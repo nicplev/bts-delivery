@@ -10,6 +10,7 @@ import '../providers/pre_delivery_checklist_providers.dart';
 import '../providers/repository_providers.dart';
 import '../services/date_utils.dart';
 import '../services/offline/connectivity_service.dart';
+import 'design/design.dart';
 import 'pre_delivery_checklist_dialog.dart';
 
 class DeliveryDayList extends ConsumerWidget {
@@ -31,71 +32,160 @@ class DeliveryDayList extends ConsumerWidget {
     final offline = ref.watch(connectivityStatusProvider).valueOrNull ==
         ConnectivityStatus.offline;
 
-    return CustomScrollView(
-      slivers: [
-        if (calendar != null) SliverToBoxAdapter(child: calendar),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          sliver: SliverToBoxAdapter(
-            child: Text(
-              MaterialLocalizations.of(context).formatFullDate(date),
-              style: Theme.of(context).textTheme.titleLarge,
+    final loaded = deliveries.asData?.value;
+    final showSummary = calendar == null && loaded != null && loaded.isNotEmpty;
+    final day = MaterialLocalizations.of(context).formatFullDate(date);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 700),
+        child: CustomScrollView(
+          slivers: [
+            if (calendar != null) SliverToBoxAdapter(child: calendar),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTokens.gutter,
+                12,
+                AppTokens.gutter,
+                14,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: showSummary
+                    ? _DeliveryDaySummary(day: day, deliveries: loaded)
+                    : AppStatusPill(
+                        icon: Icons.calendar_today_outlined,
+                        label: day,
+                        tone: AppTone.blue,
+                      ),
+              ),
             ),
-          ),
-        ),
-        deliveries.when(
-          skipLoadingOnRefresh: false,
-          loading: () => SliverToBoxAdapter(
-            child: offline
-                ? const DeliveryMessage(
-                    icon: Icons.cloud_off_outlined,
-                    title: 'Checking saved deliveries',
-                    description:
-                        'A connection may be needed to load this date.',
-                  )
-                : const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-          ),
-          error: (_, __) => SliverToBoxAdapter(
-            child: DeliveryMessage(
-              icon: Icons.error_outline,
-              title: 'Couldn’t load deliveries',
-              description: offline ? 'Reconnect, then try again.' : null,
-              action:
-                  TextButton(onPressed: onRetry, child: const Text('Retry')),
-            ),
-          ),
-          data: (items) {
-            if (items.isEmpty) {
-              return SliverToBoxAdapter(
+            deliveries.when(
+              skipLoadingOnRefresh: false,
+              loading: () => SliverToBoxAdapter(
+                child: offline
+                    ? const DeliveryMessage(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Checking saved deliveries',
+                        description:
+                            'A connection may be needed to load this date.',
+                      )
+                    : const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+              ),
+              error: (_, __) => SliverToBoxAdapter(
                 child: DeliveryMessage(
-                  icon: Icons.local_shipping_outlined,
-                  title: offline
-                      ? 'No saved deliveries for this date'
-                      : 'No deliveries scheduled',
-                ),
-              );
-            }
-            return SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 88),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final delivery = items[index];
-                    return Padding(
-                      key: ValueKey(delivery.id),
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _DeliveryCard(delivery: delivery),
-                    );
-                  },
-                  childCount: items.length,
+                  icon: Icons.error_outline,
+                  title: 'Couldn’t load deliveries',
+                  description: offline ? 'Reconnect, then try again.' : null,
+                  action: TextButton(
+                      onPressed: onRetry, child: const Text('Retry')),
                 ),
               ),
-            );
-          },
+              data: (items) {
+                if (items.isEmpty) {
+                  return SliverToBoxAdapter(
+                    child: DeliveryMessage(
+                      icon: Icons.local_shipping_outlined,
+                      title: offline
+                          ? 'No saved deliveries for this date'
+                          : 'No deliveries scheduled',
+                    ),
+                  );
+                }
+                return SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppTokens.gutter, 0, AppTokens.gutter, 88),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final delivery = items[index];
+                        return Padding(
+                          key: ValueKey(delivery.id),
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _DeliveryCard(delivery: delivery),
+                        );
+                      },
+                      childCount: items.length,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _DeliveryDaySummary extends StatelessWidget {
+  const _DeliveryDaySummary({required this.day, required this.deliveries});
+
+  final String day;
+  final List<Delivery> deliveries;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = deliveries.length;
+    final schools =
+        deliveries.map((delivery) => delivery.schoolId).toSet().length;
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppStatusPill(
+            icon: Icons.calendar_today_outlined,
+            label: day,
+            tone: AppTone.blue,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _DayMetric(
+                  value: total,
+                  label: total == 1
+                      ? 'Scheduled delivery'
+                      : 'Scheduled deliveries',
+                ),
+              ),
+              const SizedBox(width: 12),
+              const SizedBox(
+                width: 1,
+                height: 42,
+                child: ColoredBox(color: AppTokens.outline),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _DayMetric(
+                  value: schools,
+                  label: schools == 1 ? 'School' : 'Schools',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DayMetric extends StatelessWidget {
+  const _DayMetric({required this.value, required this.label});
+
+  final int value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$value', style: text.displaySmall),
+        Text(label, style: text.bodySmall),
       ],
     );
   }
@@ -117,17 +207,17 @@ class DeliveryMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final content = Padding(
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 32),
+          AppIconTile(icon: icon, size: 56),
           const SizedBox(height: 8),
           Text(
             title,
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: Theme.of(context).textTheme.titleLarge,
           ),
           if (description != null) ...[
             const SizedBox(height: 8),
@@ -139,6 +229,11 @@ class DeliveryMessage extends StatelessWidget {
           ],
         ],
       ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.hasBoundedHeight
+          ? SingleChildScrollView(child: content)
+          : content,
     );
   }
 }
@@ -169,110 +264,138 @@ class _DeliveryCard extends ConsumerWidget {
       loading: () => 'Checklist',
     );
     final time = delivery.time;
+    final showSchoolIcon = MediaQuery.textScalerOf(context).scale(19) < 27 &&
+        MediaQuery.sizeOf(context).width > 340;
 
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    delivery.schoolName,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                if (canEdit)
-                  PopupMenuButton<String>(
-                    tooltip: 'Manage delivery',
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                      if (isAdmin)
-                        const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                      if (isAdmin)
-                        const PopupMenuItem(
-                          value: 'staff',
-                          child: Text('Manage staff'),
-                        ),
-                    ],
-                    onSelected: (value) {
-                      switch (value) {
-                        case 'edit':
-                          context.go('/deliveries/${delivery.id}/edit');
-                        case 'delete':
-                          _deleteDelivery(context, ref);
-                        case 'staff':
-                          _openStaffAllocation(context, ref);
-                      }
-                    },
-                  ),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (showSchoolIcon) ...[
+                const AppIconTile(icon: Icons.school_outlined, size: 44),
+                const SizedBox(width: 12),
               ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                FilledButton.tonalIcon(
-                  icon: const Icon(Icons.arrow_forward),
-                  label: const Text('Open school'),
-                  onPressed: () => context.push(schoolWorkPath(
-                    delivery.schoolId,
-                    visit: DeliveryVisit(
-                        deliveryId: delivery.id, schoolId: delivery.schoolId),
-                  )),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      delivery.schoolName,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 7),
+                    AppStatusPill(
+                      icon:
+                          time == null ? Icons.event_outlined : Icons.schedule,
+                      label: time == null
+                          ? 'All day'
+                          : DateTimeUtils.formatTime(time),
+                      tone: time == null ? AppTone.neutral : AppTone.blue,
+                    ),
+                  ],
                 ),
-                TextButton.icon(
-                  icon: Icon(checklistIcon),
-                  label: Text(checklistLabel),
-                  onPressed: () async {
-                    await showPreDeliveryChecklistDialog(
-                      context: context,
-                      delivery: delivery,
-                    );
-                    if (context.mounted) {
-                      ref.invalidate(
-                          deliveryChecklistStatusProvider(delivery.id));
+              ),
+              if (canEdit)
+                PopupMenuButton<String>(
+                  tooltip: 'Manage delivery',
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    if (isAdmin)
+                      const PopupMenuItem(
+                          value: 'delete', child: Text('Delete')),
+                    if (isAdmin)
+                      const PopupMenuItem(
+                          value: 'staff', child: Text('Manage staff')),
+                  ],
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'edit':
+                        context.go('/deliveries/${delivery.id}/edit');
+                      case 'delete':
+                        _deleteDelivery(context, ref);
+                      case 'staff':
+                        _openStaffAllocation(context, ref);
                     }
                   },
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
+            ],
+          ),
+          if (delivery.vehicleCount != null ||
+              delivery.palletCount != null) ...[
+            const SizedBox(height: 12),
             Wrap(
-              spacing: 16,
+              spacing: 8,
               runSpacing: 8,
               children: [
-                _DeliveryFact(
-                  icon: time == null ? Icons.event : Icons.schedule,
-                  label:
-                      time == null ? 'All day' : DateTimeUtils.formatTime(time),
-                ),
                 if (delivery.vehicleCount != null)
-                  _DeliveryFact(
+                  AppStatusPill(
                     icon: Icons.local_shipping_outlined,
                     label: '${delivery.vehicleCount} vehicles',
                   ),
                 if (delivery.palletCount != null)
-                  _DeliveryFact(
+                  AppStatusPill(
                     icon: Icons.inventory_2_outlined,
                     label: '${delivery.palletCount} pallets',
+                    tone: AppTone.yellow,
                   ),
               ],
             ),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                label: const Text('Open school'),
+                onPressed: () => context.push(schoolWorkPath(
+                  delivery.schoolId,
+                  visit: DeliveryVisit(
+                      deliveryId: delivery.id, schoolId: delivery.schoolId),
+                )),
+              ),
+              TextButton.icon(
+                icon: Icon(checklistIcon, size: 18),
+                label: Text(checklistLabel),
+                style: TextButton.styleFrom(
+                  foregroundColor: checklist.hasError
+                      ? AppTone.pink.ink
+                      : checklist.valueOrNull == true
+                          ? AppTone.green.ink
+                          : AppTone.blue.ink,
+                ),
+                onPressed: () async {
+                  await showPreDeliveryChecklistDialog(
+                    context: context,
+                    delivery: delivery,
+                  );
+                  if (context.mounted) {
+                    ref.invalidate(
+                        deliveryChecklistStatusProvider(delivery.id));
+                  }
+                },
+              ),
+            ],
+          ),
+          if (staffNames.isNotEmpty || delivery.notes?.isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            const Divider(),
             if (staffNames.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               _DeliveryFact(
                   icon: Icons.group_outlined, label: staffNames.join(', ')),
             ],
             if (delivery.notes?.isNotEmpty == true) ...[
-              const SizedBox(height: 8),
-              _DeliveryFact(icon: Icons.notes, label: delivery.notes!),
+              const SizedBox(height: 10),
+              _DeliveryFact(icon: Icons.notes_outlined, label: delivery.notes!),
             ],
           ],
-        ),
+        ],
       ),
     );
   }
@@ -314,6 +437,10 @@ class _DeliveryCard extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTone.pink.ink,
+              foregroundColor: AppTokens.surface,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -348,9 +475,10 @@ class _DeliveryFact extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18),
+        Icon(icon, size: 18, color: AppTokens.muted),
         const SizedBox(width: 6),
-        Flexible(child: Text(label)),
+        Flexible(
+            child: Text(label, style: Theme.of(context).textTheme.bodySmall)),
       ],
     );
   }

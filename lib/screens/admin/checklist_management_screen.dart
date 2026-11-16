@@ -4,6 +4,7 @@ import '../../models/checklist_item.dart';
 import '../../providers/checklist_providers.dart';
 import '../../providers/auth_providers.dart';
 import '../../app/theme/brand_colors.dart';
+import '../../widgets/design/design.dart';
 
 class ChecklistManagementScreen extends ConsumerStatefulWidget {
   const ChecklistManagementScreen({super.key});
@@ -63,15 +64,12 @@ class _ChecklistManagementScreenState
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.checklist,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
+                  const AppIconTile(
+                      icon: Icons.checklist, tone: AppTone.neutral, size: 52),
                   const SizedBox(height: 16),
                   const Text(
                     'No checklist items',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
@@ -85,39 +83,52 @@ class _ChecklistManagementScreenState
           }
 
           return ReorderableListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(
+                AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap),
             itemCount: items.length,
             onReorder: (oldIndex, newIndex) =>
                 _reorderItems(items, oldIndex, newIndex),
             itemBuilder: (context, index) {
               final item = items[index];
-              return Card(
+              return AppPanel(
                 key: ValueKey(item.id),
+                padding: EdgeInsets.zero,
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
                   leading: ReorderableDragStartListener(
                     index: index,
-                    child: const Icon(Icons.drag_handle),
-                  ),
-                  title: Text(
-                    item.title,
-                    style: TextStyle(
-                      decoration:
-                          item.isActive ? null : TextDecoration.lineThrough,
-                      color: item.isActive ? null : Colors.grey,
+                    child: Semantics(
+                      label: 'Reorder item',
+                      child: const SizedBox.square(
+                        dimension: 44,
+                        child: Center(
+                          child: AppIconTile(
+                            icon: Icons.drag_handle,
+                            tone: AppTone.neutral,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                  subtitle: item.subtitle != null
-                      ? Text(
-                          item.subtitle!,
-                          style: TextStyle(
-                            color: item.isActive
-                                ? Colors.grey.shade600
-                                : Colors.grey.shade400,
-                          ),
+                  title: Text(item.title),
+                  subtitle: item.subtitle != null || !item.isActive
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (item.subtitle != null) Text(item.subtitle!),
+                            if (!item.isActive)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 6),
+                                child: AppStatusPill(
+                                  label: 'Disabled',
+                                  icon: Icons.pause_circle_outline,
+                                ),
+                              ),
+                          ],
                         )
                       : null,
                   trailing: PopupMenuButton<String>(
+                    tooltip: 'Checklist item actions',
                     onSelected: (value) {
                       switch (value) {
                         case 'edit':
@@ -147,7 +158,9 @@ class _ChecklistManagementScreenState
                         child: Row(
                           children: [
                             Icon(
-                              item.isActive ? Icons.toggle_off : Icons.toggle_on,
+                              item.isActive
+                                  ? Icons.toggle_off
+                                  : Icons.toggle_on,
                               size: 20,
                             ),
                             const SizedBox(width: 12),
@@ -184,6 +197,7 @@ class _ChecklistManagementScreenState
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: const Text('Add Checklist Item'),
         content: Form(
           key: formKey,
@@ -262,6 +276,7 @@ class _ChecklistManagementScreenState
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: const Text('Edit Checklist Item'),
         content: Form(
           key: formKey,
@@ -335,8 +350,8 @@ class _ChecklistManagementScreenState
     if (mounted && success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              'Item ${updatedItem.isActive ? 'enabled' : 'disabled'}'),
+          content:
+              Text('Item ${updatedItem.isActive ? 'enabled' : 'disabled'}'),
           backgroundColor: BrandColors.kakaGreen,
         ),
       );
@@ -347,6 +362,7 @@ class _ChecklistManagementScreenState
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: const Text('Delete Item'),
         content: Text('Are you sure you want to delete "${item.title}"?'),
         actions: [
@@ -395,7 +411,8 @@ class _ChecklistManagementScreenState
       reorderedItems[i] = reorderedItems[i].copyWith(order: i + 1);
     }
 
-    ref.read(checklistNotifierProvider.notifier)
+    ref
+        .read(checklistNotifierProvider.notifier)
         .reorderChecklistItems(reorderedItems);
   }
 }

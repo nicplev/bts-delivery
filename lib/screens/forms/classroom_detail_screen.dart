@@ -17,6 +17,7 @@ import '../../providers/offline_media_providers.dart';
 import '../../widgets/sync_status_detail_sheet.dart';
 import '../../widgets/offline_media_view.dart';
 import 'package:uuid/uuid.dart';
+import '../../widgets/design/design.dart';
 
 class ClassroomDetailScreen extends ConsumerWidget {
   const ClassroomDetailScreen({
@@ -64,6 +65,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: MediaQuery.textScalerOf(context).scale(24) * 2 + 12,
         title: classroomsAsync.when(
           data: (classrooms) {
             final classroom = classrooms.firstWhere(
@@ -74,136 +76,127 @@ class ClassroomDetailScreen extends ConsumerWidget {
                 createdAt: DateTime.now(),
               ),
             );
-            return Text(classroom.name);
+            return Text(classroom.name,
+                maxLines: 2, overflow: TextOverflow.ellipsis);
           },
           loading: () => const Text('Classroom'),
           error: (_, __) => const Text('Classroom'),
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          AppTokens.gutter,
+          12,
+          AppTokens.gutter,
+          MediaQuery.paddingOf(context).bottom + 16,
+        ),
         children: [
           if (deliveryId != null)
             classroomsAsync.when(
-            data: (classrooms) {
-              final classroom = classrooms.firstWhere(
-                (c) => c.id == classroomId,
-                orElse: () => Classroom(
-                  id: '',
-                  name: 'Classroom',
-                  createdAt: DateTime.now(),
-                ),
-              );
-              return _buildCompletionStatusCard(context, ref, classroom);
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
-          const SizedBox(height: 16),
-
-          // Pack Total Card
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.inventory_2_outlined, size: 28),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Pack Total',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      if (isAdmin)
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _showUpdatePackTotalDialog(
-                            context,
-                            ref,
-                            packTotalAsync.value?.total,
-                          ),
-                          tooltip: 'Update Pack Total',
-                        ),
-                    ],
+              data: (classrooms) {
+                final classroom = classrooms.firstWhere(
+                  (c) => c.id == classroomId,
+                  orElse: () => Classroom(
+                    id: '',
+                    name: 'Classroom',
+                    createdAt: DateTime.now(),
                   ),
-                  const SizedBox(height: 16),
-                  packTotalAsync.when(
-                    loading: () => const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: CircularProgressIndicator(),
+                );
+                return _buildCompletionStatusCard(context, ref, classroom);
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+          if (deliveryId != null) const SizedBox(height: 16),
+
+          AppPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const AppIconTile(icon: Icons.inventory_2_outlined),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Pack Total',
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
-                    error: (error, _) => const Text(
-                      'Error loading pack total',
-                      style: TextStyle(color: Colors.red),
-                    ),
-                    data: (packTotal) {
-                      if (packTotal == null) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text(
-                              'No pack total set',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                            if (isAdmin) ...[
-                              const SizedBox(height: 12),
-                              Center(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _showUpdatePackTotalDialog(
-                                    context,
-                                    ref,
-                                    null,
-                                  ),
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Set Pack Total'),
-                                ),
-                              ),
-                            ],
-                          ],
-                        );
-                      }
+                    if (isAdmin)
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined),
+                        onPressed: () => _showUpdatePackTotalDialog(
+                          context,
+                          ref,
+                          packTotalAsync.value?.total,
+                        ),
+                        tooltip: 'Update Pack Total',
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                packTotalAsync.when(
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => Text(
+                    'Error loading pack total',
+                    style: TextStyle(color: AppTone.pink.ink),
+                  ),
+                  data: (packTotal) {
+                    if (packTotal == null) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            '${packTotal.total} packs',
-                            style: TextStyle(
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).primaryColor,
-                            ),
+                          const Text(
+                            'No pack total set',
+                            style: TextStyle(color: AppTokens.muted),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Last updated: ${_formatDate(packTotal.createdAt)}',
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
+                          if (isAdmin) ...[
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: () => _showUpdatePackTotalDialog(
+                                context,
+                                ref,
+                                null,
+                              ),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Set Pack Total'),
                             ),
-                          ),
+                          ],
                         ],
                       );
-                    },
-                  ),
-                ],
-              ),
+                    }
+                    return AppPanel(
+                      tone: AppTone.blue,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Expected packs'),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${packTotal.total}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineMedium
+                                ?.copyWith(
+                                    color: AppTone.blue.ink,
+                                    fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Last updated: ${_formatDate(packTotal.createdAt)}',
+                            style: const TextStyle(color: AppTokens.muted),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: AppTokens.sectionGap),
 
           // Year Level Breakdown Section (for composite classes)
           ref.watch(yearLevelBreakdownsProvider((
@@ -494,31 +487,15 @@ class ClassroomDetailScreen extends ConsumerWidget {
             ),
           ),
 
-          // Consumables Section Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.inventory_outlined, size: 24),
-                const SizedBox(width: 8),
-                const Text(
-                  'Consumables',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: () => _showAddConsumableDialog(context, ref),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add'),
-                ),
-              ],
+          AppSectionHeading(
+            title: 'Consumables',
+            trailing: TextButton.icon(
+              onPressed: () => _showAddConsumableDialog(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('Add'),
             ),
           ),
-
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // Consumables List
           consumablesAsync.when(
@@ -575,228 +552,170 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
               return Column(
                 children: consumables.map((consumable) {
-                  final hasActualQuantity = consumable.actualQuantityDelivered != null;
+                  final hasActualQuantity =
+                      consumable.actualQuantityDelivered != null;
                   final isPartialDelivery = hasActualQuantity &&
                       consumable.actualQuantityDelivered != consumable.quantity;
                   final isFullyDelivered = hasActualQuantity &&
                       consumable.actualQuantityDelivered == consumable.quantity;
 
-                  // Determine colors based on status
-                  Color backgroundColor;
-                  Color iconColor;
-                  Color textColor;
-                  IconData iconData;
+                  final (tone, icon, status) = isPartialDelivery
+                      ? (
+                          AppTone.yellow,
+                          Icons.warning_amber_rounded,
+                          'Quantity differs'
+                        )
+                      : isFullyDelivered
+                          ? (
+                              AppTone.green,
+                              Icons.check_circle_outline,
+                              'Delivered'
+                            )
+                          : (
+                              AppTone.neutral,
+                              Icons.inventory_2_outlined,
+                              'Quantity unrecorded'
+                            );
 
-                  if (isPartialDelivery) {
-                    backgroundColor = Colors.orange.shade50;
-                    iconColor = Colors.orange.shade700;
-                    textColor = Colors.orange.shade900;
-                    iconData = Icons.warning_amber_rounded;
-                  } else if (isFullyDelivered) {
-                    backgroundColor = Colors.green.shade50;
-                    iconColor = Colors.green.shade700;
-                    textColor = Colors.green.shade900;
-                    iconData = Icons.check_circle_rounded;
-                  } else {
-                    backgroundColor = Colors.white;
-                    iconColor = Colors.grey.shade600;
-                    textColor = Colors.black87;
-                    iconData = Icons.inventory_2_outlined;
-                  }
-
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: isPartialDelivery
-                            ? Colors.orange.shade300
-                            : isFullyDelivered
-                                ? Colors.green.shade300
-                                : Colors.grey.shade200,
-                        width: 1.5,
-                      ),
-                    ),
-                    color: backgroundColor,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Header row with icon, name, and menu
-                          Row(
-                            children: [
-                              // Icon
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: iconColor.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  iconData,
-                                  size: 24,
-                                  color: iconColor,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              // Content
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      consumable.itemName,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    hasActualQuantity
-                                        ? RichText(
-                                            text: TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text: '${consumable.actualQuantityDelivered}',
-                                                  style: TextStyle(
-                                                    fontSize: 20,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: textColor,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: ' / ${consumable.quantity}',
-                                                  style: TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w500,
-                                                    color: Colors.grey.shade600,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: ' ${consumable.unit}',
-                                                  style: TextStyle(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.normal,
-                                                    color: Colors.grey.shade600,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          )
-                                        : Text(
-                                            '${consumable.quantity} ${consumable.unit}',
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              color: Colors.grey.shade600,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                  ],
-                                ),
-                              ),
-                              // Menu button
-                              PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  if (value == 'edit') {
-                                    _showEditConsumableDialog(context, ref, consumable);
-                                  } else if (value == 'delete') {
-                                    _showDeleteConsumableConfirmation(
-                                        context, ref, consumable);
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.edit, size: 20),
-                                        SizedBox(width: 12),
-                                        Text('Edit'),
-                                      ],
+                  return AppPanel(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            AppIconTile(icon: icon, tone: tone),
+                            const SizedBox(width: 12),
+                            // Content
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    consumable.itemName,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.delete, size: 20, color: Colors.red),
-                                        SizedBox(width: 12),
-                                        Text('Delete',
-                                            style: TextStyle(color: Colors.red)),
-                                      ],
-                                    ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    hasActualQuantity
+                                        ? '${consumable.actualQuantityDelivered} / ${consumable.quantity} ${consumable.unit}'
+                                        : '${consumable.quantity} ${consumable.unit}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          color: tone.ink,
+                                        ),
                                   ),
                                 ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          // Quick action buttons
-                          Row(
-                            children: [
-                              // Mark as Complete button
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    // Store mounted state before async operation
-                                    if (!context.mounted) return;
+                            ),
+                            // Menu button
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  _showEditConsumableDialog(
+                                      context, ref, consumable);
+                                } else if (value == 'delete') {
+                                  _showDeleteConsumableConfirmation(
+                                      context, ref, consumable);
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.edit, size: 20),
+                                      SizedBox(width: 12),
+                                      Text('Edit'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.delete,
+                                          size: 20, color: Colors.red),
+                                      SizedBox(width: 12),
+                                      Text('Delete',
+                                          style: TextStyle(color: Colors.red)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        AppStatusPill(label: status, tone: tone),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                // Store mounted state before async operation
+                                if (!context.mounted) return;
 
-                                    final updatedConsumable = consumable.copyWith(
-                                      actualQuantityDelivered: consumable.quantity,
-                                    );
+                                final updatedConsumable = consumable.copyWith(
+                                  actualQuantityDelivered: consumable.quantity,
+                                );
 
-                                    final success = await ref
-                                        .read(schoolsNotifierProvider.notifier)
-                                        .updateClassroomConsumable(
+                                final success = await ref
+                                    .read(schoolsNotifierProvider.notifier)
+                                    .updateClassroomConsumable(
                                       schoolId,
                                       yearLevelId,
                                       classroomId,
                                       updatedConsumable,
                                     );
 
-                                    if (!context.mounted) return;
+                                if (!context.mounted) return;
 
-                                    if (success) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('${consumable.itemName} marked as complete'),
-                                          backgroundColor: Colors.green,
-                                          duration: const Duration(seconds: 2),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                                  label: const Text('Complete'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.green,
-                                    side: BorderSide(color: Colors.green.shade300),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                  ),
-                                ),
+                                if (success) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          '${consumable.itemName} marked as complete'),
+                                      backgroundColor: Colors.green,
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.check_circle_outline,
+                                  size: 18),
+                              label: const Text('Complete'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTone.green.ink,
+                                side: BorderSide(color: Colors.green.shade300),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
                               ),
-                              const SizedBox(width: 8),
-                              // Set Actual Quantity button
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    _showSetActualConsumableDialog(context, ref, consumable);
-                                  },
-                                  icon: const Icon(Icons.edit_outlined, size: 18),
-                                  label: const Text('Set Qty'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.orange,
-                                    side: BorderSide(color: Colors.orange.shade300),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                  ),
-                                ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                _showSetActualConsumableDialog(
+                                    context, ref, consumable);
+                              },
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                              label: const Text('Set Qty'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTone.yellow.ink,
+                                side: BorderSide(color: Colors.orange.shade300),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
                               ),
-                            ],
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   );
                 }).toList(),
@@ -816,31 +735,15 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
           const SizedBox(height: 24),
 
-          // Notes Section Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.note_outlined, size: 24),
-                const SizedBox(width: 8),
-                const Text(
-                  'Notes',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: () => _showNoteDialog(context, ref),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add'),
-                ),
-              ],
+          AppSectionHeading(
+            title: 'Notes',
+            trailing: TextButton.icon(
+              onPressed: () => _showNoteDialog(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('Add'),
             ),
           ),
-
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // Notes List
           notesAsync.when(
@@ -996,154 +899,94 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
   Widget _buildCompletionStatusCard(
       BuildContext context, WidgetRef ref, Classroom classroom) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.shade200, width: 1),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.inventory_2_outlined, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Pack Delivery Status',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Select the status for packs only (not consumables)',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey,
-                fontStyle: FontStyle.italic,
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppSectionHeading(title: 'Pack Delivery Status'),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildStatusOption(
+                context,
+                ref,
+                classroom,
+                ClassroomCompletionStatus.notAttended,
+                'Not Attended',
+                Icons.remove_circle_outline,
+                AppTone.neutral,
               ),
-            ),
-            const SizedBox(height: 20),
-            // Status options as clean buttons
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatusOption(
-                    context,
-                    ref,
-                    classroom,
-                    yearLevelId,
-                    ClassroomCompletionStatus.notAttended,
-                    'Not Attended',
-                    Icons.cancel_rounded,
-                    Colors.red,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatusOption(
-                    context,
-                    ref,
-                    classroom,
-                    yearLevelId,
-                    ClassroomCompletionStatus.incomplete,
-                    'Incomplete',
-                    Icons.warning_amber_rounded,
-                    Colors.orange,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatusOption(
-                    context,
-                    ref,
-                    classroom,
-                    yearLevelId,
-                    ClassroomCompletionStatus.complete,
-                    'Complete',
-                    Icons.check_circle_rounded,
-                    Colors.green,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            // Show actual vs expected if incomplete
-            if (classroom.completionStatus == ClassroomCompletionStatus.incomplete &&
-                classroom.actualPacksDelivered != null)
-              Builder(
-                builder: (context) {
-                  final packTotalAsync = ref.watch(packTotalProvider((
-                    schoolId: schoolId,
-                    yearLevelId: yearLevelId,
-                    classroomId: classroom.id,
-                  )));
-
-                  return packTotalAsync.when(
-                    data: (packTotal) {
-                      final expected = packTotal?.total ?? 0;
-                      final actual = classroom.actualPacksDelivered ?? 0;
-
-                      return Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.orange),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Partial Delivery',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '$actual of $expected packs delivered',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.orange,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                _showActualQuantityDialog(context, ref, classroom, yearLevelId);
-                              },
-                              child: const Text('Edit'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  );
-                },
+              _buildStatusOption(
+                context,
+                ref,
+                classroom,
+                ClassroomCompletionStatus.incomplete,
+                'Incomplete',
+                Icons.warning_amber_rounded,
+                AppTone.yellow,
               ),
-            if (classroom.completionStatus == ClassroomCompletionStatus.incomplete &&
-                classroom.actualPacksDelivered != null)
-              const SizedBox(height: 0),
+              _buildStatusOption(
+                context,
+                ref,
+                classroom,
+                ClassroomCompletionStatus.complete,
+                'Complete',
+                Icons.check_circle_outline,
+                AppTone.green,
+              ),
+            ],
+          ),
+          if (classroom.actualPacksDelivered case final int actual
+              when classroom.completionStatus ==
+                  ClassroomCompletionStatus.incomplete) ...[
+            const SizedBox(height: 12),
+            Builder(
+              builder: (context) {
+                final expected = ref
+                    .watch(packTotalProvider((
+                      schoolId: schoolId,
+                      yearLevelId: yearLevelId,
+                      classroomId: classroom.id,
+                    )))
+                    .asData
+                    ?.value
+                    ?.total;
+
+                return AppPanel(
+                  tone: AppTone.yellow,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AppSectionHeading(
+                        title: 'Partial Delivery',
+                        trailing: TextButton(
+                          onPressed: () => _showActualQuantityDialog(
+                            context,
+                            ref,
+                            classroom,
+                            yearLevelId,
+                          ),
+                          child: const Text('Edit'),
+                        ),
+                      ),
+                      Text(
+                        expected == null
+                            ? '$actual packs delivered'
+                            : '$actual of $expected packs delivered',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: AppTone.yellow.ink,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1152,56 +995,32 @@ class ClassroomDetailScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     Classroom classroom,
-    String yearLevelId,
     ClassroomCompletionStatus status,
     String label,
     IconData icon,
-    Color color,
+    AppTone tone,
   ) {
-    final isSelected = classroom.completionStatus == status;
+    final selected = classroom.completionStatus == status;
 
-    return GestureDetector(
-      onTap: () {
-        if (status == ClassroomCompletionStatus.incomplete) {
-          _showActualQuantityDialog(context, ref, classroom, yearLevelId);
-        } else {
-          _saveClassroomStatus(context, ref, status);
-        }
-      },
-      child: AspectRatio(
-        aspectRatio: 1.0, // Makes it square
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? color : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                color: isSelected ? Colors.white : Colors.grey.shade600,
-                size: 32,
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.grey.shade700,
-                    height: 1.1,
-                  ),
-                ),
-              ),
-            ],
-          ),
+    return Semantics(
+      selected: selected,
+      child: OutlinedButton.icon(
+        onPressed: () {
+          if (status == ClassroomCompletionStatus.incomplete) {
+            _showActualQuantityDialog(context, ref, classroom, yearLevelId);
+          } else {
+            _saveClassroomStatus(context, ref, status);
+          }
+        },
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: selected ? tone.ink : AppTokens.ink,
+          backgroundColor: selected ? tone.tint : AppTokens.surface,
+          side: BorderSide(color: selected ? tone.ink : AppTokens.outline),
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          shape: const StadiumBorder(),
         ),
       ),
     );

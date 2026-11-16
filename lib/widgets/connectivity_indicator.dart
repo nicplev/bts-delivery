@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/offline_delivery_providers.dart';
 import '../services/offline/connectivity_service.dart';
 import 'sync_status_detail_sheet.dart';
+import 'design/design.dart';
 
 class ConnectivityIndicator extends ConsumerWidget {
   const ConnectivityIndicator({super.key});
@@ -34,8 +35,17 @@ class ConnectivityIndicator extends ConsumerWidget {
       if (needsReview + legacy > 0) '${needsReview + legacy} need review',
     ].join(' · ');
 
+    final tone = hasError || needsReview + legacy > 0 || isOffline
+        ? AppTone.yellow
+        : AppTone.blue;
     return Center(
       child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: tone.ink,
+          backgroundColor: tone.tint,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          shape: const StadiumBorder(),
+        ),
         onPressed: () => SyncStatusDetailSheet.show(context),
         icon: Icon(
           hasError || needsReview + legacy > 0

@@ -7,6 +7,7 @@ import '../providers/auth_providers.dart';
 import '../providers/offline_delivery_providers.dart';
 import '../services/offline/connectivity_service.dart';
 import '../services/offline/offline_storage_service.dart';
+import 'design/design.dart';
 
 class SyncStatusDetailSheet extends ConsumerWidget {
   const SyncStatusDetailSheet({super.key});
@@ -15,6 +16,7 @@ class SyncStatusDetailSheet extends ConsumerWidget {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
       builder: (_) => const SyncStatusDetailSheet(),
     );
@@ -29,16 +31,28 @@ class SyncStatusDetailSheet extends ConsumerWidget {
       child: SizedBox(
         height: MediaQuery.sizeOf(context).height * 0.65,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          padding: const EdgeInsets.fromLTRB(
+              AppTokens.gutter, 0, AppTokens.gutter, AppTokens.sectionGap),
           children: [
-            Text('Evidence uploads',
-                style: Theme.of(context).textTheme.titleLarge),
+            const AppSectionHeading(title: 'Evidence uploads'),
             const SizedBox(height: 8),
-            Text(switch (connectivity) {
-              ConnectivityStatus.online => 'Network connection detected',
-              ConnectivityStatus.offline => 'Waiting for a network connection',
-              _ => 'Checking network connection',
-            }),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: AppStatusPill(
+                label: switch (connectivity) {
+                  ConnectivityStatus.online => 'Network connection detected',
+                  ConnectivityStatus.offline =>
+                    'Waiting for a network connection',
+                  _ => 'Checking network connection',
+                },
+                icon: connectivity == ConnectivityStatus.offline
+                    ? Icons.cloud_off_outlined
+                    : Icons.wifi_outlined,
+                tone: connectivity == ConnectivityStatus.offline
+                    ? AppTone.yellow
+                    : AppTone.neutral,
+              ),
+            ),
             const SizedBox(height: 12),
             ...uploads.when(
               loading: () => [
@@ -70,20 +84,27 @@ class SyncStatusDetailSheet extends ConsumerWidget {
                 if (status.legacyReviewCount > 0 && ref.watch(isAdminProvider))
                   const _LegacyPhotoRecovery(),
                 for (final item in status.items)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(item.kind == EvidenceKind.photo
-                        ? Icons.photo_outlined
-                        : Icons.draw_outlined),
-                    title: Text(item.kind == EvidenceKind.photo
-                        ? 'Classroom photo'
-                        : 'Delivery signature'),
-                    subtitle: Text(item.id == status.activeId
-                        ? 'Syncing'
-                        : item.statusText),
-                    trailing: item.id == status.activeId
-                        ? null
-                        : EvidenceUploadActions(item: item),
+                  AppPanel(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: AppIconTile(
+                        icon: item.kind == EvidenceKind.photo
+                            ? Icons.photo_outlined
+                            : Icons.draw_outlined,
+                        tone:
+                            item.needsAttention ? AppTone.yellow : AppTone.blue,
+                      ),
+                      title: Text(item.kind == EvidenceKind.photo
+                          ? 'Classroom photo'
+                          : 'Delivery signature'),
+                      subtitle: Text(item.id == status.activeId
+                          ? 'Syncing'
+                          : item.statusText),
+                      trailing: item.id == status.activeId
+                          ? null
+                          : EvidenceUploadActions(item: item),
+                    ),
                   ),
                 if (status.localError ||
                     status.items

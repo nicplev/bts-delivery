@@ -6,6 +6,7 @@ import '../../providers/delivery_visit_provider.dart';
 import '../../services/delivery_visit_access.dart';
 import '../../services/offline/connectivity_service.dart';
 import '../../widgets/connectivity_indicator.dart';
+import '../../widgets/design/design.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/records_tab.dart';
 import '../../widgets/signoff_tab.dart';
@@ -62,17 +63,58 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(school?.name ?? 'School',
-            maxLines: 2, overflow: TextOverflow.ellipsis),
+        toolbarHeight: MediaQuery.textScalerOf(context).scale(24) * 2 + 12,
+        title: Tooltip(
+          message: school?.name ?? 'School',
+          excludeFromSemantics: true,
+          child: Text(
+            school?.name ?? 'School',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
         bottom: school == null
             ? null
-            : TabBar(
-                controller: _tabController,
-                tabs: [
-                  Tab(text: isVisit ? 'Records' : 'Template'),
-                  Tab(text: isVisit ? 'Sign-Off' : 'History'),
-                  const Tab(text: 'Info'),
-                ],
+            : PreferredSize(
+                preferredSize: Size.fromHeight(
+                  MediaQuery.textScalerOf(context).scale(14) * 2 + 26,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppTokens.surfaceQuiet,
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: TabBar(
+                      controller: _tabController,
+                      dividerHeight: 0,
+                      padding: const EdgeInsets.all(4),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                      labelColor: AppTokens.ink,
+                      unselectedLabelColor: AppTokens.muted,
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      indicator: BoxDecoration(
+                        color: AppTokens.surface,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: AppTokens.panelShadow,
+                      ),
+                      tabs: [
+                        for (final label in [
+                          isVisit ? 'Records' : 'Template',
+                          isVisit ? 'Sign-Off' : 'History',
+                          'Info',
+                        ])
+                          Tab(
+                            height:
+                                MediaQuery.textScalerOf(context).scale(14) * 2 +
+                                    10,
+                            child: Text(label, textAlign: TextAlign.center),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
       ),
       body: Column(
@@ -82,97 +124,131 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
             child: schoolAsync.when(
               loading: () => Center(
                 child: offline
-                    ? const DeliveryMessage(
-                        icon: Icons.cloud_off_outlined,
-                        title: 'Checking saved school records',
-                        description:
-                            'A connection may be needed to open this school.',
+                    ? const SingleChildScrollView(
+                        child: DeliveryMessage(
+                          icon: Icons.cloud_off_outlined,
+                          title: 'Checking saved school records',
+                          description:
+                              'A connection may be needed to open this school.',
+                        ),
                       )
                     : const CircularProgressIndicator(),
               ),
               error: (_, __) => Center(
-                child: DeliveryMessage(
-                  icon: Icons.error_outline,
-                  title: 'Couldn’t load the school',
-                  action: TextButton(
-                    onPressed: () {
-                      if (ref.read(currentStaffProvider).hasError) {
-                        ref.invalidate(currentStaffProvider);
-                      }
-                      ref.invalidate(schoolProvider);
-                    },
-                    child: const Text('Retry'),
+                child: SingleChildScrollView(
+                  child: DeliveryMessage(
+                    icon: Icons.error_outline,
+                    title: 'Couldn’t load the school',
+                    action: TextButton(
+                      onPressed: () {
+                        if (ref.read(currentStaffProvider).hasError) {
+                          ref.invalidate(currentStaffProvider);
+                        }
+                        ref.invalidate(schoolProvider);
+                      },
+                      child: const Text('Retry'),
+                    ),
                   ),
                 ),
               ),
               data: (school) {
                 if (school == null) {
                   return Center(
-                    child: DeliveryMessage(
-                      icon: offline
-                          ? Icons.cloud_off_outlined
-                          : Icons.school_outlined,
-                      title: offline
-                          ? 'School unavailable offline'
-                          : 'School unavailable',
-                      description: offline
-                          ? 'Reconnect to load this school.'
-                          : 'This school may no longer be assigned to your account.',
+                    child: SingleChildScrollView(
+                      child: DeliveryMessage(
+                        icon: offline
+                            ? Icons.cloud_off_outlined
+                            : Icons.school_outlined,
+                        title: offline
+                            ? 'School unavailable offline'
+                            : 'School unavailable',
+                        description: offline
+                            ? 'Reconnect to load this school.'
+                            : 'This school may no longer be assigned to your account.',
+                      ),
                     ),
                   );
                 }
-                return Column(
-                  children: [
-                    if (school.address?.isNotEmpty == true)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        child: Text(
-                          school.address!,
-                          style: Theme.of(context).textTheme.bodySmall,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    if (readiness != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        child: Text(
-                          readiness == DeliveryVisitReadiness.ready
-                              ? 'Classroom records ready on this device'
-                              : 'Classroom records available while connected',
-                          style: Theme.of(context).textTheme.bodySmall,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    if (visit != null)
-                      OfflineVisitMediaPanel(visit: visit, school: school),
-                    if (isVisit) SchoolTimerWidget(schoolId: widget.schoolId),
-                    Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
+                return NestedScrollView(
+                  headerSliverBuilder: (context, _) => [
+                    SliverToBoxAdapter(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (isVisit || canEditTemplate)
-                            RecordsTab(schoolId: widget.schoolId)
-                          else
-                            const Center(
-                              child: DeliveryMessage(
-                                icon: Icons.local_shipping_outlined,
-                                title: 'Open a delivery to record your visit',
-                                description:
-                                    'Classroom records are kept separately for each scheduled delivery.',
+                          if (school.address?.isNotEmpty == true ||
+                              readiness != null)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppTokens.gutter,
+                                12,
+                                AppTokens.gutter,
+                                8,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (school.address?.isNotEmpty == true)
+                                    Text(
+                                      school.address!,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(color: AppTokens.muted),
+                                    ),
+                                  if (readiness != null) ...[
+                                    if (school.address?.isNotEmpty == true)
+                                      const SizedBox(height: 8),
+                                    AppStatusPill(
+                                      icon: readiness ==
+                                              DeliveryVisitReadiness.ready
+                                          ? Icons.offline_pin_outlined
+                                          : Icons.cloud_outlined,
+                                      tone: readiness ==
+                                              DeliveryVisitReadiness.ready
+                                          ? AppTone.green
+                                          : AppTone.neutral,
+                                      label: readiness ==
+                                              DeliveryVisitReadiness.ready
+                                          ? 'Classroom records ready on this device'
+                                          : 'Classroom records available while connected',
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
-                          SignOffTab(
-                            schoolId: widget.schoolId,
-                            deliveryId: widget.deliveryId,
-                          ),
-                          InfoTab(schoolId: widget.schoolId),
+                          if (visit != null)
+                            OfflineVisitMediaPanel(
+                                visit: visit, school: school),
+                          if (isVisit)
+                            SchoolTimerWidget(schoolId: widget.schoolId),
                         ],
                       ),
                     ),
                   ],
+                  body: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      if (isVisit || canEditTemplate)
+                        RecordsTab(schoolId: widget.schoolId)
+                      else
+                        const Center(
+                          child: SingleChildScrollView(
+                            primary: true,
+                            child: DeliveryMessage(
+                              icon: Icons.local_shipping_outlined,
+                              title: 'Open a delivery to record your visit',
+                              description:
+                                  'Classroom records are kept separately for each scheduled delivery.',
+                            ),
+                          ),
+                        ),
+                      SignOffTab(
+                        schoolId: widget.schoolId,
+                        deliveryId: widget.deliveryId,
+                      ),
+                      InfoTab(schoolId: widget.schoolId),
+                    ],
+                  ),
                 );
               },
             ),

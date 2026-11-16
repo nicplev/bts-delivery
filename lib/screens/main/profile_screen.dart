@@ -1,220 +1,213 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../models/staff.dart';
+import '../../models/user.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../services/date_utils.dart';
 import '../../widgets/connectivity_indicator.dart';
-import '../../app/theme/brand_colors.dart';
+import '../../widgets/delivery_day_list.dart';
+import '../../widgets/design/design.dart';
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final currentUserAsync = ref.watch(currentUserProvider);
-    final currentStaffAsync = ref.watch(currentStaffProvider);
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.invalidate(currentUserProvider);
+      ref.invalidate(currentStaffProvider);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider);
+    final staff = ref.watch(currentStaffProvider).valueOrNull;
     final isAdmin = ref.watch(isAdminProvider);
     final isManager = ref.watch(isManagerProvider);
     final showAllDeliveries = ref.watch(allDeliveriesProvider);
 
-    // Refresh user data when profile page is accessed
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.invalidate(currentUserProvider);
-      ref.invalidate(currentStaffProvider);
-    });
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profile'),
-      ),
+      appBar: AppBar(title: const Text('Profile')),
       body: Column(
         children: [
           const ConnectivityIndicator(),
           Expanded(
-            child: currentUserAsync.when(
+            child: user.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) => Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error, size: 48, color: Colors.red),
-                    const SizedBox(height: 16),
-                    Text('Error loading profile: $error'),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: () => ref.invalidate(currentUserProvider),
-                      child: const Text('Retry'),
-                    ),
-                  ],
+              error: (_, __) => Center(
+                child: DeliveryMessage(
+                  icon: Icons.error_outline,
+                  title: 'Couldn’t load your profile',
+                  action: TextButton(
+                    onPressed: () => ref.invalidate(currentUserProvider),
+                    child: const Text('Retry'),
+                  ),
                 ),
               ),
-              data: (user) => SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Profile Header
-                    _ProfileHeader(
-                      user: user,
-                      staff: currentStaffAsync.value,
-                      isAdmin: isAdmin,
-                      isManager: isManager,
+              data: (account) => Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 700),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppTokens.gutter,
+                      8,
+                      AppTokens.gutter,
+                      AppTokens.sectionGap,
                     ),
-
-                    const SizedBox(height: 24),
-
-                    // Account Information
-                    _ProfileSection(
-                      title: 'Account Information',
-                      children: [
-                        _InfoTile(
-                          icon: Icons.email,
-                          label: 'Email',
-                          value: user?.email ?? 'Not available',
-                        ),
-                        _InfoTile(
-                          icon: Icons.security,
-                          label: 'Role',
-                          value: isAdmin
-                              ? 'Administrator'
-                              : isManager
+                    children: [
+                      _ProfileHeader(
+                        user: account,
+                        staff: staff,
+                        isAdmin: isAdmin,
+                        isManager: isManager,
+                      ),
+                      _ProfileSection(
+                        title: 'Account information',
+                        children: [
+                          _ProfileRow(
+                            icon: Icons.mail_outline_rounded,
+                            title: 'Email',
+                            detail: account?.email ?? 'Not available',
+                          ),
+                          _ProfileRow(
+                            icon: Icons.badge_outlined,
+                            title: 'Role',
+                            detail: isAdmin
+                                ? 'Administrator'
+                                : isManager
+                                    ? 'Manager'
+                                    : 'Staff Member',
+                          ),
+                          _ProfileRow(
+                            icon: Icons.calendar_today_outlined,
+                            title: 'Account Created',
+                            detail: account == null
+                                ? 'Not available'
+                                : DateTimeUtils.formatDateTime(
+                                    account.createdAt),
+                          ),
+                          if (account?.lastLoginAt != null)
+                            _ProfileRow(
+                              icon: Icons.schedule,
+                              title: 'Last Login',
+                              detail: DateTimeUtils.formatDateTime(
+                                  account!.lastLoginAt!),
+                            ),
+                        ],
+                      ),
+                      if (staff != null)
+                        _ProfileSection(
+                          title: 'Staff information',
+                          children: [
+                            _ProfileRow(
+                              icon: Icons.person_outline,
+                              tone: AppTone.green,
+                              title: 'Name',
+                              detail: staff.name,
+                            ),
+                            _ProfileRow(
+                              icon: Icons.work_outline,
+                              tone: AppTone.green,
+                              title: 'Position',
+                              detail: staff.hasManagerAccess
                                   ? 'Manager'
                                   : 'Staff Member',
+                            ),
+                            _ProfileRow(
+                              icon: Icons.today_outlined,
+                              tone: AppTone.green,
+                              title: 'Staff Since',
+                              detail: DateTimeUtils.formatDate(staff.createdAt),
+                            ),
+                            _ProfileRow(
+                              icon: Icons.badge_outlined,
+                              tone: AppTone.green,
+                              title: 'Role',
+                              detail: staff.role,
+                            ),
+                          ],
                         ),
-                        _InfoTile(
-                          icon: Icons.calendar_today,
-                          label: 'Account Created',
-                          value: user?.createdAt != null
-                              ? DateTimeUtils.formatDateTime(user!.createdAt)
-                              : 'Not available',
+                      if (isManager && !isAdmin)
+                        _ProfileSection(
+                          title: 'Settings',
+                          children: [
+                            SwitchListTile(
+                              secondary: const AppIconTile(
+                                icon: Icons.visibility_outlined,
+                                tone: AppTone.green,
+                              ),
+                              title: const Text('Show All Deliveries'),
+                              subtitle: const Text(
+                                  'View all deliveries or only yours'),
+                              value: showAllDeliveries,
+                              onChanged: (value) {
+                                ref.read(allDeliveriesProvider.notifier).state =
+                                    value;
+                              },
+                            ),
+                          ],
                         ),
-                        if (user?.lastLoginAt != null)
-                          _InfoTile(
-                            icon: Icons.access_time,
-                            label: 'Last Login',
-                            value: DateTimeUtils.formatDateTime(
-                                user!.lastLoginAt!),
-                          ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // Staff Information (if linked)
-                    if (currentStaffAsync.value != null) ...[
+                      if (isAdmin)
+                        _ProfileSection(
+                          title: 'Admin actions',
+                          children: [
+                            _ProfileRow(
+                              icon: Icons.people_outline,
+                              title: 'Staff Management',
+                              onTap: () => context.go('/profile/staff'),
+                            ),
+                            _ProfileRow(
+                              icon: Icons.fact_check_outlined,
+                              tone: AppTone.green,
+                              title: 'Pre-Signoff Checklist',
+                              onTap: () => context.go('/profile/checklist'),
+                            ),
+                            _ProfileRow(
+                              icon: Icons.checklist_rtl,
+                              tone: AppTone.green,
+                              title: 'Pre-Delivery Checklist',
+                              onTap: () =>
+                                  context.go('/profile/pre-delivery-checklist'),
+                            ),
+                            _ProfileRow(
+                              icon: Icons.summarize_outlined,
+                              tone: AppTone.yellow,
+                              title: 'Season Report',
+                              detail: 'Export end-of-season data',
+                              onTap: () => context.go('/profile/season-export'),
+                            ),
+                          ],
+                        ),
                       _ProfileSection(
-                        title: 'Staff Information',
+                        title: 'Actions',
                         children: [
-                          _InfoTile(
-                            icon: Icons.person,
-                            label: 'Name',
-                            value: currentStaffAsync.value!.name,
-                          ),
-                          _InfoTile(
-                            icon: Icons.badge,
-                            label: 'Position',
-                            value: currentStaffAsync.value!.hasManagerAccess
-                                ? 'Manager'
-                                : 'Staff Member',
-                          ),
-                          _InfoTile(
-                            icon: Icons.calendar_today,
-                            label: 'Staff Since',
-                            value: DateTimeUtils.formatDate(
-                                currentStaffAsync.value!.createdAt),
-                          ),
-                          _InfoTile(
-                            icon: Icons.work,
-                            label: 'Role',
-                            value: currentStaffAsync.value!.role,
+                          if (staff == null && !isAdmin)
+                            _ProfileRow(
+                              icon: Icons.link,
+                              title: 'Link to Staff Account',
+                              onTap: () => context.go('/staff-link'),
+                            ),
+                          _ProfileRow(
+                            icon: Icons.logout_rounded,
+                            tone: AppTone.pink,
+                            title: 'Sign Out',
+                            onTap: () => _showSignOutDialog(context),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 24),
                     ],
-
-                    // Settings (for managers)
-                    if (isManager && !isAdmin) ...[
-                      _ProfileSection(
-                        title: 'Settings',
-                        children: [
-                          SwitchListTile(
-                            secondary: const Icon(Icons.visibility),
-                            title: const Text('Show All Deliveries'),
-                            subtitle:
-                                const Text('View all deliveries or only yours'),
-                            value: showAllDeliveries,
-                            onChanged: (value) {
-                              ref.read(allDeliveriesProvider.notifier).state =
-                                  value;
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-
-                    // Admin Actions
-                    if (isAdmin) ...[
-                      _ProfileSection(
-                        title: 'Admin Actions',
-                        children: [
-                          ListTile(
-                            leading: const Icon(Icons.people),
-                            title: const Text('Staff Management'),
-                            subtitle: const Text('Manage staff members'),
-                            trailing: const Icon(Icons.arrow_forward_ios),
-                            onTap: () => context.go('/profile/staff'),
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.checklist),
-                            title: const Text('Pre-Signoff Checklist'),
-                            subtitle: const Text('Manage pre-signoff checklist items'),
-                            trailing: const Icon(Icons.arrow_forward_ios),
-                            onTap: () => context.go('/profile/checklist'),
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.checklist_rtl),
-                            title: const Text('Pre-Delivery Checklist'),
-                            subtitle: const Text('Manage van loading checklist'),
-                            trailing: const Icon(Icons.arrow_forward_ios),
-                            onTap: () => context.go('/profile/pre-delivery-checklist'),
-                          ),
-                          ListTile(
-                            leading: const Icon(Icons.summarize),
-                            title: const Text('Season Report'),
-                            subtitle: const Text('Export end-of-season data'),
-                            trailing: const Icon(Icons.arrow_forward_ios),
-                            onTap: () => context.go('/profile/season-export'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-
-                    // Actions Section
-                    _ProfileSection(
-                      title: 'Actions',
-                      children: [
-                        if (currentStaffAsync.value == null && !isAdmin)
-                          ListTile(
-                            leading: const Icon(Icons.link),
-                            title: const Text('Link to Staff Account'),
-                            subtitle: const Text(
-                                'Connect your account to a staff member'),
-                            trailing: const Icon(Icons.arrow_forward_ios),
-                            onTap: () => context.go('/staff-link'),
-                          ),
-                        ListTile(
-                          leading: const Icon(Icons.logout, color: Colors.red),
-                          title: const Text('Sign Out',
-                              style: TextStyle(color: Colors.red)),
-                          onTap: () => _showSignOutDialog(context, ref),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -224,7 +217,7 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _showSignOutDialog(BuildContext context, WidgetRef ref) {
+  void _showSignOutDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -236,6 +229,10 @@ class ProfileScreen extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTone.pink.ink,
+              foregroundColor: AppTokens.surface,
+            ),
             onPressed: () {
               Navigator.pop(context);
               ref.read(authNotifierProvider.notifier).signOut();
@@ -246,7 +243,6 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
   }
-
 }
 
 class _ProfileHeader extends StatelessWidget {
@@ -257,126 +253,113 @@ class _ProfileHeader extends StatelessWidget {
     required this.isManager,
   });
 
-  final dynamic user;
-  final dynamic staff;
+  final AppUser? user;
+  final Staff? staff;
   final bool isAdmin;
   final bool isManager;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 30,
-              backgroundColor: Theme.of(context).primaryColor,
-              child: Icon(
-                isAdmin
-                    ? Icons.admin_panel_settings
-                    : isManager
-                        ? Icons.supervisor_account
-                        : Icons.person,
-                size: 32,
-                color: Colors.white,
-              ),
+    final linked = staff != null || isAdmin;
+    final tone = isAdmin
+        ? AppTone.pink
+        : linked
+            ? AppTone.green
+            : AppTone.blue;
+
+    return AppPanel(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          AppIconTile(
+            icon: isAdmin
+                ? Icons.admin_panel_settings_outlined
+                : Icons.person_outline_rounded,
+            tone: tone,
+            size: 58,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  staff?.name ?? user?.email ?? 'User',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                AppStatusPill(
+                  tone: tone,
+                  label: isAdmin
+                      ? 'Administrator'
+                      : isManager
+                          ? 'Manager'
+                          : linked
+                              ? 'Staff Member'
+                              : 'Account not linked',
+                ),
+              ],
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    staff?.name ?? user?.email ?? 'User',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    isAdmin
-                        ? 'Administrator'
-                        : isManager
-                            ? 'Manager'
-                            : staff != null
-                                ? 'Staff Member'
-                                : 'Account not linked',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: staff != null || isAdmin
-                              ? BrandColors.kakaGreen
-                              : BrandColors.kakaBlue,
-                          fontWeight: FontWeight.w500,
-                        ),
-                  ),
-                  if (staff == null && !isAdmin) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Link your account to access staff features',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.grey[600],
-                          ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _ProfileSection extends StatelessWidget {
-  const _ProfileSection({
-    required this.title,
-    required this.children,
-  });
+  const _ProfileSection({required this.title, required this.children});
 
   final String title;
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Column(
-            children: children,
+    return Padding(
+      padding: const EdgeInsets.only(top: AppTokens.sectionGap),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 9),
+            child: Text(title,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelLarge
+                    ?.copyWith(color: AppTokens.muted)),
           ),
-        ),
-      ],
+          AppGroupedList(children: children),
+        ],
+      ),
     );
   }
 }
 
-class _InfoTile extends StatelessWidget {
-  const _InfoTile({
+class _ProfileRow extends StatelessWidget {
+  const _ProfileRow({
     required this.icon,
-    required this.label,
-    required this.value,
+    required this.title,
+    this.detail,
+    this.onTap,
+    this.tone = AppTone.blue,
   });
 
   final IconData icon;
-  final String label;
-  final String value;
+  final String title;
+  final String? detail;
+  final VoidCallback? onTap;
+  final AppTone tone;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: Theme.of(context).primaryColor),
-      title: Text(label),
-      subtitle: Text(value),
-      dense: true,
+      leading: AppIconTile(icon: icon, tone: tone),
+      title: Text(title),
+      subtitle: detail != null ? Text(detail!) : null,
+      trailing: onTap != null
+          ? const Icon(Icons.chevron_right_rounded, color: AppTokens.muted)
+          : null,
+      onTap: onTap,
     );
   }
 }

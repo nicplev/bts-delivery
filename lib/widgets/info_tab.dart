@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
 import '../models/offline/offline_media.dart';
@@ -14,6 +13,7 @@ import '../providers/offline_media_providers.dart';
 import 'package:uuid/uuid.dart';
 import 'offline_media_view.dart';
 import 'school_timer_history.dart';
+import 'design/design.dart';
 
 class InfoTab extends ConsumerStatefulWidget {
   const InfoTab({super.key, required this.schoolId});
@@ -31,8 +31,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   final _schoolNameController = TextEditingController();
   final _schoolAddressController = TextEditingController();
 
-  GoogleMapController? _mapController;
-
   @override
   void dispose() {
     _contactNameController.dispose();
@@ -40,7 +38,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     _contactEmailController.dispose();
     _schoolNameController.dispose();
     _schoolAddressController.dispose();
-    _mapController?.dispose();
     super.dispose();
   }
 
@@ -51,7 +48,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
 
     return schoolAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => Center(child: Text('Error: $error')),
+      error: (_, __) =>
+          const Center(child: Text('Couldn’t load school information')),
       data: (school) {
         if (school == null) {
           return const Center(child: Text('School not found'));
@@ -60,19 +58,24 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         final canEditSchoolData = ref.watch(canEditSchoolDataProvider);
 
         return ListView(
-          padding: const EdgeInsets.all(16),
+          key: const PageStorageKey('school-info'),
+          primary: true,
+          padding: EdgeInsets.fromLTRB(
+            AppTokens.gutter,
+            16,
+            AppTokens.gutter,
+            MediaQuery.paddingOf(context).bottom + 16,
+          ),
           children: [
             _buildSchoolInfoCard(school),
+            const SizedBox(height: 16),
+            _buildLocationCard(school.address),
             const SizedBox(height: 16),
             _buildSchoolMapCard(school),
             const SizedBox(height: 16),
             if (canEditSchoolData &&
                 ref.watch(activeDeliveryVisitProvider) == null) ...[
               _buildBulkImportCard(school),
-              const SizedBox(height: 16),
-            ],
-            if (school.address?.isNotEmpty == true) ...[
-              _buildMapCard(school),
               const SizedBox(height: 16),
             ],
             _buildContactsCard(contactsAsync, canEdit: canEditSchoolData),
@@ -88,36 +91,33 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
     final isAdmin = isVisit && ref.watch(isAdminProvider);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.history, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    isVisit ? 'Visit timer history' : 'Earlier timer history',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.history, tone: AppTone.green),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  isVisit ? 'Visit timer history' : 'Earlier timer history',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
-                if (isAdmin)
-                  IconButton(
-                    onPressed: () => _showAddTimerDialog(),
-                    icon: const Icon(Icons.add),
-                    tooltip: 'Add Timer Entry',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SchoolTimerHistory(schoolId: widget.schoolId, readOnly: !isVisit),
-          ],
-        ),
+              ),
+              if (isAdmin)
+                IconButton(
+                  onPressed: () => _showAddTimerDialog(),
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add Timer Entry',
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SchoolTimerHistory(schoolId: widget.schoolId, readOnly: !isVisit),
+        ],
       ),
     );
   }
@@ -136,71 +136,60 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   Widget _buildSchoolInfoCard(School school) {
     final isAdmin = ref.watch(isAdminProvider);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.school, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'School Information',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.school, tone: AppTone.blue),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'School Information',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
-                if (isAdmin)
-                  IconButton(
-                    onPressed: () => _showEditSchoolDialog(school),
-                    icon: const Icon(Icons.edit),
-                    tooltip: 'Edit School',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildInfoRow(
-              icon: Icons.label,
-              label: 'School Name',
-              value: school.name,
-            ),
-            if (school.address?.isNotEmpty == true) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow(
-                icon: Icons.location_on,
-                label: 'Address',
-                value: school.address!,
               ),
+              if (isAdmin)
+                IconButton(
+                  onPressed: () => _showEditSchoolDialog(school),
+                  icon: const Icon(Icons.edit),
+                  tooltip: 'Edit School',
+                ),
             ],
+          ),
+          const SizedBox(height: 16),
+          _buildInfoRow(
+            icon: Icons.label,
+            label: 'School Name',
+            value: school.name,
+          ),
+          const SizedBox(height: 12),
+          _buildInfoRow(
+            icon: Icons.calendar_today,
+            label: 'Added',
+            value: _formatDate(school.createdAt),
+          ),
+          if (school.isSignedOff && school.lastSignOffDate != null) ...[
             const SizedBox(height: 12),
             _buildInfoRow(
-              icon: Icons.calendar_today,
-              label: 'Added',
-              value: _formatDate(school.createdAt),
+              icon: Icons.check_circle,
+              label: 'Earlier school sign-off',
+              value: _formatDate(school.lastSignOffDate!),
+              valueColor: AppTone.green.ink,
             ),
-            if (school.isSignedOff && school.lastSignOffDate != null) ...[
+            if (school.signedBy?.isNotEmpty == true) ...[
               const SizedBox(height: 12),
               _buildInfoRow(
-                icon: Icons.check_circle,
-                label: 'Earlier school sign-off',
-                value: _formatDate(school.lastSignOffDate!),
-                valueColor: Colors.green,
+                icon: Icons.person,
+                label: 'Signed by',
+                value: school.signedBy!,
               ),
-              if (school.signedBy?.isNotEmpty == true) ...[
-                const SizedBox(height: 12),
-                _buildInfoRow(
-                  icon: Icons.person,
-                  label: 'Signed by',
-                  value: school.signedBy!,
-                ),
-              ],
             ],
           ],
-        ),
+        ],
       ),
     );
   }
@@ -214,7 +203,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: Colors.grey[600]),
+        AppIconTile(icon: icon, tone: AppTone.neutral, size: 32),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -222,9 +211,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             children: [
               Text(
                 label,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12,
-                  color: Colors.grey[600],
+                  color: AppTokens.muted,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -257,186 +246,153 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           );
     final owner = ref.watch(offlineMediaOwnerProvider(school.id));
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.map_outlined, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('School map', style: Theme.of(context).textTheme.titleLarge),
-                ),
-                if (canEdit && reference != null)
-                  IconButton(
-                    onPressed: () => _showDeleteMapConfirmation(school),
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Delete map',
-                  ),
-                if (canEdit)
-                  IconButton(
-                    onPressed: () => _handleUploadSchoolMap(school),
-                    icon: Icon(reference == null ? Icons.add : Icons.edit),
-                    tooltip: reference == null ? 'Upload map' : 'Replace map',
-                  ),
-              ],
-            ),
-            if (reference == null)
-              const Text('No school map uploaded')
-            else if (asset == null)
-              const Text('This school map cannot be opened from its saved reference')
-            else ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 250,
-                  child: OfflineMediaPreview(asset: asset),
-                ),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.map_outlined, tone: AppTone.blue),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('School map',
+                    style: Theme.of(context).textTheme.titleLarge),
               ),
-              if (visit != null) OfflineMediaDownloadStatus(asset: asset),
-              Wrap(
-                spacing: 8,
-                children: [
-                  TextButton.icon(
-                    onPressed: owner == null
-                        ? null
-                        : () => Navigator.of(context).push<void>(
-                              MaterialPageRoute(
-                                builder: (_) => OfflineMediaScreen(
-                                  asset: asset,
-                                  ownerUid: owner,
-                                  title: 'School map',
-                                ),
+              if (canEdit && reference != null)
+                IconButton(
+                  onPressed: () => _showDeleteMapConfirmation(school),
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete map',
+                ),
+              if (canEdit)
+                IconButton(
+                  onPressed: () => _handleUploadSchoolMap(school),
+                  icon: Icon(reference == null ? Icons.add : Icons.edit),
+                  tooltip: reference == null ? 'Upload map' : 'Replace map',
+                ),
+            ],
+          ),
+          if (reference == null)
+            const Text('No school map uploaded')
+          else if (asset == null)
+            const Text(
+                'This school map cannot be opened from its saved reference')
+          else ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+              child: SizedBox(
+                width: double.infinity,
+                height: 250,
+                child: OfflineMediaPreview(asset: asset),
+              ),
+            ),
+            if (visit != null) OfflineMediaDownloadStatus(asset: asset),
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: owner == null
+                      ? null
+                      : () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (_) => OfflineMediaScreen(
+                                asset: asset,
+                                ownerUid: owner,
+                                title: 'School map',
                               ),
                             ),
-                    icon: const Icon(Icons.open_in_full_outlined),
-                    label: const Text('Open map'),
-                  ),
-                  if (visit != null)
-                    OfflineMediaDownloadButton(asset: asset, compact: false),
-                ],
-              ),
-            ],
-            if (visit != null)
-              OfflineEarlierMapButton(visit: visit, currentMap: asset),
+                          ),
+                  icon: const Icon(Icons.open_in_full_outlined),
+                  label: const Text('Open map'),
+                ),
+                if (visit != null)
+                  OfflineMediaDownloadButton(asset: asset, compact: false),
+              ],
+            ),
           ],
-        ),
+          if (visit != null)
+            OfflineEarlierMapButton(visit: visit, currentMap: asset),
+        ],
       ),
     );
   }
 
   Widget _buildBulkImportCard(School school) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.upload_file, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Bulk Import',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
-              style: TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () {
-                context.push(
-                  '/schools/${school.id}/bulk-import?schoolName=${Uri.encodeComponent(school.name)}',
-                );
-              },
-              icon: const Icon(Icons.cloud_upload),
-              label: const Text('Import Classrooms'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMapCard(School school) {
-    // Using a hardcoded location for Beaumaris (you can add geocoding later)
-    // This is approximately where Beaumaris, VIC 3193 is located
-    const LatLng beaumaris = LatLng(-37.9833, 145.0333);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.map, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  'Location',
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.upload_file, tone: AppTone.green),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Bulk Import',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
+            style: TextStyle(color: AppTokens.muted),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () {
+              context.push(
+                '/schools/${school.id}/bulk-import?schoolName=${Uri.encodeComponent(school.name)}',
+              );
+            },
+            icon: const Icon(Icons.cloud_upload),
+            label: const Text('Import Classrooms'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationCard(String? savedAddress) {
+    final address = savedAddress?.trim() ?? '';
+
+    return AppPanel(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AppIconTile(icon: Icons.location_on_outlined),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Location',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  address.isEmpty ? 'No address saved' : address,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                if (address.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: () => _openInMaps(address),
+                    icon: const Icon(Icons.open_in_new_outlined),
+                    label: const Text('Open in Maps'),
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                height: 200,
-                child: GoogleMap(
-                  initialCameraPosition: const CameraPosition(
-                    target: beaumaris,
-                    zoom: 15,
-                  ),
-                  markers: {
-                    Marker(
-                      markerId: const MarkerId('school_location'),
-                      position: beaumaris,
-                      infoWindow: InfoWindow(
-                        title: school.name,
-                        snippet: school.address,
-                      ),
-                    ),
-                  },
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapToolbarEnabled: false,
-                  onMapCreated: (GoogleMapController controller) {
-                    _mapController = controller;
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _openInMaps(school.address ?? ''),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Open in Maps'),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -445,72 +401,67 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     AsyncValue<List<Contact>> contactsAsync, {
     required bool canEdit,
   }) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.contacts, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Contacts',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-                if (canEdit)
-                  IconButton(
-                    onPressed: _showAddContactDialog,
-                    icon: const Icon(Icons.add),
-                    tooltip: 'Add Contact',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            contactsAsync.when(
-              loading: () => const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
-                ),
-              ),
-              error: (error, _) => Center(
-                child: Text('Error loading contacts: $error'),
-              ),
-              data: (contacts) {
-                if (contacts.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          Icon(Icons.person_off,
-                              size: 48, color: Colors.grey[400]),
-                          const SizedBox(height: 8),
-                          Text(
-                            'No contacts added yet',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.contacts, tone: AppTone.pink),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Contacts',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                    ),
-                  );
-                }
-
-                return Column(
-                  children: contacts.map((contact) {
-                    return _buildContactTile(contact, canEdit: canEdit);
-                  }).toList(),
-                );
-              },
+                ),
+              ),
+              if (canEdit)
+                IconButton(
+                  onPressed: _showAddContactDialog,
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add Contact',
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          contactsAsync.when(
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
             ),
-          ],
-        ),
+            error: (_, __) => const Text('Couldn’t load contacts'),
+            data: (contacts) {
+              if (contacts.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        Icon(Icons.person_off,
+                            size: 48, color: Colors.grey[400]),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'No contacts added yet',
+                          style: TextStyle(color: AppTokens.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return AppGroupedList(
+                children: contacts.map((contact) {
+                  return _buildContactTile(contact, canEdit: canEdit);
+                }).toList(),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -518,114 +469,106 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   Widget _buildContactTile(Contact contact, {required bool canEdit}) {
     final hasPhone = contact.phone?.isNotEmpty == true;
     final hasEmail = contact.email?.isNotEmpty == true;
-    final initial = contact.name.trim().characters.firstOrNull?.toUpperCase();
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Text(initial ?? '?'),
-        ),
-        title: Text(
-          contact.name,
-          style: const TextStyle(fontWeight: FontWeight.w500),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (hasPhone)
-              Row(
-                children: [
-                  const Icon(Icons.phone, size: 14),
-                  const SizedBox(width: 4),
-                  Expanded(child: Text(contact.phone!)),
-                ],
-              ),
-            if (hasEmail)
-              Row(
-                children: [
-                  const Icon(Icons.email, size: 14),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      contact.email!,
-                      overflow: TextOverflow.ellipsis,
+    return ListTile(
+      leading: const AppIconTile(
+          icon: Icons.person_outline, tone: AppTone.pink, size: 32),
+      title: Text(
+        contact.name,
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasPhone)
+            Row(
+              children: [
+                const Icon(Icons.phone, size: 14),
+                const SizedBox(width: 4),
+                Expanded(child: Text(contact.phone!)),
+              ],
+            ),
+          if (hasEmail)
+            Row(
+              children: [
+                const Icon(Icons.email, size: 14),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(contact.email!),
+                ),
+              ],
+            ),
+        ],
+      ),
+      trailing: canEdit || hasPhone || hasEmail
+          ? PopupMenuButton<String>(
+              itemBuilder: (context) => [
+                if (hasPhone)
+                  const PopupMenuItem(
+                    value: 'call',
+                    child: Row(
+                      children: [
+                        Icon(Icons.phone),
+                        SizedBox(width: 8),
+                        Text('Call'),
+                      ],
                     ),
                   ),
-                ],
-              ),
-          ],
-        ),
-        trailing: canEdit || hasPhone || hasEmail
-            ? PopupMenuButton<String>(
-                itemBuilder: (context) => [
-                  if (hasPhone)
-                    const PopupMenuItem(
-                      value: 'call',
-                      child: Row(
-                        children: [
-                          Icon(Icons.phone),
-                          SizedBox(width: 8),
-                          Text('Call'),
-                        ],
-                      ),
+                if (hasEmail)
+                  const PopupMenuItem(
+                    value: 'email',
+                    child: Row(
+                      children: [
+                        Icon(Icons.email),
+                        SizedBox(width: 8),
+                        Text('Email'),
+                      ],
                     ),
-                  if (hasEmail)
-                    const PopupMenuItem(
-                      value: 'email',
-                      child: Row(
-                        children: [
-                          Icon(Icons.email),
-                          SizedBox(width: 8),
-                          Text('Email'),
-                        ],
-                      ),
+                  ),
+                if (canEdit)
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit),
+                        SizedBox(width: 8),
+                        Text('Edit'),
+                      ],
                     ),
-                  if (canEdit)
-                    const PopupMenuItem(
-                      value: 'edit',
-                      child: Row(
-                        children: [
-                          Icon(Icons.edit),
-                          SizedBox(width: 8),
-                          Text('Edit'),
-                        ],
-                      ),
+                  ),
+                if (canEdit)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Delete', style: TextStyle(color: Colors.red)),
+                      ],
                     ),
-                  if (canEdit)
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete, color: Colors.red),
-                          SizedBox(width: 8),
-                          Text('Delete', style: TextStyle(color: Colors.red)),
-                        ],
-                      ),
-                    ),
-                ],
-                onSelected: (value) {
-                  switch (value) {
-                    case 'call':
-                      _callContact(contact.phone!);
-                      break;
-                    case 'email':
-                      _emailContact(contact.email!);
-                      break;
-                    case 'edit':
-                      if (ref.read(canEditSchoolDataProvider)) {
-                        _showEditContactDialog(contact);
-                      }
-                      break;
-                    case 'delete':
-                      if (ref.read(canEditSchoolDataProvider)) {
-                        _showDeleteContactConfirmation(contact);
-                      }
-                      break;
-                  }
-                },
-              )
-            : null,
-      ),
+                  ),
+              ],
+              onSelected: (value) {
+                switch (value) {
+                  case 'call':
+                    _callContact(contact.phone!);
+                    break;
+                  case 'email':
+                    _emailContact(contact.email!);
+                    break;
+                  case 'edit':
+                    if (ref.read(canEditSchoolDataProvider)) {
+                      _showEditContactDialog(contact);
+                    }
+                    break;
+                  case 'delete':
+                    if (ref.read(canEditSchoolDataProvider)) {
+                      _showDeleteContactConfirmation(contact);
+                    }
+                    break;
+                }
+              },
+            )
+          : null,
     );
   }
 
@@ -1056,7 +999,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white),
             ),
             SizedBox(width: 16),
             Text('Uploading school map...'),
@@ -1083,7 +1027,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     if (!uploadResult.isSuccess) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text(uploadResult.errorOrNull ?? 'Failed to upload school map'),
+          content:
+              Text(uploadResult.errorOrNull ?? 'Failed to upload school map'),
           backgroundColor: Colors.red,
         ),
       );
@@ -1134,7 +1079,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete School Map'),
-        content: const Text('Are you sure you want to delete the school map? This action cannot be undone.'),
+        content: const Text(
+            'Are you sure you want to delete the school map? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
@@ -1150,7 +1096,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     );
   }
 
-  Future<void> _deleteSchoolMap(BuildContext dialogContext, School school) async {
+  Future<void> _deleteSchoolMap(
+      BuildContext dialogContext, School school) async {
     Navigator.of(dialogContext).pop(); // Close dialog
 
     final storageRepository = ref.read(storageRepositoryProvider);

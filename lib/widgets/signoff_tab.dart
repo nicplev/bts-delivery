@@ -15,7 +15,7 @@ import 'sync_status_detail_sheet.dart';
 import '../services/date_utils.dart';
 import '../services/excel_export_service.dart';
 import '../models/school.dart';
-import '../app/theme/brand_colors.dart';
+import 'design/design.dart';
 
 final _signedEvidenceProvider = StreamProvider.autoDispose
     .family<SignedEvidence?, ({String schoolId, String? deliveryId})>(
@@ -62,7 +62,6 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     penColor: Colors.black,
     exportBackgroundColor: Colors.white,
   );
-  final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _noteKeys =
       {}; // Map of yearLevelId_classroomId -> GlobalKey
   bool _isUploading = false;
@@ -75,7 +74,6 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
   void dispose() {
     _nameController.dispose();
     _signatureController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -114,33 +112,35 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       ref.watch(_serverSigningDraftProvider(_scope));
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildOverviewCard(),
-                const SizedBox(height: 16),
-                _buildNotesCard(),
-                const SizedBox(height: 16),
-                _buildSignOffCard(signed, pending, uploads?.activeId),
-                if (legacy != null) ...[
-                  const SizedBox(height: 16),
-                  ExpansionTile(
-                    title: const Text('Earlier school sign-off'),
-                    subtitle: const Text('No delivery visit was recorded'),
-                    children: [_buildCompletedSignOff(legacy)],
-                  ),
-                ],
-              ],
+    return SingleChildScrollView(
+      key: const PageStorageKey('school-signoff'),
+      primary: true,
+      padding: EdgeInsets.fromLTRB(
+        AppTokens.gutter,
+        16,
+        AppTokens.gutter,
+        MediaQuery.paddingOf(context).bottom + 16,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildOverviewCard(),
+          const SizedBox(height: AppTokens.sectionGap),
+          _buildNotesCard(),
+          const SizedBox(height: AppTokens.sectionGap),
+          _buildSignOffCard(signed, pending, uploads?.activeId),
+          if (legacy != null) ...[
+            const SizedBox(height: 16),
+            AppPanel(
+              child: ExpansionTile(
+                title: const Text('Earlier school sign-off'),
+                subtitle: const Text('No delivery visit was recorded'),
+                children: [_buildCompletedSignOff(legacy)],
+              ),
             ),
-          ),
-        );
-      },
+          ],
+        ],
+      ),
     );
   }
 
@@ -149,137 +149,84 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final schoolConsumablesTotalsAsync =
         ref.watch(schoolConsumablesTotalsProvider(widget.schoolId));
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16.0),
+    final typography = Theme.of(context).textTheme;
+    return AppPanel(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(Icons.summarize, color: Theme.of(context).primaryColor),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Delivery Overview',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ),
-              // Use IconButton instead of OutlinedButton
-              IconButton(
-                onPressed: _refreshTotals,
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh',
-              ),
-            ],
+          AppSectionHeading(
+            title: 'Delivery Overview',
+            trailing: IconButton(
+              onPressed: _refreshTotals,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+            ),
           ),
           const SizedBox(height: 12),
-          // School-wide total summary
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          AppPanel(
+            tone: AppTone.blue,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Total Packs Delivered',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
+                const Text('Expected pack total'),
+                const SizedBox(height: 4),
                 schoolTotalAsync.when(
                   data: (total) => Text(
                     '$total',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor,
-                        ),
+                    style: typography.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: AppTone.blue.ink,
+                    ),
                   ),
-                  loading: () => const CircularProgressIndicator(),
-                  error: (error, _) => const Text(
-                    '?',
-                    style: TextStyle(fontSize: 18, color: Colors.red),
-                  ),
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => const Text('Pack total unavailable'),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          // Consumables Totals Summary
           schoolConsumablesTotalsAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            loading: () => const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('Loading consumables totals…'),
+            ),
+            error: (_, __) => const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('Consumables totals unavailable'),
+            ),
             data: (totals) {
-              if (totals.isEmpty) {
-                return const SizedBox.shrink();
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Consumables Totals',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: BrandColors.kakaBlue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: BrandColors.kakaBlue.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Column(
-                      children: totals.entries.map((entry) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  entry.key,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ),
-                              Text(
+              if (totals.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Consumables Totals', style: typography.titleMedium),
+                    const SizedBox(height: 8),
+                    for (final entry in totals.entries)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: Text(entry.key)),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
                                 '${entry.value.quantity} ${entry.value.unit}',
+                                textAlign: TextAlign.end,
                                 style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
+                                    fontWeight: FontWeight.w600),
                               ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               );
             },
           ),
+          const SizedBox(height: 16),
           _buildDeliveryBreakdown(),
         ],
       ),
@@ -293,37 +240,9 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Classroom Totals',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ],
-        ),
+        Text('Classroom Totals',
+            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        // Color Legend
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildLegendItem(Icons.check_circle, Colors.green, 'Complete'),
-              _buildLegendItem(Icons.warning, Colors.orange, 'Incomplete'),
-              _buildLegendItem(Icons.cancel, Colors.red, 'Not Attended'),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
         yearLevelsAsync.when(
           data: (yearLevels) => yearLevels.isEmpty
               ? Container(
@@ -358,35 +277,13 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     );
   }
 
-  Widget _buildLegendItem(IconData icon, Color color, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: color, size: 16),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildYearLevelCard(YearLevel yearLevel) {
     final classroomsAsync = ref.watch(classroomsProvider(
         (schoolId: widget.schoolId, yearLevelId: yearLevel.id)));
 
-    return Container(
+    return AppPanel(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-      ),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -453,457 +350,138 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       classroomId: classroom.id,
     )));
 
-    // Get color based on completion status - must check consumables too
-    Color getStatusColor(List<Consumable> consumables) {
-      // If not attended, return red immediately
-      if (classroom.completionStatus == ClassroomCompletionStatus.notAttended) {
-        return Colors.red;
-      }
-
-      // If classroom is marked complete, verify all consumables are actually complete
-      if (classroom.completionStatus == ClassroomCompletionStatus.complete) {
-        // Check if any consumables are incomplete (partial delivery)
-        final hasPartialConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered != null &&
-              consumable.actualQuantityDelivered != consumable.quantity;
-        });
-
-        // Check if any consumables are not attended (no actual quantity set)
-        final hasUnattendedConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered == null;
-        });
-
-        // If any consumables are incomplete or not attended, show orange
-        if (hasPartialConsumables || hasUnattendedConsumables) {
-          return Colors.orange;
-        }
-
-        // All consumables are complete, show green
-        return Colors.green;
-      }
-
-      // Otherwise use the classroom's status
-      switch (classroom.completionStatus) {
-        case ClassroomCompletionStatus.complete:
-          return Colors.green;
-        case ClassroomCompletionStatus.incomplete:
-          return Colors.orange;
-        case ClassroomCompletionStatus.notAttended:
-          return Colors.red;
-      }
-    }
-
-    IconData getStatusIcon(List<Consumable> consumables) {
-      // If not attended, return cancel icon immediately
-      if (classroom.completionStatus == ClassroomCompletionStatus.notAttended) {
-        return Icons.cancel;
-      }
-
-      // If classroom is marked complete, verify all consumables are actually complete
-      if (classroom.completionStatus == ClassroomCompletionStatus.complete) {
-        // Check if any consumables are incomplete (partial delivery)
-        final hasPartialConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered != null &&
-              consumable.actualQuantityDelivered != consumable.quantity;
-        });
-
-        // Check if any consumables are not attended (no actual quantity set)
-        final hasUnattendedConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered == null;
-        });
-
-        // If any consumables are incomplete or not attended, show warning
-        if (hasPartialConsumables || hasUnattendedConsumables) {
-          return Icons.warning;
-        }
-
-        // All consumables are complete, show check circle
-        return Icons.check_circle;
-      }
-
-      // Otherwise use the classroom's status
-      switch (classroom.completionStatus) {
-        case ClassroomCompletionStatus.complete:
-          return Icons.check_circle;
-        case ClassroomCompletionStatus.incomplete:
-          return Icons.warning;
-        case ClassroomCompletionStatus.notAttended:
-          return Icons.cancel;
-      }
-    }
+    final typography = Theme.of(context).textTheme;
+    final notes = notesAsync.asData?.value;
+    final breakdowns = breakdownsAsync.asData?.value;
 
     return consumablesAsync.when(
       data: (consumables) {
-        final statusColor = getStatusColor(consumables);
-        final statusIcon = getStatusIcon(consumables);
+        final allConsumablesDelivered = consumables.every(
+          (item) => item.actualQuantityDelivered == item.quantity,
+        );
+        final (status, icon, tone) = switch (classroom.completionStatus) {
+          ClassroomCompletionStatus.notAttended => (
+              'Not Attended',
+              Icons.remove_circle_outline,
+              AppTone.neutral
+            ),
+          ClassroomCompletionStatus.complete when allConsumablesDelivered => (
+              'Complete',
+              Icons.check_circle_outline,
+              AppTone.green
+            ),
+          _ => ('Incomplete', Icons.warning_amber_rounded, AppTone.yellow),
+        };
+        final actual = classroom.actualPacksDelivered;
 
         return Container(
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.all(12),
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: statusColor,
-              width: 2,
-            ),
+            color: AppTokens.surfaceQuiet,
+            borderRadius: BorderRadius.circular(AppTokens.controlRadius),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Classroom name and pack total row
-              Row(
+              Text(classroom.name, style: typography.titleMedium),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
                 children: [
-                  Expanded(
+                  AppStatusPill(label: status, icon: icon, tone: tone),
+                  if (breakdowns != null && breakdowns.length > 1)
+                    const AppStatusPill(label: 'Composite', tone: AppTone.blue),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                packTotalAsync.when(
+                  data: (total) {
+                    if (classroom.completionStatus ==
+                            ClassroomCompletionStatus.incomplete &&
+                        actual != null) {
+                      return total == null
+                          ? '$actual packs delivered'
+                          : '$actual of ${total.total} packs delivered';
+                    }
+                    return total == null
+                        ? 'No pack total set'
+                        : '${total.total} expected packs';
+                  },
+                  loading: () => 'Loading pack total…',
+                  error: (_, __) => 'Pack total unavailable',
+                ),
+                style: typography.bodyMedium,
+              ),
+              if (breakdowns != null && breakdowns.length > 1)
+                Text(
+                  breakdowns
+                      .map((item) =>
+                          '${item.yearLevelLabel}: ${item.studentCount}')
+                      .join(' • '),
+                  style: typography.bodySmall?.copyWith(color: AppTokens.muted),
+                ),
+              if (notes != null && notes.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => _scrollToNote(yearLevelId, classroom.id),
+                  icon: const Icon(Icons.notes_outlined),
+                  label: const Text('View notes'),
+                ),
+              if (consumables.isNotEmpty) ...[
+                const Divider(height: 16),
+                for (final item in consumables)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          statusIcon,
-                          color: statusColor,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          classroom.name,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                        Icon(_getConsumableIcon(item.itemName),
+                            size: 16, color: AppTone.blue.ink),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(item.itemName)),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            item.actualQuantityDelivered == null
+                                ? '${item.quantity} ${item.unit} expected'
+                                : '${item.actualQuantityDelivered} / ${item.quantity} ${item.unit}',
+                            textAlign: TextAlign.end,
+                            style: typography.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
                           ),
-                        ),
-                        // Composite class indicator badge only
-                        breakdownsAsync.when(
-                          data: (breakdowns) {
-                            if (breakdowns.length <= 1) {
-                              return const SizedBox.shrink();
-                            }
-                            return Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.shade100,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  'Composite',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.teal.shade700,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                          loading: () => const SizedBox.shrink(),
-                          error: (_, __) => const SizedBox.shrink(),
                         ),
                       ],
                     ),
                   ),
-                  packTotalAsync.when(
-                    data: (packTotal) {
-                      final expectedTotal = packTotal?.total ?? 0;
-                      final isIncomplete = classroom.completionStatus ==
-                          ClassroomCompletionStatus.incomplete;
-                      final hasActualQuantity =
-                          classroom.actualPacksDelivered != null;
-
-                      // Determine display color based on status
-                      final displayColor = isIncomplete
-                          ? Colors.orange
-                          : Theme.of(context).primaryColor;
-                      final backgroundColor = isIncomplete
-                          ? Colors.orange.withValues(alpha: 0.15)
-                          : Theme.of(context)
-                              .primaryColor
-                              .withValues(alpha: 0.15);
-
-                      String displayText;
-                      if (isIncomplete && hasActualQuantity) {
-                        // Show actual/expected for incomplete deliveries
-                        displayText =
-                            '${classroom.actualPacksDelivered}/$expectedTotal packs';
-                      } else {
-                        // Show total for complete or not attended
-                        displayText = '$expectedTotal packs';
-                      }
-
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: backgroundColor,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.inventory_2,
-                              size: 14,
-                              color: displayColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              displayText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: displayColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    error: (error, _) => const Text(
-                      '?',
-                      style: TextStyle(fontSize: 12, color: Colors.red),
-                    ),
-                  ),
-                ],
-              ),
-
-              // Second row: year level distribution + note badge
-              breakdownsAsync.when(
-                data: (breakdowns) {
-                  return notesAsync.when(
-                    data: (notes) {
-                      final isComposite = breakdowns.length > 1;
-                      final hasNotes = notes.isNotEmpty;
-
-                      if (!isComposite && !hasNotes) {
-                        return const SizedBox.shrink();
-                      }
-
-                      // Build distribution text if composite
-                      String? distributionText;
-                      if (isComposite) {
-                        distributionText = breakdowns.map((b) {
-                          final label =
-                              b.yearLevelLabel.replaceAll('Year ', 'Y');
-                          return '$label: ${b.studentCount}';
-                        }).join('  •  ');
-                      }
-
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 4, left: 24),
-                        child: Row(
-                          children: [
-                            if (distributionText != null)
-                              Text(
-                                distributionText,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.teal.shade600,
-                                ),
-                              ),
-                            if (hasNotes) ...[
-                              if (isComposite) const SizedBox(width: 12),
-                              InkWell(
-                                onTap: () =>
-                                    _scrollToNote(yearLevelId, classroom.id),
-                                borderRadius: BorderRadius.circular(8),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.pink.shade400,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Text(
-                                    'note',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-
-              // Consumables section
-              consumablesAsync.when(
-                data: (consumables) {
-                  if (consumables.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 8),
-                      const Divider(height: 1),
-                      const SizedBox(height: 8),
-                      ...consumables.map((consumable) {
-                        final hasActualQuantity =
-                            consumable.actualQuantityDelivered != null;
-                        final isPartialDelivery = hasActualQuantity &&
-                            consumable.actualQuantityDelivered !=
-                                consumable.quantity;
-
-                        // Determine icon and color based on delivery status
-                        final icon = _getConsumableIcon(consumable.itemName);
-                        final iconColor = isPartialDelivery
-                            ? Colors.orange
-                            : BrandColors.kakaBlue;
-
-                        // Format quantity text
-                        String quantityText;
-                        Color quantityColor;
-                        if (hasActualQuantity) {
-                          quantityText =
-                              '${consumable.actualQuantityDelivered}/${consumable.quantity} ${consumable.unit}';
-                          quantityColor =
-                              isPartialDelivery ? Colors.orange : Colors.green;
-                        } else {
-                          quantityText =
-                              '${consumable.quantity} ${consumable.unit}';
-                          quantityColor = BrandColors.kakaBlue;
-                        }
-
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            children: [
-                              Icon(
-                                icon,
-                                size: 14,
-                                color: iconColor,
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  consumable.itemName,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                quantityText,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: quantityColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (error, _) => const SizedBox.shrink(),
-              ),
-
-              // Last updated info
+              ],
               if (classroom.lastUpdatedBy != null &&
                   classroom.lastUpdatedAt != null) ...[
-                const SizedBox(height: 8),
-                const Divider(height: 1),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.update,
-                      size: 12,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                  ],
+                const Divider(height: 16),
+                Text(
+                  'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
+                  style: typography.bodySmall?.copyWith(color: AppTokens.muted),
                 ),
               ],
             ],
           ),
         );
       },
-      loading: () => Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.grey.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade300, width: 2),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
-      ),
-      error: (_, __) => Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.grey.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade300, width: 2),
-        ),
-        child: const Text('Error loading classroom'),
-      ),
+      loading: () => const LinearProgressIndicator(),
+      error: (_, __) => Text('Error loading classroom: ${classroom.name}'),
     );
   }
 
   Widget _buildNotesCard() {
     final yearLevelsAsync = ref.watch(yearLevelsProvider(widget.schoolId));
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16.0),
+    return AppPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.note_outlined, color: Theme.of(context).primaryColor),
-              const SizedBox(width: 8),
-              Text(
-                'Classroom Notes',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ],
-          ),
+          const AppSectionHeading(title: 'Classroom Notes'),
           const SizedBox(height: 16),
           yearLevelsAsync.when(
             data: (yearLevels) {
@@ -986,55 +564,27 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final key = '${yearLevelId}_$classroomId';
     _noteKeys.putIfAbsent(key, () => GlobalKey());
 
-    return Container(
+    return AppPanel(
       key: _noteKeys[key],
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: BrandColors.kakaYellow.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: BrandColors.kakaYellow.withValues(alpha: 0.3),
-        ),
-      ),
+      tone: AppTone.yellow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Icon(
-                    Icons.class_,
-                    size: 16,
-                    color: BrandColors.kakaYellow,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$yearLevelLabel - ${classroom.name}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: BrandColors.kakaYellow.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '${notes.length} ${notes.length == 1 ? 'note' : 'notes'}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
+              Text(
+                '$yearLevelLabel – ${classroom.name}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              AppStatusPill(
+                label:
+                    '${notes.length} ${notes.length == 1 ? 'note' : 'notes'}',
+                icon: Icons.notes_outlined,
+                tone: AppTone.yellow,
               ),
               if (classroom.lastUpdatedBy != null &&
                   classroom.lastUpdatedAt != null) ...[
@@ -1056,12 +606,12 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
                       child: Icon(
                         Icons.note,
                         size: 12,
-                        color: BrandColors.kakaYellow,
+                        color: AppTone.yellow.ink,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -1102,46 +652,47 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     String? activeId,
   ) {
     final latest = signed.valueOrNull;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (pending != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.cloud_upload_outlined),
-                title: const Text('Signature saved on this device'),
-                subtitle: Text(
-                    pending.id == activeId ? 'Syncing' : pending.statusText),
-                trailing: pending.id == activeId
-                    ? null
-                    : EvidenceUploadActions(item: pending),
-              ),
-            if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
-            if (widget.deliveryId != null &&
-                pending == null &&
-                (latest == null || _isCorrecting))
-              _buildSignOffForm(),
-            if (widget.deliveryId == null && latest == null && pending == null)
-              const Text('Open a scheduled delivery to create a sign-off.'),
-            if (signed.hasError)
-              const Text('Could not load earlier signed snapshots.'),
-            if (pending == null && _isCorrecting)
-              TextButton(
-                onPressed: _isUploading
-                    ? null
-                    : () => setState(() => _isCorrecting = false),
-                child: const Text('Cancel correction'),
-              ),
-            TextButton.icon(
-              onPressed: _showSignOffHistory,
-              icon: const Icon(Icons.history),
-              label: const Text('Recent signed snapshots'),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (pending != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppStatusPill(
+                  label: 'Signature saved on this device',
+                  icon: Icons.cloud_upload_outlined,
+                  tone: AppTone.blue,
+                ),
+                const SizedBox(height: 8),
+                Text(pending.id == activeId ? 'Syncing' : pending.statusText),
+                if (pending.id != activeId)
+                  EvidenceUploadActions(item: pending),
+              ],
             ),
-          ],
-        ),
+          if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
+          if (widget.deliveryId != null &&
+              pending == null &&
+              (latest == null || _isCorrecting))
+            _buildSignOffForm(),
+          if (widget.deliveryId == null && latest == null && pending == null)
+            const Text('Open a scheduled delivery to create a sign-off.'),
+          if (signed.hasError)
+            const Text('Could not load earlier signed snapshots.'),
+          if (pending == null && _isCorrecting)
+            TextButton(
+              onPressed: _isUploading
+                  ? null
+                  : () => setState(() => _isCorrecting = false),
+              child: const Text('Cancel correction'),
+            ),
+          TextButton.icon(
+            onPressed: _showSignOffHistory,
+            icon: const Icon(Icons.history),
+            label: const Text('Recent signed snapshots'),
+          ),
+        ],
       ),
     );
   }
@@ -1258,20 +809,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Icon(Icons.edit, color: Theme.of(context).primaryColor),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Sign-off',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ],
-        ),
+        const AppSectionHeading(title: 'Sign-off'),
         const SizedBox(height: 8),
         const Text('This signature will be linked to the selected delivery.'),
         const SizedBox(height: 16),
@@ -1295,11 +833,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           aspectRatio: 2.0,
           child: Container(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTokens.muted),
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
               child: Stack(
                 children: [
                   Signature(
@@ -1319,29 +857,26 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           ),
         ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            Flexible(
-              child: TextButton.icon(
-                onPressed:
-                    _isUploading ? null : () => _signatureController.clear(),
-                icon: const Icon(Icons.clear),
-                label: const Text('Clear'),
-              ),
+            TextButton.icon(
+              onPressed:
+                  _isUploading ? null : () => _signatureController.clear(),
+              icon: const Icon(Icons.clear),
+              label: const Text('Clear'),
             ),
-            const SizedBox(width: 16),
-            Flexible(
-              child: FilledButton.icon(
-                onPressed: _isUploading ? null : _handleSignOff,
-                icon: _isUploading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.check),
-                label: Text(_isUploading ? 'Saving…' : 'Review and save'),
-              ),
+            FilledButton.icon(
+              onPressed: _isUploading ? null : _handleSignOff,
+              icon: _isUploading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.check),
+              label: Text(_isUploading ? 'Saving…' : 'Review and save'),
             ),
           ],
         ),
@@ -1408,11 +943,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           aspectRatio: 2.5,
           child: Container(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTokens.muted),
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
               child: Image.network(
                 signOff.signatureURL,
                 fit: BoxFit.contain,

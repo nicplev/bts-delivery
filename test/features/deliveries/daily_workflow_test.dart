@@ -1,3 +1,4 @@
+import 'package:bts_delivery_app/app/theme/app_theme.dart';
 import 'package:bts_delivery_app/models/delivery.dart';
 import 'package:bts_delivery_app/models/staff.dart';
 import 'package:bts_delivery_app/providers/auth_providers.dart';
@@ -40,6 +41,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(_longName), findsOneWidget);
+    expect(find.text('Scheduled delivery'), findsOneWidget);
+    expect(find.text('School'), findsOneWidget);
     expect(find.text('Offline'), findsOneWidget);
     expect(find.text('Checklist complete'), findsOneWidget);
     expect(find.byType(TableCalendar<Delivery>), findsNothing);
@@ -58,6 +61,25 @@ void main() {
     tester.state<NavigatorState>(find.byType(Navigator).last).pop();
     await tester.pumpAndSettle();
     expect(find.text(_longName), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('calendar fits the production theme at 320 px with large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 690);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final today = DateTime.now();
+    final repository = _DeliveriesRepository(today);
+    await tester.pumpWidget(
+      _app(repository,
+          loadStaff: () => Stream.value(_staff(today)), textScale: 1.8),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Calendar'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TableCalendar<Delivery>), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -256,6 +278,7 @@ Widget _app(
     ],
     child: MaterialApp.router(
       routerConfig: router,
+      theme: AppTheme.lightTheme,
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context)
             .copyWith(textScaler: TextScaler.linear(textScale)),

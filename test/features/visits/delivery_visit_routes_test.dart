@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:bts_delivery_app/app/router/app_router.dart';
+import 'package:bts_delivery_app/app/theme/app_theme.dart';
 import 'package:bts_delivery_app/models/delivery.dart';
 import 'package:bts_delivery_app/models/delivery_visit.dart';
 import 'package:bts_delivery_app/models/school.dart';
 import 'package:bts_delivery_app/models/school_timer.dart';
+import 'package:bts_delivery_app/models/signoff_snapshot.dart';
 import 'package:bts_delivery_app/models/staff.dart';
 import 'package:bts_delivery_app/providers/auth_providers.dart';
+import 'package:bts_delivery_app/providers/checklist_providers.dart';
 import 'package:bts_delivery_app/providers/deliveries_providers.dart';
 import 'package:bts_delivery_app/providers/delivery_visit_provider.dart';
 import 'package:bts_delivery_app/providers/field_draft_providers.dart';
@@ -20,6 +23,7 @@ import 'package:bts_delivery_app/repositories/classroom_edit.dart';
 import 'package:bts_delivery_app/repositories/schools_repository.dart';
 import 'package:bts_delivery_app/services/delivery_visit_access.dart';
 import 'package:bts_delivery_app/screens/forms/classroom_detail_screen.dart';
+import 'package:bts_delivery_app/screens/main/school_hub_screen.dart';
 import 'package:bts_delivery_app/services/offline/connectivity_service.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
 import 'package:bts_delivery_app/services/offline/field_draft_store.dart';
@@ -29,6 +33,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 void main() {
   testWidgets('stale visit readiness cannot bypass connectivity or assignment',
@@ -172,11 +177,12 @@ void main() {
     Future<void> openRoom(DeliveryVisit visit) async {
       router.go('/home');
       await tester.pumpAndSettle();
-      await tester.tap(
-        find
-            .widgetWithText(FilledButton, 'Open school')
-            .at(visit.deliveryId == 'first' ? 0 : 1),
-      );
+      final openSchool = find
+          .widgetWithText(FilledButton, 'Open school')
+          .at(visit.deliveryId == 'first' ? 0 : 1);
+      await tester.ensureVisible(openSchool);
+      await tester.pumpAndSettle();
+      await tester.tap(openSchool);
       await tester.pumpAndSettle();
       expect(
           find.text('Classroom records ready on this device'), findsOneWidget);
@@ -231,6 +237,132 @@ void main() {
     expect(find.text('Year 1'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+      'visit tabs and note jump work on a narrow screen with large text',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 560);
+    tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    const schoolName = 'Example Primary School and Early Learning Centre';
+    const savedAddress = '42 Example Street, Melbourne';
+    const noteText = 'Check with the office before leaving the student packs.';
+    final school = _VisitSchools(
+      schoolName: schoolName,
+      schoolAddress: savedAddress,
+      notes: [Note(id: 'note', content: noteText, createdAt: DateTime(2025))],
+    );
+    addTearDown(school.dispose);
+    const visit = DeliveryVisit(deliveryId: 'first', schoolId: 'school');
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          currentStaffProvider.overrideWith((_) => Stream.value(_staff)),
+          authStateProvider.overrideWith((_) => Stream.value(_FieldUser())),
+          activeDeliveryVisitProvider.overrideWithValue(visit),
+          deliveryVisitReadinessProvider.overrideWith(
+            (_, __) async => (
+              uid: 'field-owner',
+              status: DeliveryVisitReadiness.ready,
+            ),
+          ),
+          activeChecklistItemsProvider.overrideWith(
+            (_) => Stream.value(const []),
+          ),
+          baseSchoolsRepositoryProvider.overrideWithValue(school),
+          visitSchoolsRepositoryFactoryProvider
+              .overrideWithValue((_) => school),
+          offlineMediaOwnerProvider.overrideWith((_, __) => null),
+          connectivityStatusProvider.overrideWith(
+            (_) => Stream.value(ConnectivityStatus.offline),
+          ),
+          evidenceUploadsProvider.overrideWith(
+            (_) => Stream.value(
+              const EvidenceUploadStatus(
+                items: [],
+                activeId: null,
+                legacyReviewCount: 0,
+                localError: false,
+              ),
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: const SchoolHubScreen(
+            schoolId: 'school',
+            deliveryId: 'first',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Classroom records ready on this device'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('Year 1'),
+      find.byType(NestedScrollView),
+      const Offset(0, -120),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Year 1').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Sign-Off'));
+    await tester.pumpAndSettle();
+    expect(find.text('Expected pack total'), findsOneWidget);
+    expect(find.text('10 expected packs'), findsOneWidget);
+    final viewNotes = find.text('View notes');
+    for (var attempt = 0;
+        attempt < 12 && viewNotes.hitTestable().evaluate().isEmpty;
+        attempt++) {
+      await tester.drag(find.byType(NestedScrollView), const Offset(0, -160));
+      await tester.pumpAndSettle();
+    }
+    expect(viewNotes.hitTestable(), findsOneWidget);
+    await tester.tap(viewNotes);
+    await tester.pumpAndSettle();
+    expect(find.text(noteText).hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Info'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('School Information'));
+    await tester.pumpAndSettle();
+    expect(find.text('School Information').hitTestable(), findsOneWidget);
+
+    final openInMaps = find.text('Open in Maps');
+    for (var attempt = 0;
+        attempt < 12 && openInMaps.hitTestable().evaluate().isEmpty;
+        attempt++) {
+      await tester.drag(find.byType(NestedScrollView), const Offset(0, -160));
+      await tester.pumpAndSettle();
+    }
+    expect(openInMaps.hitTestable(), findsOneWidget);
+    final infoPage = find.byKey(const PageStorageKey('school-info'));
+    expect(
+      find.descendant(of: infoPage, matching: find.text(savedAddress)),
+      findsOneWidget,
+    );
+    expect(find.byType(GoogleMap), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Records'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('Year 1'),
+      find.byType(NestedScrollView),
+      const Offset(0, -120),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Year 1').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 final _staff = Staff(
@@ -274,14 +406,29 @@ class _FieldDrafts implements FieldDraftStore {
 }
 
 class _VisitSchools implements SchoolsRepository {
+  _VisitSchools({
+    this.schoolName = 'School',
+    this.schoolAddress,
+    this.notes = const [],
+  });
+
+  final String schoolName;
+  final String? schoolAddress;
+  final List<Note> notes;
   final _classroomChanges = StreamController<List<Classroom>>.broadcast();
   String? lastEditId;
   Classroom room =
       Classroom(id: 'room', name: 'Room A', createdAt: DateTime(2025));
 
   @override
-  Stream<List<School>> watchSchools({List<String>? schoolIds}) => Stream.value(
-      [School(id: 'school', name: 'School', createdAt: DateTime(2025))]);
+  Stream<List<School>> watchSchools({List<String>? schoolIds}) => Stream.value([
+        School(
+          id: 'school',
+          name: schoolName,
+          address: schoolAddress,
+          createdAt: DateTime(2025),
+        ),
+      ]);
 
   @override
   Stream<List<YearLevel>> watchYearLevels(String schoolId) => Stream.value(
@@ -321,6 +468,25 @@ class _VisitSchools implements SchoolsRepository {
     String yearLevelId,
     String classroomId,
   ) =>
+      Stream.value(notes);
+
+  @override
+  Stream<SignOff?> watchSignOff(String schoolId) => Stream.value(null);
+
+  @override
+  Stream<SignedEvidence?> watchSignedEvidence(
+    String schoolId,
+    String? deliveryId,
+  ) =>
+      Stream.value(null);
+
+  @override
+  Stream<List<Contact>> watchContacts(String schoolId) =>
+      Stream.value(const []);
+
+  @override
+  Stream<List<SchoolTimer>> watchTimerHistory(String schoolId,
+          {int limit = 20}) =>
       Stream.value(const []);
 
   @override

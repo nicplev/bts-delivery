@@ -9,6 +9,7 @@ import '../services/media/offline_media_cache.dart';
 import '../services/media/visit_media_inventory.dart';
 import '../services/offline/connectivity_service.dart';
 import 'offline_media_view.dart';
+import 'design/design.dart';
 
 class OfflineVisitMediaPanel extends ConsumerWidget {
   const OfflineVisitMediaPanel({
@@ -35,12 +36,20 @@ class OfflineVisitMediaPanel extends ConsumerWidget {
         : known
             ? 'Offline media · ${state!.ready}/${state.totalAvailable} saved'
             : 'Offline media';
+    final tone = mapChanged ? AppTone.yellow : AppTone.blue;
     return TextButton.icon(
+      style: TextButton.styleFrom(
+        foregroundColor: tone.ink,
+        backgroundColor: tone.tint,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: const StadiumBorder(),
+      ),
       icon: const Icon(Icons.download_outlined, size: 18),
       label: Text(label, textAlign: TextAlign.center),
       onPressed: () => showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
+        useSafeArea: true,
         isScrollControlled: true,
         builder: (_) => _VisitMediaSheet(
           visit: visit,
@@ -102,10 +111,10 @@ class _VisitMediaSheetState extends ConsumerState<_VisitMediaSheet> {
       child: SizedBox(
         height: MediaQuery.sizeOf(context).height * 0.65,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          padding: const EdgeInsets.fromLTRB(
+              AppTokens.gutter, 0, AppTokens.gutter, AppTokens.sectionGap),
           children: [
-            Text('Offline media',
-                style: Theme.of(context).textTheme.titleLarge),
+            const AppSectionHeading(title: 'Offline media'),
             const SizedBox(height: 8),
             if (!allowed)
               const Text('Offline media is unavailable to this account')
@@ -116,9 +125,14 @@ class _VisitMediaSheetState extends ConsumerState<_VisitMediaSheet> {
               else
                 Text(
                     '${state!.ready} of ${state.totalAvailable} files from the last check saved · $checked'),
-              if (mapChanged)
-                const Text(
-                    'The school map changed since the last media check.'),
+              if (mapChanged) ...[
+                const SizedBox(height: 8),
+                const AppStatusPill(
+                  label: 'The school map changed since the last media check.',
+                  icon: Icons.info_outline,
+                  tone: AppTone.yellow,
+                ),
+              ],
               OfflineEarlierMapButton(
                   visit: widget.visit, currentMap: currentMap),
               if ((inventory?.unavailableCount ?? 0) > 0)
@@ -131,8 +145,14 @@ class _VisitMediaSheetState extends ConsumerState<_VisitMediaSheet> {
                     'A download could not stop. Close and reopen the app if it does not finish.'),
               if (state?.progress != null)
                 LinearProgressIndicator(value: state!.progress),
-              if ((state?.failed ?? 0) > 0)
-                Text('${state!.failed} files need a new download'),
+              if ((state?.failed ?? 0) > 0) ...[
+                const SizedBox(height: 8),
+                AppStatusPill(
+                  label: '${state!.failed} files need a new download',
+                  icon: Icons.error_outline,
+                  tone: AppTone.pink,
+                ),
+              ],
               if (state?.localError == true || value?.hasError == true)
                 const Text('Could not read the offline media cache'),
               if (_error != null) Text(_error!),

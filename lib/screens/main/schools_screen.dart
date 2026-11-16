@@ -6,6 +6,8 @@ import '../../providers/auth_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../models/school.dart';
 import '../../app/theme/brand_colors.dart';
+import '../../widgets/delivery_day_list.dart';
+import '../../widgets/design/design.dart';
 
 class SchoolsScreen extends ConsumerStatefulWidget {
   const SchoolsScreen({super.key});
@@ -87,45 +89,32 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
       ),
       body: currentStaffAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => const Center(child: CircularProgressIndicator()),
+        error: (_, __) => Center(
+          child: DeliveryMessage(
+            icon: Icons.error_outline,
+            title: 'Couldn’t load your staff account',
+            action: TextButton(
+              onPressed: () => ref.invalidate(currentStaffProvider),
+              child: const Text('Retry'),
+            ),
+          ),
+        ),
         data: (staff) {
-          // If user is not linked to staff and not an admin, show placeholder
           if (staff == null && !isAdmin) {
             return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+              child: DeliveryMessage(
+                icon: Icons.link_off,
+                title: 'Account not linked',
+                description: 'Link your staff account to see your schools.',
+                action: Wrap(
+                  spacing: 8,
+                  alignment: WrapAlignment.center,
                   children: [
-                    Icon(
-                      Icons.link_off,
-                      size: 64,
-                      color: Colors.grey[400],
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Account Not Linked',
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Your account needs to be linked to a staff member to access schools.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
                     FilledButton.icon(
                       onPressed: () => context.go('/staff-link'),
                       icon: const Icon(Icons.link),
                       label: const Text('Link Account'),
                     ),
-                    const SizedBox(height: 12),
                     TextButton(
                       onPressed: () => context.go('/profile'),
                       child: const Text('Go to Profile'),
@@ -136,221 +125,141 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
             );
           }
 
-          // User is linked or is admin, show schools
           return schoolsAsync.when(
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error, size: 48, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text('Error loading schools: $error'),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () => ref.invalidate(schoolsProvider),
-                    child: const Text('Retry'),
-                  ),
-                ],
+            error: (_, __) => Center(
+              child: DeliveryMessage(
+                icon: Icons.error_outline,
+                title: 'Couldn’t load schools',
+                action: TextButton(
+                  onPressed: () => ref.invalidate(schoolsProvider),
+                  child: const Text('Retry'),
+                ),
               ),
             ),
             data: (schools) {
               if (schools.isEmpty) {
-                // Different messages based on role
-                if (isAdmin) {
-                  return const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.school_outlined,
-                            size: 48, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text('No schools found'),
-                        SizedBox(height: 8),
-                        Text(
-                          'Tap the + button to add your first school',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  );
-                } else if (staff?.hasManagerAccess ?? false) {
-                  return const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.school_outlined,
-                            size: 48, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text('No schools found'),
-                        SizedBox(height: 8),
-                        Text(
-                          'Contact an admin to add schools',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  );
-                } else {
-                  // Regular staff with no assigned schools
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.assignment_outlined,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 24),
-                          Text(
-                            'No Schools Assigned',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall
-                                ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'You don\'t have any schools assigned to you yet. Contact your manager or admin to get assigned to schools.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          TextButton.icon(
+                final canBrowseAll =
+                    isAdmin || (staff?.hasManagerAccess ?? false);
+                return Center(
+                  child: DeliveryMessage(
+                    icon: Icons.school_outlined,
+                    title: canBrowseAll
+                        ? 'No schools found'
+                        : 'No schools assigned',
+                    description: isAdmin
+                        ? 'Use Add School to create the first school.'
+                        : canBrowseAll
+                            ? 'Contact an administrator to add schools.'
+                            : 'Ask your manager or administrator to assign a school.',
+                    action: canBrowseAll
+                        ? null
+                        : TextButton(
                             onPressed: () => context.go('/profile'),
-                            icon: const Icon(Icons.person),
-                            label: const Text('View Profile'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
-              }
-
-              // Filter schools based on search query
-              final filteredSchools = _filterSchools(schools);
-              final showSearchBar =
-                  schools.length > 5; // Show search if more than 5 schools
-
-              return Column(
-                children: [
-                  // Search bar
-                  if (showSearchBar)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: 'Search schools by name or address...',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () {
-                                    setState(() {
-                                      _searchController.clear();
-                                      _searchQuery = '';
-                                    });
-                                  },
-                                )
-                              : null,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                        ),
-                        onChanged: (value) {
-                          setState(() {
-                            _searchQuery = value;
-                          });
-                        },
-                      ),
-                    ),
-
-                  // Results count
-                  if (showSearchBar && _searchQuery.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      child: Row(
-                        children: [
-                          Text(
-                            '${filteredSchools.length} of ${schools.length} schools',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // School list or no results message
-                  Expanded(
-                    child: filteredSchools.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.search_off,
-                                    size: 64, color: Colors.grey[400]),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'No schools found',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Try a different search term',
-                                  style: TextStyle(color: Colors.grey[600]),
-                                ),
-                                const SizedBox(height: 16),
-                                OutlinedButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      _searchController.clear();
-                                      _searchQuery = '';
-                                    });
-                                  },
-                                  icon: const Icon(Icons.clear),
-                                  label: const Text('Clear Search'),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                            itemCount: filteredSchools.length,
-                            itemBuilder: (context, index) {
-                              final school = filteredSchools[index];
-                              return _SchoolCard(
-                                school: school,
-                                searchQuery: _searchQuery,
-                              );
-                            },
+                            child: const Text('View Profile'),
                           ),
                   ),
-                ],
-              );
+                );
+              }
+              return _buildDirectory(schools);
             },
           );
         },
+      ),
+    );
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _searchController.clear();
+      _searchQuery = '';
+    });
+  }
+
+  Widget _buildDirectory(List<School> schools) {
+    final results = _filterSchools(schools);
+    final showSearch = schools.length > 5;
+    final count = _searchQuery.isNotEmpty
+        ? '${results.length} of ${schools.length} schools'
+        : '${schools.length} ${schools.length == 1 ? 'school' : 'schools'}';
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 700),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showSearch)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTokens.gutter,
+                  8,
+                  AppTokens.gutter,
+                  12,
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search by name or address',
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            tooltip: 'Clear search',
+                            icon: const Icon(Icons.close_rounded),
+                            onPressed: _clearSearch,
+                          )
+                        : null,
+                    fillColor: AppTokens.surface,
+                  ),
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTokens.gutter,
+                8,
+                AppTokens.gutter,
+                12,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AppStatusPill(
+                  label: count,
+                  icon: Icons.school_outlined,
+                  tone: AppTone.green,
+                ),
+              ),
+            ),
+            Expanded(
+              child: results.isEmpty
+                  ? Center(
+                      child: DeliveryMessage(
+                        icon: Icons.search_off_rounded,
+                        title: 'No schools found',
+                        description: 'Try a different search term.',
+                        action: TextButton(
+                          onPressed: _clearSearch,
+                          child: const Text('Clear Search'),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppTokens.gutter,
+                        2,
+                        AppTokens.gutter,
+                        16,
+                      ),
+                      itemCount: results.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) => _SchoolCard(
+                        school: results[index],
+                        searchQuery: _searchQuery,
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -437,7 +346,7 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                         content: Text(school == null
                             ? 'School added successfully'
                             : 'School updated successfully'),
-                        backgroundColor: Colors.green,
+                        backgroundColor: BrandColors.greenDarker,
                       ),
                     );
                   }
@@ -447,7 +356,7 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(message),
-                        backgroundColor: Colors.red,
+                        backgroundColor: BrandColors.pinkDarker,
                       ),
                     );
                   }
@@ -472,153 +381,61 @@ class _SchoolCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isAdmin = ref.watch(isAdminProvider);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push('/schools/${school.id}'),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.school,
-                    color: searchQuery.isNotEmpty &&
-                            school.name
-                                .toLowerCase()
-                                .contains(searchQuery.toLowerCase())
-                        ? BrandColors.kakaBlue
-                        : Colors.blue,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      school.name,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                  ),
-                  if (isAdmin)
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 20),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 8,
-                      offset: const Offset(0, 8),
-                      onSelected: (value) {
-                        switch (value) {
-                          case 'edit':
-                            _showEditSchoolDialog(context, ref, school);
-                            break;
-                          case 'staff':
-                            context.push(
-                                '/schools/${school.id}/staff-allocation',
-                                extra: school);
-                            break;
-                          case 'delete':
-                            _showDeleteDialog(context, ref, school);
-                            break;
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: 'edit',
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.edit_outlined,
-                                size: 20,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Edit',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: 'staff',
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.people_outline,
-                                size: 20,
-                                color: Theme.of(context).colorScheme.secondary,
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Manage Staff',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          padding: EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.delete_outline,
-                                size: 20,
-                                color: Colors.red,
-                              ),
-                              SizedBox(width: 12),
-                              Text(
-                                'Delete',
-                                style: TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    const Icon(Icons.arrow_forward_ios,
-                        size: 16, color: Colors.grey),
+    final matchingName = searchQuery.isNotEmpty &&
+        school.name.toLowerCase().contains(searchQuery.toLowerCase());
+
+    return AppPanel(
+      onTap: () => context.push('/schools/${school.id}'),
+      child: Row(
+        children: [
+          AppIconTile(
+            icon: Icons.school_outlined,
+            tone: matchingName ? AppTone.blue : AppTone.green,
+            size: 46,
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(school.name,
+                    style: Theme.of(context).textTheme.titleMedium),
+                if (school.address?.isNotEmpty == true) ...[
+                  const SizedBox(height: 5),
+                  Text(school.address!,
+                      style: Theme.of(context).textTheme.bodySmall),
                 ],
-              ),
-              if (school.address?.isNotEmpty == true) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const SizedBox(width: 36), // Align with school name
-                    Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        school.address!,
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                    ),
-                  ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          if (isAdmin)
+            PopupMenuButton<String>(
+              tooltip: 'Manage school',
+              onSelected: (value) {
+                switch (value) {
+                  case 'edit':
+                    _showEditSchoolDialog(context, ref, school);
+                  case 'staff':
+                    context.push('/schools/${school.id}/staff-allocation',
+                        extra: school);
+                  case 'delete':
+                    _showDeleteDialog(context, ref, school);
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit')),
+                PopupMenuItem(value: 'staff', child: Text('Manage Staff')),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Delete',
+                      style: TextStyle(color: BrandColors.pinkDarker)),
                 ),
               ],
-            ],
-          ),
-        ),
+            )
+          else
+            const Icon(Icons.chevron_right_rounded, color: AppTokens.muted),
+        ],
       ),
     );
   }
@@ -693,7 +510,7 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('School updated successfully'),
-                        backgroundColor: Colors.green,
+                        backgroundColor: BrandColors.greenDarker,
                       ),
                     );
                   }
@@ -703,7 +520,7 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(message),
-                        backgroundColor: Colors.red,
+                        backgroundColor: BrandColors.pinkDarker,
                       ),
                     );
                   }
@@ -736,7 +553,9 @@ class _SchoolCard extends ConsumerWidget {
             const Text(
               'This action cannot be undone.',
               style: TextStyle(
-                  color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+                  color: BrandColors.pinkDarker,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -759,7 +578,7 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('School deleted successfully'),
-                        backgroundColor: Colors.green,
+                        backgroundColor: BrandColors.greenDarker,
                       ),
                     );
                   }
@@ -769,14 +588,17 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(message),
-                        backgroundColor: Colors.red,
+                        backgroundColor: BrandColors.pinkDarker,
                       ),
                     );
                   }
                 },
               );
             },
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: BrandColors.pinkDarker,
+              foregroundColor: AppTokens.surface,
+            ),
             child: const Text('Delete'),
           ),
         ],

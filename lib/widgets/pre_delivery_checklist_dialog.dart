@@ -7,6 +7,7 @@ import '../models/pre_delivery_completion.dart';
 import '../providers/pre_delivery_checklist_providers.dart';
 import '../services/offline/connectivity_service.dart';
 import 'field_draft_dialog.dart';
+import 'design/design.dart';
 
 /// Opens immediately and keeps the checklist responsive as data loads.
 Future<bool> showPreDeliveryChecklistDialog({
@@ -143,24 +144,34 @@ class _PreDeliveryChecklistDialogState
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(widget.delivery.schoolName),
+        AppSectionHeading(title: widget.delivery.schoolName),
         const SizedBox(height: 8),
-        for (final item in active)
-          CheckboxListTile(
-            onChanged: _saving.contains(item.id)
-                ? null
-                : (value) => _toggle(item, value ?? false),
-            value: done.contains(item.id),
-            title: Text(item.title),
-            subtitle: _buildItemSubtitle(item),
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
+        Semantics(
+          liveRegion: true,
+          child: AppStatusPill(
+            label:
+                '$completed of ${active.length} checked${offline ? ' on this device' : ''}',
+            icon: Icons.checklist_outlined,
+            tone: completed == active.length ? AppTone.green : AppTone.blue,
           ),
-        const SizedBox(height: 12),
-        LinearProgressIndicator(value: completed / active.length),
+        ),
         const SizedBox(height: 8),
-        Text(
-            '$completed of ${active.length} checked${offline ? ' on this device' : ''}'),
+        LinearProgressIndicator(value: completed / active.length),
+        const SizedBox(height: 12),
+        AppGroupedList(
+          children: [
+            for (final item in active)
+              CheckboxListTile(
+                onChanged: _saving.contains(item.id)
+                    ? null
+                    : (value) => _toggle(item, value ?? false),
+                value: done.contains(item.id),
+                title: Text(item.title),
+                subtitle: _buildItemSubtitle(item),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+          ],
+        ),
       ],
     );
   }

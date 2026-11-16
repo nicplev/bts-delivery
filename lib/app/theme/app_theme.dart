@@ -1,449 +1,346 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+
+import 'app_tokens.dart';
 import 'brand_colors.dart';
 
-/// Apple-inspired theme configuration for BTS Delivery App
 class AppTheme {
-  AppTheme._(); // Private constructor
+  AppTheme._();
 
-  // ========== TEXT THEME ==========
-
-  static const TextTheme textTheme = TextTheme(
-    // Display styles - Large headings
+  static const textTheme = TextTheme(
     displayLarge: TextStyle(
-      fontSize: 34,
-      fontWeight: FontWeight.bold,
-      letterSpacing: -0.5,
-      color: BrandColors.textPrimary,
-      height: 1.2,
-    ),
+        fontSize: 42,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -1.8,
+        height: 1.08,
+        color: AppTokens.ink),
     displayMedium: TextStyle(
-      fontSize: 28,
-      fontWeight: FontWeight.bold,
-      letterSpacing: -0.3,
-      color: BrandColors.textPrimary,
-      height: 1.25,
-    ),
+        fontSize: 34,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -1.3,
+        height: 1.12,
+        color: AppTokens.ink),
     displaySmall: TextStyle(
-      fontSize: 22,
-      fontWeight: FontWeight.bold,
-      letterSpacing: -0.2,
-      color: BrandColors.textPrimary,
-      height: 1.3,
-    ),
-
-    // Headline styles - Section headers
+        fontSize: 29,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -1.0,
+        height: 1.15,
+        color: AppTokens.ink),
     headlineLarge: TextStyle(
-      fontSize: 20,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.2,
-      color: BrandColors.textPrimary,
-      height: 1.3,
-    ),
+        fontSize: 26,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.8,
+        height: 1.20,
+        color: AppTokens.ink),
     headlineMedium: TextStyle(
-      fontSize: 18,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.2,
-      color: BrandColors.textPrimary,
-      height: 1.35,
-    ),
+        fontSize: 23,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.65,
+        height: 1.22,
+        color: AppTokens.ink),
     headlineSmall: TextStyle(
-      fontSize: 16,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.1,
-      color: BrandColors.textPrimary,
-      height: 1.4,
-    ),
-
-    // Title styles - Card titles
+        fontSize: 20,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.45,
+        height: 1.24,
+        color: AppTokens.ink),
     titleLarge: TextStyle(
-      fontSize: 17,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.4,
-      color: BrandColors.textPrimary,
-      height: 1.35,
-    ),
+        fontSize: 19,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.35,
+        height: 1.25,
+        color: AppTokens.ink),
     titleMedium: TextStyle(
-      fontSize: 15,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.2,
-      color: BrandColors.textPrimary,
-      height: 1.4,
-    ),
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.18,
+        height: 1.30,
+        color: AppTokens.ink),
     titleSmall: TextStyle(
-      fontSize: 13,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -0.1,
-      color: BrandColors.textPrimary,
-      height: 1.45,
-    ),
-
-    // Body styles - Regular text
-    bodyLarge: TextStyle(
-      fontSize: 17,
-      fontWeight: FontWeight.w400,
-      letterSpacing: -0.4,
-      color: BrandColors.textPrimary,
-      height: 1.35,
-    ),
-    bodyMedium: TextStyle(
-      fontSize: 15,
-      fontWeight: FontWeight.w400,
-      letterSpacing: -0.2,
-      color: BrandColors.textPrimary,
-      height: 1.4,
-    ),
-    bodySmall: TextStyle(
-      fontSize: 13,
-      fontWeight: FontWeight.w400,
-      letterSpacing: -0.1,
-      color: BrandColors.textSecondary,
-      height: 1.45,
-    ),
-
-    // Label styles - Small text, captions
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        height: 1.35,
+        color: AppTokens.ink),
+    bodyLarge: TextStyle(fontSize: 16, height: 1.40, color: AppTokens.ink),
+    bodyMedium: TextStyle(fontSize: 15, height: 1.40, color: AppTokens.ink),
+    bodySmall: TextStyle(fontSize: 13, height: 1.40, color: AppTokens.muted),
     labelLarge: TextStyle(
-      fontSize: 15,
-      fontWeight: FontWeight.w500,
-      letterSpacing: -0.2,
-      color: BrandColors.textPrimary,
-      height: 1.4,
-    ),
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        height: 1.30,
+        color: AppTokens.ink),
     labelMedium: TextStyle(
-      fontSize: 13,
-      fontWeight: FontWeight.w500,
-      letterSpacing: -0.1,
-      color: BrandColors.textSecondary,
-      height: 1.45,
-    ),
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        height: 1.28,
+        color: AppTokens.muted),
     labelSmall: TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w500,
-      letterSpacing: 0,
-      color: BrandColors.textTertiary,
-      height: 1.5,
-    ),
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.15,
+        height: 1.28,
+        color: AppTokens.muted),
   );
 
-  // ========== LIGHT THEME ==========
+  static final ThemeData lightTheme = _buildTheme();
 
-  static ThemeData get lightTheme {
+  static ThemeData _buildTheme() {
+    const buttonText = TextStyle(fontSize: 14, fontWeight: FontWeight.w700);
+    const buttonSize = Size(44, 46);
+    const pill = StadiumBorder();
+    const border = BorderSide(color: AppTokens.outline);
+    const cardShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(AppTokens.cardRadius)),
+      side: border,
+    );
+    const inputBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(AppTokens.controlRadius)),
+      borderSide: border,
+    );
+
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
-
-      // Color scheme
+      scaffoldBackgroundColor: AppTokens.canvas,
+      textTheme: textTheme,
       colorScheme: const ColorScheme.light(
         primary: BrandColors.kakaGreen,
-        onPrimary: BrandColors.white,
+        onPrimary: AppTokens.ink,
+        primaryContainer: BrandColors.greenLightest,
+        onPrimaryContainer: BrandColors.greenDarker,
         secondary: BrandColors.kakaBlue,
-        onSecondary: BrandColors.white,
+        onSecondary: AppTokens.ink,
+        secondaryContainer: BrandColors.blueLightest,
+        onSecondaryContainer: BrandColors.blueDarker,
         tertiary: BrandColors.kakaPink,
-        onTertiary: BrandColors.white,
-        error: BrandColors.kakaPink,
-        onError: BrandColors.white,
-        surface: BrandColors.surfacePrimary,
-        onSurface: BrandColors.textPrimary,
+        onTertiary: Colors.black,
+        tertiaryContainer: BrandColors.pinkLightest,
+        onTertiaryContainer: BrandColors.pinkDarker,
+        error: BrandColors.pinkDarker,
+        onError: Colors.white,
+        errorContainer: BrandColors.pinkLightest,
+        onErrorContainer: BrandColors.pinkDarker,
+        surface: AppTokens.surface,
+        onSurface: AppTokens.ink,
+        onSurfaceVariant: AppTokens.muted,
+        surfaceContainerLowest: AppTokens.surface,
+        surfaceContainerLow: AppTokens.canvas,
+        surfaceContainer: AppTokens.surfaceQuiet,
+        outline: AppTokens.muted,
+        outlineVariant: AppTokens.outline,
       ),
-
-      // Scaffold
-      scaffoldBackgroundColor: BrandColors.surfaceSecondary,
-
-      // App Bar theme (iOS-style)
       appBarTheme: const AppBarTheme(
+        backgroundColor: AppTokens.canvas,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: AppTokens.ink,
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: BrandColors.surfacePrimary,
-        foregroundColor: BrandColors.textPrimary,
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: AppTokens.gutter,
         titleTextStyle: TextStyle(
-          fontSize: 17,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.4,
-          color: BrandColors.textPrimary,
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.55,
+          color: AppTokens.ink,
         ),
-        iconTheme: IconThemeData(
-          color: BrandColors.kakaBlue, // Blue for app bar icons
-          size: 24,
-        ),
+        iconTheme: IconThemeData(color: AppTokens.ink, size: 22),
+        actionsIconTheme: IconThemeData(color: AppTokens.ink, size: 21),
       ),
-
-      // Card theme (iOS-style rounded cards)
       cardTheme: const CardThemeData(
         elevation: 0,
-        color: BrandColors.cardBackground,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
+        color: AppTokens.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: cardShape,
         margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       ),
-
-      // Button themes - Using variety of KAKA colors
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
+          foregroundColor: AppTokens.ink,
+          backgroundColor: BrandColors.kakaBlue,
+          minimumSize: buttonSize,
           elevation: 0,
-          backgroundColor: BrandColors.kakaBlue, // Blue for primary actions
-          foregroundColor: BrandColors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.4,
-          ),
+          shape: pill,
+          padding: const EdgeInsets.symmetric(horizontal: 19, vertical: 10),
+          textStyle: buttonText,
         ),
       ),
-
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          elevation: 0,
-          backgroundColor: BrandColors.kakaGreen, // Green for filled buttons
-          foregroundColor: BrandColors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.4,
-          ),
+          minimumSize: buttonSize,
+          shape: pill,
+          padding: const EdgeInsets.symmetric(horizontal: 19, vertical: 10),
+          textStyle: buttonText,
         ),
       ),
-
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          elevation: 0,
-          foregroundColor: BrandColors.kakaPink, // Pink for outlined buttons
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          side: const BorderSide(
-            color: BrandColors.kakaPink,
-            width: 1.5,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.4,
-          ),
+          foregroundColor: AppTokens.ink,
+          minimumSize: buttonSize,
+          side: border,
+          shape: pill,
+          padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 10),
+          textStyle: buttonText,
         ),
       ),
-
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: BrandColors.kakaBlue, // Blue for text buttons
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          textStyle: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w400,
-            letterSpacing: -0.4,
-          ),
+          foregroundColor: BrandColors.blueDarker,
+          minimumSize: buttonSize,
+          shape: pill,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          textStyle: buttonText,
         ),
       ),
-
-      // Icon button theme
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          foregroundColor: BrandColors.kakaBlue, // Blue for icon buttons
-          padding: const EdgeInsets.all(12),
+          foregroundColor: AppTokens.ink,
+          minimumSize: const Size.square(44),
         ),
       ),
-
-      // Input decoration theme (iOS-style inputs)
-      inputDecorationTheme: InputDecorationTheme(
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          minimumSize: const WidgetStatePropertyAll(Size(44, 44)),
+          shape: const WidgetStatePropertyAll(pill),
+          side: const WidgetStatePropertyAll(border),
+          textStyle: const WidgetStatePropertyAll(buttonText),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? BrandColors.blueLightest
+                : AppTokens.surface,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? BrandColors.blueDarker
+                : AppTokens.muted,
+          ),
+        ),
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
         filled: true,
-        fillColor: BrandColors.surfaceSecondary,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
+        fillColor: AppTokens.surfaceQuiet,
+        border: inputBorder,
+        enabledBorder: inputBorder,
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(
-            color: BrandColors.kakaBlue, // Blue for focused inputs
-            width: 2,
-          ),
+          borderRadius:
+              BorderRadius.all(Radius.circular(AppTokens.controlRadius)),
+          borderSide: BorderSide(color: BrandColors.blueDark, width: 1.5),
         ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(
-            color: BrandColors.kakaPink,
-            width: 1.5,
-          ),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
-        ),
-        labelStyle: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w400,
-          letterSpacing: -0.2,
-          color: BrandColors.textTertiary,
-        ),
-        hintStyle: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w400,
-          letterSpacing: -0.2,
-          color: BrandColors.textDisabled,
-        ),
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        labelStyle: TextStyle(color: AppTokens.muted),
+        hintStyle: TextStyle(color: AppTokens.muted),
       ),
-
-      // Divider theme
       dividerTheme: const DividerThemeData(
-        color: BrandColors.divider,
-        thickness: 0.5,
-        space: 1,
-      ),
-
-      // Navigation bar theme (bottom nav) - Colors handled per-item in app_shell.dart
+          color: AppTokens.outline, thickness: 1, space: 1),
       navigationBarTheme: NavigationBarThemeData(
-        height: 65,
+        height: 64,
         elevation: 0,
-        backgroundColor: BrandColors.surfacePrimary,
-        indicatorColor: Colors.transparent, // No background indicator - icons carry the color
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0,
-              color: BrandColors.textPrimary, // Label color handled per-item
-            );
-          }
-          return const TextStyle(
+        backgroundColor: AppTokens.surface,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: BrandColors.blueLightest,
+        indicatorShape: pill,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
             fontSize: 11,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0,
-            color: BrandColors.textTertiary,
-          );
-        }),
-        iconTheme: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(
-              size: 26,
-            );
-          }
-          return const IconThemeData(
-            size: 24,
-          );
-        }),
-      ),
-
-      // Snackbar theme
-      snackBarTheme: SnackBarThemeData(
-        backgroundColor: BrandColors.gray2,
-        contentTextStyle: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w400,
-          letterSpacing: -0.2,
-          color: BrandColors.white,
+            height: 1.1,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w700
+                : FontWeight.w500,
+            color: states.contains(WidgetState.selected)
+                ? AppTokens.ink
+                : AppTokens.muted,
+          ),
         ),
+        iconTheme: const WidgetStatePropertyAll(IconThemeData(size: 22)),
+      ),
+      tabBarTheme: const TabBarThemeData(
+        dividerColor: AppTokens.outline,
+        labelColor: BrandColors.blueDarker,
+        unselectedLabelColor: AppTokens.muted,
+        indicatorColor: BrandColors.kakaBlue,
+        labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        unselectedLabelStyle:
+            TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      ),
+      snackBarTheme: const SnackBarThemeData(
+        backgroundColor: AppTokens.ink,
+        contentTextStyle: TextStyle(fontSize: 14, color: Colors.white),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius:
+              BorderRadius.all(Radius.circular(AppTokens.controlRadius)),
         ),
         behavior: SnackBarBehavior.floating,
         elevation: 0,
       ),
-
-      // Dialog theme
       dialogTheme: const DialogThemeData(
         elevation: 0,
-        backgroundColor: BrandColors.surfacePrimary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(14)),
-        ),
+        backgroundColor: AppTokens.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: cardShape,
         titleTextStyle: TextStyle(
-          fontSize: 17,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.4,
-          color: BrandColors.textPrimary,
+          fontSize: 21,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.45,
+          color: AppTokens.ink,
         ),
-        contentTextStyle: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w400,
-          letterSpacing: -0.2,
-          color: BrandColors.textSecondary,
+        contentTextStyle:
+            TextStyle(fontSize: 15, color: AppTokens.ink, height: 1.4),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: AppTokens.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
+        dragHandleColor: AppTokens.outline,
+      ),
+      popupMenuTheme: const PopupMenuThemeData(
+        color: AppTokens.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 3,
+        shape: RoundedRectangleBorder(
+          borderRadius:
+              BorderRadius.all(Radius.circular(AppTokens.controlRadius)),
         ),
       ),
-
-      // List tile theme
       listTileTheme: const ListTileThemeData(
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 5),
         minLeadingWidth: 40,
-        iconColor: BrandColors.textSecondary,
-        textColor: BrandColors.textPrimary,
+        iconColor: AppTokens.muted,
+        textColor: AppTokens.ink,
       ),
-
-      // Switch theme (iOS-style)
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.all(BrandColors.white),
-        trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return BrandColors.kakaGreen;
-          }
-          return BrandColors.gray7;
-        }),
+        thumbColor: const WidgetStatePropertyAll(Colors.white),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? BrandColors.greenDarker
+              : AppTokens.outline,
+        ),
       ),
-
-      // Floating Action Button - Yellow accent
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: BrandColors.kakaBlue,
-        foregroundColor: BrandColors.gray1,
+        foregroundColor: AppTokens.ink,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16)),
+          borderRadius: BorderRadius.all(Radius.circular(18)),
         ),
       ),
-
-      // Chip theme - Using variety of colors
-      chipTheme: ChipThemeData(
-        backgroundColor: BrandColors.getSubtleBackground(BrandColors.kakaBlue),
-        deleteIconColor: BrandColors.kakaBlue,
-        selectedColor: BrandColors.kakaBlue,
-        secondarySelectedColor: BrandColors.kakaPink,
-        labelStyle: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          letterSpacing: -0.2,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
+      chipTheme: const ChipThemeData(
+        backgroundColor: AppTokens.surfaceQuiet,
+        selectedColor: BrandColors.blueLightest,
+        side: BorderSide.none,
+        shape: pill,
       ),
-
-      // Badge theme - Yellow for notifications
       badgeTheme: const BadgeThemeData(
         backgroundColor: BrandColors.kakaBlue,
-        textColor: BrandColors.gray1,
-        textStyle: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
+        textColor: AppTokens.ink,
       ),
-
-      // Text theme
-      textTheme: textTheme,
-
-      // iOS-specific
       cupertinoOverrideTheme: const CupertinoThemeData(
-        primaryColor: BrandColors.kakaGreen,
-        barBackgroundColor: BrandColors.surfacePrimary,
-        scaffoldBackgroundColor: BrandColors.surfaceSecondary,
+        primaryColor: BrandColors.blueDarker,
+        barBackgroundColor: AppTokens.canvas,
+        scaffoldBackgroundColor: AppTokens.canvas,
       ),
     );
   }
 
-  // ========== DARK THEME ==========
-  // For now, using the same light theme - dark theme can be customized later
   static ThemeData get darkTheme => lightTheme;
 }

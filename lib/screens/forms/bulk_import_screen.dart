@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'dart:io';
 import '../../services/csv_import_service.dart';
 import '../../providers/repository_providers.dart';
-import '../../app/theme/brand_colors.dart';
+import '../../widgets/design/design.dart';
 import '../../utils/notification_utils.dart';
 
 class BulkImportScreen extends ConsumerStatefulWidget {
@@ -47,8 +47,12 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
     }
 
     // Normalize line endings
-    final normalizedContent = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-    final lines = normalizedContent.split('\n').where((line) => line.trim().isNotEmpty).toList();
+    final normalizedContent =
+        content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final lines = normalizedContent
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty)
+        .toList();
 
     if (lines.isEmpty) {
       errors.add('No data found');
@@ -63,7 +67,8 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
     final headers = lines[0].split(',').map((e) => e.trim()).toList();
 
     if (headers.length < 3) {
-      errors.add('Header must have at least 3 columns: Year Level, Classroom, Packs');
+      errors.add(
+          'Header must have at least 3 columns: Year Level, Classroom, Packs');
     } else {
       // Validate header names
       final firstHeader = headers[0].toLowerCase().replaceAll(' ', '');
@@ -88,7 +93,8 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
       }
 
       if (cells.length < 3) {
-        errors.add('Row ${i + 1}: Missing required columns (need Year Level, Classroom, Packs)');
+        errors.add(
+            'Row ${i + 1}: Missing required columns (need Year Level, Classroom, Packs)');
         continue;
       }
 
@@ -107,11 +113,14 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
       // Check numeric columns after Packs
       for (int j = 3; j < cells.length && j < headers.length; j++) {
         if (cells[j].isNotEmpty && int.tryParse(cells[j]) == null) {
-          errors.add('Row ${i + 1}: "${headers[j]}" must be a number (got "${cells[j]}")');
+          errors.add(
+              'Row ${i + 1}: "${headers[j]}" must be a number (got "${cells[j]}")');
         }
       }
 
-      if (cells[0].isNotEmpty && cells[1].isNotEmpty && int.tryParse(cells[2]) != null) {
+      if (cells[0].isNotEmpty &&
+          cells[1].isNotEmpty &&
+          int.tryParse(cells[2]) != null) {
         validRows++;
       }
     }
@@ -245,90 +254,54 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
         ),
         title: const Text('Bulk Import Classrooms'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppTokens.gutter,
+            10,
+            AppTokens.gutter,
+            AppTokens.sectionGap,
+          ),
           children: [
-            // Info Card
-            Card(
-              color: BrandColors.kakaBlue.withValues(alpha: 0.1),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.info_outline,
-                            color: BrandColors.kakaBlue),
-                        const SizedBox(width: 8),
-                        Text(
-                          'How It Works',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      '1. Download or paste the CSV template\n'
-                      '2. Edit the data with your classroom information\n'
-                      '3. Paste the CSV data below\n'
-                      '4. Click Import to add the data',
-                      style: TextStyle(height: 1.5),
-                    ),
-                  ],
-                ),
+            AppPanel(
+              tone: AppTone.blue,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AppSectionHeading(title: 'Classroom template'),
+                  const SizedBox(height: 8),
+                  const Text(
+                      'Add your classroom details to the CSV template, then paste it here.'),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _downloadTemplate,
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('Download Template'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _pasteTemplate,
+                        icon: const Icon(Icons.content_paste_outlined),
+                        label: const Text('Paste Template'),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-
-            const SizedBox(height: 24),
-
-            // Template Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _downloadTemplate,
-                    icon: const Icon(Icons.download),
-                    label: const Text('Download Template'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pasteTemplate,
-                    icon: const Icon(Icons.content_paste),
-                    label: const Text('Paste Template'),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // CSV Input Field
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'CSV Data',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                        if (_csvController.text.isNotEmpty)
-                          TextButton.icon(
+            const SizedBox(height: 12),
+            AppPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AppSectionHeading(
+                    title: 'CSV Data',
+                    trailing: _csvController.text.isNotEmpty
+                        ? TextButton(
                             onPressed: () {
                               _csvController.clear();
                               setState(() {
@@ -338,269 +311,118 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
                                 _isValidCSV = false;
                               });
                             },
-                            icon: const Icon(Icons.clear, size: 18),
-                            label: const Text('Clear'),
-                          ),
-                      ],
-                    ),
+                            child: const Text('Clear'),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _csvController,
+                    onChanged: _validateCSV,
+                    minLines: 6,
+                    maxLines: 10,
+                    decoration:
+                        const InputDecoration(hintText: 'Paste CSV data'),
+                    style:
+                        const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                  ),
+                  if (_csvController.text.isNotEmpty &&
+                      _validationErrors.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: _csvController,
-                      onChanged: (value) {
-                        _validateCSV(value);
-                      },
-                      maxLines: 15,
-                      decoration: const InputDecoration(
-                        hintText: 'Paste your CSV data here...\n\n'
-                            'Year Level,Classroom,Packs,Year 1 Students,Headphones\n'
-                            'Year 1,Year 1A,26,26,26\n'
-                            'Year 1,Year 1/2A,24,10,24  (composite class)',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.all(12),
+                    const AppStatusPill(
+                      label: 'Format issues detected',
+                      icon: Icons.warning_amber_rounded,
+                      tone: AppTone.yellow,
+                    ),
+                    for (final error in _validationErrors)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(error),
                       ),
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
+                  ] else if (_csvController.text.isNotEmpty && _isValidCSV) ...[
+                    const SizedBox(height: 12),
+                    const AppStatusPill(
+                      label: 'CSV format looks good!',
+                      icon: Icons.check_circle_outline,
+                      tone: AppTone.green,
                     ),
                   ],
-                ),
+                ],
               ),
             ),
-
-            // Validation Status
-            if (_csvController.text.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              if (_validationErrors.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.warning_amber_rounded,
-                              color: Colors.orange, size: 20),
-                          SizedBox(width: 8),
-                          Text(
-                            'Format Issues Detected',
-                            style: TextStyle(
-                              color: Colors.orange,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      ...(_validationErrors.map((error) => Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('• ',
-                                    style: TextStyle(color: Colors.orange)),
-                                Expanded(
-                                  child: Text(
-                                    error,
-                                    style: const TextStyle(
-                                      color: Colors.orange,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ))),
-                    ],
-                  ),
-                )
-              else if (_isValidCSV)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.green, size: 20),
-                      SizedBox(width: 8),
-                      Text(
-                        'CSV format looks good!',
-                        style: TextStyle(
-                          color: Colors.green,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-
-            const SizedBox(height: 24),
-
-            // Import Button
-            ElevatedButton.icon(
-              onPressed: _isValidCSV && !_isLoading
-                  ? _importData
-                  : null,
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _isValidCSV && !_isLoading ? _importData : null,
               icon: _isLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.cloud_upload),
+                  : const Icon(Icons.upload_outlined),
               label: Text(_isLoading ? 'Importing...' : 'Import Data'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.all(16),
-                backgroundColor: BrandColors.kakaBlue,
-                foregroundColor: Colors.white,
-              ),
             ),
-
-            const SizedBox(height: 24),
-
-            // Error Message
-            if (_errorMessage != null)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.error_outline, color: Colors.red),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Success Message
-            if (_successMessage != null)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green),
-                ),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 12),
+              AppPanel(tone: AppTone.pink, child: Text(_errorMessage!)),
+            ],
+            if (_successMessage != null) ...[
+              const SizedBox(height: 12),
+              AppPanel(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.check_circle, color: Colors.green),
-                        SizedBox(width: 12),
-                        Text(
-                          'Success!',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
+                    const AppStatusPill(
+                      label: 'Import successful',
+                      icon: Icons.check_circle_outline,
+                      tone: AppTone.green,
                     ),
+                    const SizedBox(height: 10),
+                    Text(_successMessage!),
                     const SizedBox(height: 12),
-                    Text(
-                      _successMessage!,
-                      style: const TextStyle(
-                        color: Colors.green,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        // Navigate back to school hub
-                        context.go('/schools/${widget.schoolId}');
-                      },
+                    FilledButton.icon(
+                      onPressed: () =>
+                          context.go('/schools/${widget.schoolId}'),
                       icon: const Icon(Icons.check),
                       label: const Text('Done'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
                     ),
                   ],
                 ),
               ),
-
-            const SizedBox(height: 24),
-
-            // CSV Format Example
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'CSV Format Example',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+            ],
+            const SizedBox(height: 12),
+            AppPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const AppSectionHeading(title: 'CSV Format Example'),
+                  const SizedBox(height: 10),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppTokens.surfaceQuiet,
+                      borderRadius:
+                          BorderRadius.circular(AppTokens.controlRadius),
                     ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.grey.withValues(alpha: 0.3)),
-                      ),
-                      child: const Text(
+                    child: const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SelectableText(
                         'Year Level,Classroom,Packs,Year 1 Students,Year 2 Students,Headphones,Tissues\n'
                         'Prep,Prep A,25,,,25,1\n'
                         'Year 1,Year 1A,26,26,,26,1\n'
                         'Year 1,Year 1/2A,24,10,14,24,1\n'
                         'Year 2,Year 2A,27,,27,27,1',
-                        style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                        ),
+                        style: TextStyle(fontFamily: 'monospace', fontSize: 13),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Notes:\n'
-                      '• First row must be the header\n'
-                      '• Year Level and Classroom are required\n'
-                      '• Packs must be a number\n'
-                      '• Additional columns are treated as consumables\n'
-                      '• Use 0 or leave empty for items you don\'t need\n\n'
-                      'Composite Classes:\n'
-                      '• Add columns ending in "Students" for any year level\n'
-                      '• Examples: "Year 3 Students", "Year 5 Students", "Prep Students"\n'
-                      '• Works for Year 1/2, Year 3/4, Year 5/6, or any combination',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Use the first row for column headers. Year Level and Classroom are required. '
+                    'Packs must be a number. Extra columns represent consumables. Use zero or leave a consumable blank when it is not needed.',
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                      'For composite classes, add a column ending in “Students” for each year level, such as “Year 3 Students”.'),
+                ],
               ),
             ),
           ],

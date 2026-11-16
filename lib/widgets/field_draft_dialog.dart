@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'design/design.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -189,7 +190,10 @@ class _FieldDraftDialogState extends ConsumerState<_FieldDraftDialog> {
               else if (_loading)
                 const Center(child: CircularProgressIndicator())
               else if (_store != null) ...[
-                if (widget.description != null) Text(widget.description!),
+                if (widget.description != null) ...[
+                  Text(widget.description!),
+                  const SizedBox(height: 12),
+                ],
                 for (final input in widget.inputs)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -210,13 +214,14 @@ class _FieldDraftDialogState extends ConsumerState<_FieldDraftDialog> {
               if (signedIn && status != null)
                 Semantics(
                   liveRegion: true,
-                  child: Text(
-                    status,
-                    style: TextStyle(
-                      color: _draftError != null || _submitError != null
-                          ? Theme.of(context).colorScheme.error
-                          : null,
-                    ),
+                  child: AppStatusPill(
+                    label: status,
+                    icon: _draftError != null || _submitError != null
+                        ? Icons.info_outline
+                        : Icons.edit_note_outlined,
+                    tone: _draftError != null || _submitError != null
+                        ? AppTone.pink
+                        : AppTone.blue,
                   ),
                 ),
             ],

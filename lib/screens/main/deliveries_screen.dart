@@ -9,6 +9,7 @@ import '../../services/offline/connectivity_service.dart';
 import '../../widgets/connectivity_indicator.dart';
 import '../../widgets/deliveries_calendar_view.dart';
 import '../../widgets/delivery_day_list.dart';
+import '../../widgets/design/design.dart';
 import '../../widgets/calendar_subscription_dialog.dart';
 
 class DeliveriesScreen extends ConsumerStatefulWidget {
@@ -44,6 +45,8 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
     final canAssignDeliveries = ref.watch(canAssignDeliveriesProvider);
     final showAllDeliveries = ref.watch(allDeliveriesProvider);
     final connectivityAsync = ref.watch(connectivityStatusProvider);
+    final compactSegments = MediaQuery.sizeOf(context).width <= 360 ||
+        MediaQuery.textScalerOf(context).scale(14) > 18;
 
     return Scaffold(
       appBar: AppBar(
@@ -62,7 +65,7 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
                       )
                     : Icon(
                         isOffline ? Icons.wifi_off : Icons.refresh,
-                        color: isOffline ? Colors.orange : null,
+                        color: isOffline ? AppTone.yellow.ink : null,
                       ),
                 tooltip: isOffline ? 'Reconnect to WiFi' : 'Refresh connection',
                 onPressed: _isRefreshing ? null : () => _refreshConnectivity(),
@@ -119,25 +122,38 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
         children: [
           const ConnectivityIndicator(),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: false,
-                  icon: Icon(Icons.today_outlined),
-                  label: Text('Today'),
-                ),
-                ButtonSegment(
-                  value: true,
-                  icon: Icon(Icons.calendar_month_outlined),
-                  label: Text('Calendar'),
-                ),
-              ],
-              selected: {_showCalendar},
-              showSelectedIcon: false,
-              onSelectionChanged: (selection) {
-                setState(() => _showCalendar = selection.single);
-              },
+            padding: const EdgeInsets.fromLTRB(
+              AppTokens.gutter,
+              6,
+              AppTokens.gutter,
+              4,
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 660),
+              child: SegmentedButton<bool>(
+                expandedInsets: EdgeInsets.zero,
+                segments: [
+                  ButtonSegment(
+                    value: false,
+                    icon: compactSegments
+                        ? null
+                        : const Icon(Icons.today_outlined),
+                    label: const Text('Today', textAlign: TextAlign.center),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    icon: compactSegments
+                        ? null
+                        : const Icon(Icons.calendar_month_outlined),
+                    label: const Text('Calendar', textAlign: TextAlign.center),
+                  ),
+                ],
+                selected: {_showCalendar},
+                showSelectedIcon: false,
+                onSelectionChanged: (selection) {
+                  setState(() => _showCalendar = selection.single);
+                },
+              ),
             ),
           ),
           Expanded(child: _buildDeliveries(isAdmin)),
@@ -271,7 +287,7 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
                 Text('Error checking connection: $e'),
               ],
             ),
-            backgroundColor: Colors.red,
+            backgroundColor: AppTone.pink.ink,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),

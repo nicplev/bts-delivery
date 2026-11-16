@@ -240,3 +240,55 @@ For the iOS Debug build, set all three together:
 - Xcode `BTS_APP_BUNDLE_IDENTIFIER=com.nicplev.btsdeliveryapp.refreshdemo` for a separate demo installation. Do not override `PRODUCT_BUNDLE_IDENTIFIER` globally, which also changes Pod framework identifiers.
 
 Keep production and demo queues separate. Never pause or reset another project's services while simulating an outage. Debug demo analytics is disabled, and debug/simulator builds skip crash-symbol publishing. Release configuration remains unchanged.
+
+## UI continuation — Bevel-inspired company design system
+
+Requested 16 November 2026. Baseline `8a40b23`; Astra reviews, Sol 6.1 implements. UI presentation changes preserve delivery repositories, visit isolation, drafts, sync acknowledgement and evidence capture.
+
+### References inspected
+
+Authenticated Mobbin collection: https://mobbin.com/apps/bevel-ios-4e7bb614-26f2-4464-a26b-9314adeef824/07003fc7-0512-4a41-b38d-e54efc4d5ec3/screens
+
+- Home flow: https://mobbin.com/flows/b6daf084-b308-4c5d-b610-b762cf4bf530 — visually inspected soft neutral canvas, white rounded panels, compact date/status pills, grouped circular metrics, restrained colour, clear section spacing and inset capsule navigation.
+- Settings flow: https://mobbin.com/flows/3e689062-664e-4cc6-aa8f-0f1f6a9b42df — visually inspected grouped white rows, quiet section labels, small tinted icon tiles, consistent chevrons and rounded sheet presentation.
+- Activity detail flow: https://mobbin.com/flows/60e3eab3-367a-406c-82e9-bd3073331ad8 — visually inspected paired metrics with prominent values and quieter labels, grouped detail sections and compact progress rows.
+
+These are visual references, not an extracted proprietary component specification. Implement original Flutter components adapted to delivery work; do not copy Bevel assets, health labels, fabricated statistics or low-contrast text.
+
+### Design decisions and constraints
+
+- Preserve the exact primary brand hexes: green #2BB673, blue #00AEEF, pink #EC008C and yellow #F9ED32. Use their existing darker shades for small text and existing light tints for supporting surfaces; the original bright colours remain accents/action surfaces.
+- Quiet neutral page canvas, white cards, subtle outlines/shadows, 20–24 px main card corners, 12–16 px nested controls, capsule navigation/status chips. Use a shared spacing/type/component vocabulary rather than styling each screen independently.
+- Give date and school/room identity a clear hierarchy; show true counts only from already-loaded data. Circular progress only where a trustworthy numerator/denominator already exists. No new reads for decorative dashboards.
+- Use dark readable labels on bright green/blue/yellow fills and accessible dark shades for links. Never rely on colour alone for completion, warning, failure or sync state.
+- Preserve operational labels and navigation, especially Today/Calendar, Open school, Checklist, Records, Sign-Off and saved-edit review. Navigation remains above safe-area insets without covering content or pending-work controls.
+- Preserve narrow-screen wrapping, scrolling, large text, keyboard clearance and minimum 44–48 px actions. No continuous ornamental animation or blur; media and signature data stay local/offline capable.
+- Signature capture remains black-on-white. Do not change persistence, backend contracts or permission policy as part of this visual pass.
+
+### Implementation checklist
+
+- [x] Inspect Bevel on Mobbin and map useful patterns to delivery workflows.
+- [x] Shared theme, spacing, typography, cards, status chips and grouped rows; retain brand colours.
+- [x] Refresh Today/Calendar, delivery cards, app navigation, school list, profile and sign-in surfaces.
+- [x] Refresh visit hub, classroom list/detail, record groups and completion/count panels.
+- [x] Align info, sign-off, timer, offline media/recovery panels and common forms with the shared design.
+- [x] Align remaining administrative/edit/import screens without altering behaviour.
+- [x] Astra review for accessibility, truthful metrics, scope and offline regressions.
+- [x] Run regression tests/analyzer, inspect actual-widget previews at small/large text, and build/launch the native sign-in screen.
+- [ ] Complete an interactive native tap-through of the refreshed delivery workflow after Mac unlock.
+- [x] Save screenshots, final evidence and a local reviewed checkpoint. No production deployment implied.
+
+
+### UI verification journal
+
+- Sol 6.1 implemented the shared tokens/components and primary, visit and secondary UI workstreams. Exact primary brand constants are unchanged. No new runtime font/network dependency, provider/repository contract, permission rule or delivery data migration was introduced.
+- Changes use real existing counts; an early scheduled-time ring was removed because it could imply delivery completion. School visit controls now scroll without occupying the classroom list's fixed viewport. Note-jump anchors stay mounted, recovery actions remain visible and calendar status preserves loading/error uncertainty.
+- Fresh independent Astra review found no actionable introduced regression in the combined source and two synthetic visit/classroom previews. Follow-up review covers removal of an old misleading static school-location pin.
+- Combined validation: 84/84 Flutter tests passed; whole-repository analyzer zero errors/warnings and the same 26 informational baseline diagnostics (default exit 1). The final location-card correction also passed focused visit tests and analysis; repeat combined validation is recorded below.
+- Rendered and inspected real Flutter widget previews for Today (393×852), Today with large text (360×780, 1.7×), school hub and classroom detail (390×844). They use synthetic records and local fonts; these are widget previews, not physical-device screenshots. Focused tests also cover 320 px / 1.8× text, keyboard clearance, action reachability, saved-edit review/navigation, visit isolation and Sign-Off note navigation.
+- Native Debug demo built, installed and launched on iPhone Air / iOS 26.5 with scheme Runner and workspace `ios/Runner.xcworkspace`. Native sign-in screenshot inspected successfully. The main iPhone 17 Pro simulator was already displaying another project, so the preview uses a separate simulator. Existing Pod/script build warnings remain.
+- Full native tap-through of the refreshed operational screens is pending Mac unlock. Physical-device accessibility, performance and production release gates elsewhere in this plan remain open.
+
+- Final location correction: removed the old constant Beaumaris pin that was labelled as whichever school was open. The location card now displays only the stored address and existing Maps action, with an explicit missing-address state. Downloaded school maps/PDFs are unchanged. Sol implemented and Astra independently reviewed the correction.
+- Preview artifacts are stored outside the repository in `/Users/nicplev/.codex/visualizations/2026/11/16/01a1e26d-c2b6-7022-9636-994f38618886/bts-ui-refresh/`: `today.png`, `today-large-text.png`, `school.png`, `classroom.png` (synthetic widget previews) and `native-sign-in.jpg` (iPhone Air capture). No Bevel screenshots/assets were copied into the app.
+- Final post-correction checkpoint: **84/84 Flutter tests passed**, analyzer retained **zero errors/warnings and 26 baseline informational notices**, and native Debug build/install/launch succeeded again on iPhone Air / iOS 26.5. `git diff --check` passed. No GitHub push or production deployment was performed for this UI increment.

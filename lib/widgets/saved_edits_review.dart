@@ -8,6 +8,7 @@ import '../models/offline/saved_edit.dart';
 import '../providers/auth_providers.dart';
 import '../providers/saved_edit_providers.dart';
 import '../services/offline/saved_edit_recovery.dart';
+import 'design/design.dart';
 
 class SavedEditsBanner extends ConsumerWidget {
   const SavedEditsBanner({super.key});
@@ -23,6 +24,15 @@ class SavedEditsBanner extends ConsumerWidget {
         0;
     if (count == 0 && !state.hasError) return const SizedBox.shrink();
     return MaterialBanner(
+      backgroundColor: state.hasError ? AppTone.pink.tint : AppTone.blue.tint,
+      dividerColor: AppTokens.outline,
+      padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 6, 8),
+      leadingPadding: const EdgeInsetsDirectional.only(end: 8),
+      leading: AppIconTile(
+        icon: state.hasError ? Icons.info_outline : Icons.edit_note_outlined,
+        size: 32,
+        tone: state.hasError ? AppTone.pink : AppTone.blue,
+      ),
       content: Text(state.hasError
           ? 'Could not read saved edits on this device.'
           : count == 1
@@ -73,10 +83,10 @@ class _SavedEditsList extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-          child: Text('Saved edits',
-              style: Theme.of(context).textTheme.titleLarge),
+        const Padding(
+          padding:
+              EdgeInsets.symmetric(horizontal: AppTokens.gutter, vertical: 8),
+          child: AppSectionHeading(title: 'Saved edits'),
         ),
         Expanded(
           child: state.when(
@@ -94,29 +104,46 @@ class _SavedEditsList extends ConsumerWidget {
               if (edits.isEmpty) {
                 return const Center(child: Text('No saved edits to review'));
               }
-              return ListView.builder(
-                padding: const EdgeInsets.only(bottom: 12),
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(AppTokens.gutter, 8,
+                    AppTokens.gutter, AppTokens.sectionGap),
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemCount: edits.length,
                 itemBuilder: (context, index) {
                   final edit = edits[index];
                   final date = DateFormat.MMMd()
                       .add_jm()
                       .format(edit.intent.capturedAt.toLocal());
-                  return ListTile(
-                    title: Text(edit.intent.itemLabel ?? edit.intent.title),
-                    subtitle: Text('${_status(edit.state)} · $date'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      final location = await showDialog<String>(
-                        context: context,
-                        builder: (_) => _EditReviewDialog(edit: edit),
-                      );
-                      if (location != null &&
-                          context.mounted &&
-                          ModalRoute.of(context)?.isCurrent == true) {
-                        Navigator.of(context).pop(location);
-                      }
-                    },
+                  return AppPanel(
+                    key: ValueKey(edit.intent.id),
+                    padding: EdgeInsets.zero,
+                    child: ListTile(
+                      title: Text(edit.intent.itemLabel ?? edit.intent.title),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 6),
+                          AppStatusPill(
+                            label: _status(edit.state),
+                            tone: _tone(edit.state),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(date),
+                        ],
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        final location = await showDialog<String>(
+                          context: context,
+                          builder: (_) => _EditReviewDialog(edit: edit),
+                        );
+                        if (location != null &&
+                            context.mounted &&
+                            ModalRoute.of(context)?.isCurrent == true) {
+                          Navigator.of(context).pop(location);
+                        }
+                      },
+                    ),
                   );
                 },
               );
@@ -126,6 +153,14 @@ class _SavedEditsList extends ConsumerWidget {
       ],
     );
   }
+
+  AppTone _tone(SavedEditState state) => switch (state) {
+        SavedEditState.rejected => AppTone.pink,
+        SavedEditState.review => AppTone.yellow,
+        SavedEditState.matched => AppTone.green,
+        SavedEditState.waiting || SavedEditState.queued => AppTone.blue,
+        _ => AppTone.neutral,
+      };
 
   String _status(SavedEditState state) => switch (state) {
         SavedEditState.waiting => 'Saved on this device',
@@ -225,6 +260,19 @@ class _EditReviewDialogState extends ConsumerState<_EditReviewDialog> {
     }).join('\n');
   }
 
+  Widget _valuesPanel(String title, String values, AppTone tone) => AppPanel(
+        tone: tone,
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            SelectableText(values),
+          ],
+        ),
+      );
+
   void _openLocation() {
     final classroom =
         _intent.yearLevelId != null && _intent.classroomId != null;
@@ -258,17 +306,20 @@ class _EditReviewDialogState extends ConsumerState<_EditReviewDialog> {
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(_intent.deletesDocument
-              ? 'Note selected for deletion'
-              : 'Your saved values'),
-          SelectableText(_display(_intent, _intent.values)),
+          _valuesPanel(
+            _intent.deletesDocument
+                ? 'Note selected for deletion'
+                : 'Your saved values',
+            _display(_intent, _intent.values),
+            AppTone.blue,
+          ),
           const SizedBox(height: 12),
           if (_busy) const LinearProgressIndicator(),
           if (comparison != null) Text(comparison.message),
           if (current?.exists == true) ...[
             const SizedBox(height: 12),
-            const Text('Current server values'),
-            SelectableText(_display(_intent, current!.fields)),
+            _valuesPanel('Current server values',
+                _display(_intent, current!.fields), AppTone.neutral),
           ],
           if (comparison?.canRetry == true &&
               _intent.kind == SavedEditKind.packTotal) ...[
