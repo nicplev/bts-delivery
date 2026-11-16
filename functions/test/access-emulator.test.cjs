@@ -279,6 +279,52 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
     await status(await remove("deliveries/alpha", adminUser), 403);
   });
 
+  await t.test("ordinary classroom changes and classroom audit commit atomically", async () => {
+    const classroom = "deliveries/alpha/workspace/alpha/yearLevels/year/classrooms/base";
+    const note = `${classroom}/notes/00000000-0000-4000-8000-000000000011`;
+    const noteFields = {content: "Leave boxes by the door", author: "Field worker", createdAt: now};
+    const noteWrite = {update: {name: `${root}/${note}`, fields: fields(noteFields)}};
+    const audit = {
+      update: {name: `${root}/${classroom}`, fields: fields({lastUpdatedBy: "Field worker"})},
+      updateMask: {fieldPaths: ["lastUpdatedBy"]},
+      updateTransforms: [{fieldPath: "lastUpdatedAt", setToServerValue: "REQUEST_TIME"}],
+    };
+
+    // An invalid audit change rejects the entire batch, including the valid note.
+    const forbiddenAudit = {
+      ...audit,
+      update: {
+        ...audit.update,
+        fields: fields({lastUpdatedBy: "Field worker", createdAt: null}),
+      },
+      updateMask: {fieldPaths: ["lastUpdatedBy", "createdAt"]},
+    };
+    await status(await commit(field, [noteWrite, forbiddenAudit]), 403);
+    await status(await get(note, field), 404);
+
+    await status(await commit(field, [noteWrite, audit]), 200);
+    assert.equal((await db.doc(note).get()).get("content"), noteFields.content);
+    const updated = (await db.doc(classroom).get()).data();
+    assert.equal(updated.lastUpdatedBy, "Field worker");
+    assert.ok(updated.lastUpdatedAt instanceof admin.firestore.Timestamp);
+
+    const consumable = `${classroom}/consumables/pens`;
+    await db.doc(consumable).update({quantity: 18});
+    await status(await commit(field, [
+      {
+        update: {name: `${root}/${consumable}`, fields: fields({actualQuantityDelivered: 9})},
+        updateMask: {fieldPaths: ["actualQuantityDelivered"]},
+      },
+      audit,
+    ]), 200);
+    const supply = (await db.doc(consumable).get()).data();
+    assert.equal(supply.quantity, 18);
+    assert.equal(supply.actualQuantityDelivered, 9);
+
+    await status(await commit(field, [{delete: `${root}/${note}`}, audit]), 200);
+    await status(await get(note, field), 404);
+  });
+
   await t.test("signoffs are visit-bound, append-only and scoped to the signing account", async () => {
     const operation = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     const capture = {

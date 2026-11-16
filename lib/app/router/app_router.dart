@@ -22,7 +22,6 @@ import '../../screens/admin/season_export_screen.dart';
 import '../../screens/main/profile_screen.dart';
 import '../../models/school.dart';
 import '../../models/delivery_visit.dart';
-import '../../providers/delivery_visit_provider.dart';
 import '../../widgets/delivery_visit_gate.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -71,6 +70,22 @@ Page<dynamic> _buildPageWithSlideTransition({
         child: child,
       );
     },
+  );
+}
+
+Page<dynamic> _buildVisitPage(
+  BuildContext context,
+  GoRouterState state,
+  Widget Function(DeliveryVisit visit) buildChild,
+) {
+  final visit = DeliveryVisit(
+    deliveryId: state.pathParameters['deliveryId']!,
+    schoolId: state.pathParameters['schoolId']!,
+  );
+  return _buildPageWithSlideTransition(
+    context: context,
+    state: state,
+    child: DeliveryVisitGate(visit: visit, child: buildChild(visit)),
   );
 }
 
@@ -228,72 +243,50 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               ),
             ),
           ),
-          ShellRoute(
-            builder: (context, state, child) {
-              final visit = DeliveryVisit(
-                deliveryId: state.pathParameters['deliveryId']!,
-                schoolId: state.pathParameters['schoolId']!,
-              );
-              return ProviderScope(
-                key: ValueKey(visit),
-                overrides: [
-                  activeDeliveryVisitProvider.overrideWithValue(visit)
-                ],
-                child: DeliveryVisitGate(visit: visit, child: child),
-              );
-            },
+          GoRoute(
+            path: '/deliveries/:deliveryId/schools/:schoolId',
+            pageBuilder: (context, state) => _buildVisitPage(
+              context,
+              state,
+              (visit) => SchoolHubScreen(
+                schoolId: visit.schoolId,
+                deliveryId: visit.deliveryId,
+              ),
+            ),
             routes: [
               GoRoute(
-                path: '/deliveries/:deliveryId/schools/:schoolId',
-                pageBuilder: (context, state) => _buildPageWithSlideTransition(
-                  context: context,
-                  state: state,
-                  child: SchoolHubScreen(
-                    schoolId: state.pathParameters['schoolId']!,
-                    deliveryId: state.pathParameters['deliveryId']!,
+                path: 'year/:yearLevelId/classrooms',
+                pageBuilder: (context, state) => _buildVisitPage(
+                  context,
+                  state,
+                  (visit) => ClassroomsScreen(
+                    schoolId: visit.schoolId,
+                    yearLevelId: state.pathParameters['yearLevelId']!,
                   ),
                 ),
                 routes: [
                   GoRoute(
-                    path: 'year/:yearLevelId/classrooms',
-                    pageBuilder: (context, state) =>
-                        _buildPageWithSlideTransition(
-                      context: context,
-                      state: state,
-                      child: ClassroomsScreen(
-                        schoolId: state.pathParameters['schoolId']!,
+                    path: ':classroomId',
+                    pageBuilder: (context, state) => _buildVisitPage(
+                      context,
+                      state,
+                      (visit) => ClassroomDetailScreen(
+                        schoolId: visit.schoolId,
                         yearLevelId: state.pathParameters['yearLevelId']!,
-                      ),
-                    ),
-                    routes: [
-                      GoRoute(
-                        path: ':classroomId',
-                        pageBuilder: (context, state) =>
-                            _buildPageWithSlideTransition(
-                          context: context,
-                          state: state,
-                          child: ClassroomDetailScreen(
-                            schoolId: state.pathParameters['schoolId']!,
-                            yearLevelId: state.pathParameters['yearLevelId']!,
-                            classroomId: state.pathParameters['classroomId']!,
-                            deliveryId: state.pathParameters['deliveryId'],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  GoRoute(
-                    path: 'consumables',
-                    pageBuilder: (context, state) =>
-                        _buildPageWithSlideTransition(
-                      context: context,
-                      state: state,
-                      child: ConsumablesScreen(
-                        schoolId: state.pathParameters['schoolId']!,
+                        classroomId: state.pathParameters['classroomId']!,
+                        deliveryId: visit.deliveryId,
                       ),
                     ),
                   ),
                 ],
+              ),
+              GoRoute(
+                path: 'consumables',
+                pageBuilder: (context, state) => _buildVisitPage(
+                  context,
+                  state,
+                  (visit) => ConsumablesScreen(schoolId: visit.schoolId),
+                ),
               ),
             ],
           ),

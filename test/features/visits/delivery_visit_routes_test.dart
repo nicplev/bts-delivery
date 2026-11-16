@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:bts_delivery_app/app/router/app_router.dart';
+import 'package:bts_delivery_app/models/delivery.dart';
 import 'package:bts_delivery_app/models/delivery_visit.dart';
 import 'package:bts_delivery_app/models/school.dart';
 import 'package:bts_delivery_app/models/school_timer.dart';
@@ -8,14 +9,20 @@ import 'package:bts_delivery_app/models/staff.dart';
 import 'package:bts_delivery_app/providers/auth_providers.dart';
 import 'package:bts_delivery_app/providers/deliveries_providers.dart';
 import 'package:bts_delivery_app/providers/delivery_visit_provider.dart';
+import 'package:bts_delivery_app/providers/field_draft_providers.dart';
 import 'package:bts_delivery_app/providers/offline_delivery_providers.dart';
+import 'package:bts_delivery_app/providers/offline_media_providers.dart';
+import 'package:bts_delivery_app/providers/saved_edit_providers.dart';
+import 'package:bts_delivery_app/providers/pre_delivery_checklist_providers.dart';
 import 'package:bts_delivery_app/providers/repository_providers.dart';
+import 'package:bts_delivery_app/repositories/auth_repository.dart';
 import 'package:bts_delivery_app/repositories/classroom_edit.dart';
 import 'package:bts_delivery_app/repositories/schools_repository.dart';
 import 'package:bts_delivery_app/services/delivery_visit_access.dart';
 import 'package:bts_delivery_app/screens/forms/classroom_detail_screen.dart';
 import 'package:bts_delivery_app/services/offline/connectivity_service.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
+import 'package:bts_delivery_app/services/offline/field_draft_store.dart';
 import 'package:bts_delivery_app/services/result.dart';
 import 'package:bts_delivery_app/widgets/delivery_visit_gate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -94,6 +101,7 @@ void main() {
   testWidgets('nested classroom routes isolate two visits to the same school', (
     tester,
   ) async {
+    final drafts = _FieldDrafts();
     final first = _VisitSchools();
     final second = _VisitSchools();
     addTearDown(first.dispose);
@@ -103,7 +111,23 @@ void main() {
       overrides: [
         authStateProvider.overrideWith((_) => Stream.value(_FieldUser())),
         currentStaffProvider.overrideWith((_) => Stream.value(_staff)),
-        todayDeliveriesProvider.overrideWith((_) => Stream.value(const [])),
+        todayDeliveriesProvider.overrideWith((_) => Stream.value([
+              for (final id in ['first', 'second'])
+                Delivery(
+                  id: id,
+                  schoolId: 'school',
+                  schoolName: 'School',
+                  date: DateTime(2025),
+                  createdAt: DateTime(2025),
+                ),
+            ])),
+        deliveryChecklistStatusProvider.overrideWith(
+          (_, __) => const AsyncValue.data(false),
+        ),
+        authRepositoryProvider.overrideWithValue(_VisitAuth()),
+        fieldDraftStoreProvider.overrideWith((_) async => drafts),
+        savedEditsProvider.overrideWith((_) => Stream.value(const [])),
+        offlineMediaOwnerProvider.overrideWith((_, __) => null),
         connectivityStatusProvider.overrideWith(
           (_) => Stream.value(ConnectivityStatus.offline),
         ),
@@ -146,8 +170,16 @@ void main() {
     await tester.pumpAndSettle();
 
     Future<void> openRoom(DeliveryVisit visit) async {
-      router.go(schoolWorkPath(visit.schoolId, visit: visit));
+      router.go('/home');
       await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .widgetWithText(FilledButton, 'Open school')
+            .at(visit.deliveryId == 'first' ? 0 : 1),
+      );
+      await tester.pumpAndSettle();
+      expect(
+          find.text('Classroom records ready on this device'), findsOneWidget);
       await tester.tap(find.text('Year 1'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Room A'));
@@ -160,6 +192,25 @@ void main() {
 
     await openRoom(
         const DeliveryVisit(deliveryId: 'first', schoolId: 'school'));
+    await tester.tap(find.text('Incomplete'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), '7');
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    final savedDraft = drafts.entries.values.single;
+    expect(savedDraft.values['quantity'], '7');
+
+    await tester.tap(find.text('Incomplete'));
+    await tester.pumpAndSettle();
+    expect(find.text('7'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(first.room.completionStatus, ClassroomCompletionStatus.incomplete);
+    expect(first.room.actualPacksDelivered, 7);
+    expect(first.lastEditId, savedDraft.revision);
+    expect(drafts.entries, isEmpty);
+    expect(second.room.actualPacksDelivered, isNull);
+
     await tester.tap(find.text('Complete'));
     await tester.pumpAndSettle();
     expect(first.room.completionStatus, ClassroomCompletionStatus.complete);
@@ -198,8 +249,33 @@ class _FieldUser implements User {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _VisitAuth implements AuthRepository {
+  @override
+  User? get currentUser => _FieldUser();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FieldDrafts implements FieldDraftStore {
+  final entries = <String, FieldDraft>{};
+
+  @override
+  Future<FieldDraft?> read(String key) async => entries[key];
+
+  @override
+  Future<void> write(String key, FieldDraft draft) async =>
+      entries[key] = draft;
+
+  @override
+  Future<void> remove(String key, {required String revision}) async {
+    if (entries[key]?.revision == revision) entries.remove(key);
+  }
+}
+
 class _VisitSchools implements SchoolsRepository {
   final _classroomChanges = StreamController<List<Classroom>>.broadcast();
+  String? lastEditId;
   Classroom room =
       Classroom(id: 'room', name: 'Room A', createdAt: DateTime(2025));
 
@@ -264,7 +340,9 @@ class _VisitSchools implements SchoolsRepository {
     required ClassroomCompletionStatus status,
     required int? actualPacksDelivered,
     required String updatedBy,
+    String? editId,
   }) async {
+    lastEditId = editId;
     room = room.copyWith(
       completionStatus: status,
       actualPacksDelivered: actualPacksDelivered,

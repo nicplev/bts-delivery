@@ -5,7 +5,8 @@ import '../../providers/schools_providers.dart';
 import '../../models/school.dart';
 import '../../models/delivery_visit.dart';
 import '../../providers/delivery_visit_provider.dart';
-import '../../repositories/classroom_edit.dart';
+import '../../services/offline/field_draft_store.dart';
+import '../../widgets/field_draft_dialog.dart';
 import '../../utils/notification_utils.dart';
 import '../../utils/year_level_colors.dart';
 
@@ -515,59 +516,39 @@ class _ClassroomCard extends ConsumerWidget {
     WidgetRef ref,
     Classroom classroom,
   ) {
-    final nameController = TextEditingController(text: classroom.name);
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    final visit = ref.read(activeDeliveryVisitProvider);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit Classroom'),
-        content: Form(
-          key: formKey,
-          child: TextFormField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Classroom Name',
-              hintText: 'e.g., Room 1A, Blue Room',
-            ),
-            autofocus: true,
-            validator: (value) =>
-                value?.trim().isEmpty ?? true ? 'Please enter a name' : null,
-          ),
+      ref: ref,
+      target: FieldDraftTarget(
+        schoolId: schoolId,
+        deliveryId: visit?.deliveryId,
+        yearLevelId: yearLevelId,
+        classroomId: classroom.id,
+        form: 'rename',
+      ),
+      title: 'Rename classroom',
+      savedLabel: 'Classroom name',
+      inputs: [
+        FieldDraftInput(
+          id: 'name',
+          label: 'Classroom name',
+          initialText: classroom.name,
+          validator: (value) {
+            final name = value.trim();
+            if (name.isEmpty) return 'Enter a classroom name.';
+            if (name.length > 200) return 'Use 200 characters or fewer.';
+            return null;
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              final name = nameController.text.trim();
-              Navigator.pop(dialogContext);
-
-              final result = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .updateClassroomName(schoolId, yearLevelId, classroom.id, name: name);
-              if (!context.mounted) return;
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(result.when(
-                    success: (progress) => switch (progress) {
-                      ClassroomEditStatus.saved => 'Classroom name saved',
-                      ClassroomEditStatus.pending => 'Classroom name saved on this device · Sync pending',
-                      ClassroomEditStatus.unconfirmed => 'Waiting to confirm the classroom name change',
-                    },
-                    failure: (message, _) => message,
-                  )),
-                ),
-              );
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.updateClassroomName(
+        schoolId,
+        yearLevelId,
+        classroom.id,
+        name: draft.values['name']!.trim(),
+        editId: draft.revision,
       ),
     );
   }

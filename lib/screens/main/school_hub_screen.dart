@@ -10,6 +10,7 @@ import '../../widgets/delivery_day_list.dart';
 import '../../widgets/records_tab.dart';
 import '../../widgets/signoff_tab.dart';
 import '../../widgets/info_tab.dart';
+import '../../widgets/offline_visit_media_panel.dart';
 import '../../widgets/school_timer_widget.dart';
 
 class SchoolHubScreen extends ConsumerStatefulWidget {
@@ -40,9 +41,16 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
 
   @override
   Widget build(BuildContext context) {
-    final schoolProvider = schoolByIdProvider(widget.schoolId);
     final isVisit = widget.deliveryId != null;
     final visit = ref.watch(activeDeliveryVisitProvider);
+    if (isVisit &&
+        (visit?.deliveryId != widget.deliveryId ||
+            visit?.schoolId != widget.schoolId)) {
+      return const Scaffold(
+        body: Center(child: Text('Couldn’t open the records for this visit.')),
+      );
+    }
+    final schoolProvider = schoolByIdProvider(widget.schoolId);
     final readiness = visit == null
         ? null
         : ref.watch(deliveryVisitReadinessProvider(visit)).valueOrNull?.status;
@@ -138,6 +146,8 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                           textAlign: TextAlign.center,
                         ),
                       ),
+                    if (visit != null)
+                      OfflineVisitMediaPanel(visit: visit, school: school),
                     if (isVisit) SchoolTimerWidget(schoolId: widget.schoolId),
                     Expanded(
                       child: TabBarView(

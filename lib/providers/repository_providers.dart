@@ -4,6 +4,7 @@ import '../repositories/deliveries_repository.dart';
 import '../repositories/schools_repository.dart';
 import '../repositories/storage_repository.dart';
 import 'delivery_visit_provider.dart';
+import 'saved_edit_providers.dart';
 import '../models/delivery_visit.dart';
 import '../services/photo_service.dart';
 import '../services/permissions_service.dart';
@@ -18,12 +19,13 @@ final deliveriesRepositoryProvider = Provider<DeliveriesRepository>((ref) {
 
 // Background evidence uploads are explicit about which visit they update.
 final baseSchoolsRepositoryProvider = Provider<SchoolsRepository>((ref) {
-  return FirebaseSchoolsRepository();
+  return FirebaseSchoolsRepository(recovery: ref.watch(savedEditRecoveryProvider));
 });
 
 final visitSchoolsRepositoryFactoryProvider =
     Provider<SchoolsRepository Function(DeliveryVisit)>((ref) {
-  return (visit) => FirebaseSchoolsRepository(visit: visit);
+  final recovery = ref.watch(savedEditRecoveryProvider);
+  return (visit) => FirebaseSchoolsRepository(visit: visit, recovery: recovery);
 });
 
 final schoolsRepositoryProvider = Provider<SchoolsRepository>((ref) {

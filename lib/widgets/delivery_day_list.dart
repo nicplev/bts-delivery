@@ -230,7 +230,6 @@ class _DeliveryCard extends ConsumerWidget {
                   onPressed: () async {
                     await showPreDeliveryChecklistDialog(
                       context: context,
-                      ref: ref,
                       delivery: delivery,
                     );
                     if (context.mounted) {

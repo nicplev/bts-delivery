@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 import '../services/result.dart';
 import '../models/offline/evidence_upload.dart';
+import '../models/offline/saved_edit.dart';
+import '../services/offline/saved_edit_recovery.dart';
 import '../models/school.dart';
 import '../models/delivery_visit.dart';
 import '../models/signoff_snapshot.dart';
@@ -37,6 +39,7 @@ abstract class SchoolsRepository {
     String classroomId, {
     required String name,
     required String updatedBy,
+    String? editId,
   });
   Future<Result<ClassroomEditReceipt>> updateClassroomStatus(
     String schoolId,
@@ -45,6 +48,23 @@ abstract class SchoolsRepository {
     required ClassroomCompletionStatus status,
     required int? actualPacksDelivered,
     required String updatedBy,
+    String? editId,
+  });
+  Future<Result<ClassroomEditReceipt>> saveClassroomNote(
+    String schoolId, String yearLevelId, String classroomId, Note note, {
+    required String updatedBy, String? editId,
+  });
+  Future<Result<ClassroomEditReceipt>> saveClassroomNoteDeletion(
+    String schoolId, String yearLevelId, String classroomId, Note note, {
+    required String updatedBy,
+  });
+  Future<Result<ClassroomEditReceipt>> saveClassroomActualQuantity(
+    String schoolId, String yearLevelId, String classroomId, String consumableId, int? quantity, {
+    required String updatedBy, String? editId,
+  });
+  Future<Result<ClassroomEditReceipt>> saveClassroomPackTotal(
+    String schoolId, String yearLevelId, String classroomId, int total, {
+    required String updatedBy, String? editId,
   });
   Future<Result<void>> deleteClassroom(
       String schoolId, String yearLevelId, String classroomId);
@@ -221,7 +241,11 @@ class ConsumableImportData {
 class FirebaseSchoolsRepository implements SchoolsRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  FirebaseSchoolsRepository({DeliveryVisit? visit}) : _visit = visit;
+  FirebaseSchoolsRepository({DeliveryVisit? visit, SavedEditRecovery? recovery})
+      : _visit = visit,
+        _recovery = recovery;
+
+  final SavedEditRecovery? _recovery;
 
   final DeliveryVisit? _visit;
 
@@ -502,15 +526,12 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
     String classroomId, {
     required String name,
     required String updatedBy,
-  }) {
-    return _editClassroom(
-      schoolId,
-      yearLevelId,
-      classroomId,
-      () => ClassroomEdit.rename(name),
-      updatedBy,
-    );
-  }
+    String? editId,
+  }) => _saveClassroomEdit(
+    schoolId, yearLevelId, classroomId, SavedEditKind.classroomName,
+    () => ClassroomEdit.rename(name).fields,
+    updatedBy: updatedBy, editId: editId,
+  );
 
   @override
   Future<Result<ClassroomEditReceipt>> updateClassroomStatus(
@@ -520,52 +541,122 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
     required ClassroomCompletionStatus status,
     required int? actualPacksDelivered,
     required String updatedBy,
-  }) {
-    return _editClassroom(
-      schoolId,
-      yearLevelId,
-      classroomId,
-      () => ClassroomEdit.status(status, actualPacksDelivered),
-      updatedBy,
-    );
-  }
+    String? editId,
+  }) => _saveClassroomEdit(
+    schoolId, yearLevelId, classroomId, SavedEditKind.classroomStatus,
+    () => ClassroomEdit.status(status, actualPacksDelivered).fields,
+    updatedBy: updatedBy, editId: editId,
+  );
 
-  Future<Result<ClassroomEditReceipt>> _editClassroom(
+  @override
+  Future<Result<ClassroomEditReceipt>> saveClassroomNote(
     String schoolId,
     String yearLevelId,
     String classroomId,
-    ClassroomEdit Function() edit,
-    String updatedBy,
-  ) async {
+    Note note, {
+    required String updatedBy,
+    String? editId,
+  }) => _saveClassroomEdit(
+    schoolId, yearLevelId, classroomId,
+    note.id.isEmpty ? SavedEditKind.noteCreate : SavedEditKind.noteContent,
+    () {
+      final content = note.content.trim();
+      if (content.isEmpty || content.length > 20000) {
+        throw ArgumentError('Enter a note of 1 to 20,000 characters.');
+      }
+      return {'content': content, if (note.id.isEmpty) 'author': note.author};
+    },
+    updatedBy: updatedBy, editId: editId, itemId: note.id.isEmpty ? null : note.id,
+  );
+
+  @override
+  Future<Result<ClassroomEditReceipt>> saveClassroomNoteDeletion(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    Note note, {
+    required String updatedBy,
+  }) => _saveClassroomEdit(
+    schoolId, yearLevelId, classroomId, SavedEditKind.noteDelete,
+    () => {
+      'content': note.content,
+      'author': note.author,
+      'createdAt': note.createdAt.microsecondsSinceEpoch,
+    },
+    updatedBy: updatedBy, itemId: note.id,
+  );
+
+  @override
+  Future<Result<ClassroomEditReceipt>> saveClassroomActualQuantity(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    String consumableId,
+    int? quantity, {
+    required String updatedBy,
+    String? editId,
+  }) => _saveClassroomEdit(
+    schoolId, yearLevelId, classroomId, SavedEditKind.consumableCount,
+    () => {'actualQuantityDelivered': _validCount(quantity)},
+    updatedBy: updatedBy, editId: editId, itemId: consumableId,
+  );
+
+  @override
+  Future<Result<ClassroomEditReceipt>> saveClassroomPackTotal(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    int total, {
+    required String updatedBy,
+    String? editId,
+  }) => _saveClassroomEdit(
+    schoolId, yearLevelId, classroomId, SavedEditKind.packTotal,
+    () => {'total': _validCount(total)},
+    updatedBy: updatedBy, editId: editId,
+  );
+
+  int? _validCount(int? count) {
+    if (count != null && (count < 0 || count > 1000000)) {
+      throw ArgumentError('Enter a quantity between 0 and 1,000,000.');
+    }
+    return count;
+  }
+
+  Future<Result<ClassroomEditReceipt>> _saveClassroomEdit(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    SavedEditKind kind,
+    Map<String, Object?> Function() values, {
+    required String updatedBy,
+    String? editId,
+    String? itemId,
+  }) async {
+    final recovery = _recovery;
+    final uid = recovery?.currentUid();
+    if (uid == null || recovery == null) {
+      return const Result.failure('Sign in to save this edit.');
+    }
     try {
-      final fields = edit().fields;
-      final editId = const Uuid().v4();
-      final classroom = _recordsFor(schoolId)
-          .collection('yearLevels')
-          .doc(yearLevelId)
-          .collection('classrooms')
-          .doc(classroomId);
-
-      final pendingEditIds = classroom
-          .snapshots(includeMetadataChanges: true)
-          .map((snapshot) => snapshot.metadata.hasPendingWrites
-              ? (snapshot.data()?['lastEditId'] as String?)
-              : null);
-
-      return await observeClassroomEdit(
-        editId: editId,
-        pendingEditIds: pendingEditIds,
-        write: () => classroom.update({
-          ...fields,
-          'lastEditId': editId,
-          'lastUpdatedBy': updatedBy,
-          'lastUpdatedAt': FieldValue.serverTimestamp(),
-        }),
-      );
+      _recordsFor(schoolId);
+      return await recovery.save(EditIntent(
+        id: editId ?? const Uuid().v4(),
+        rememberId: editId != null,
+        ownerUid: uid,
+        schoolId: schoolId,
+        deliveryId: _visit?.deliveryId,
+        yearLevelId: yearLevelId,
+        classroomId: classroomId,
+        itemId: itemId,
+        kind: kind,
+        values: values(),
+        capturedAt: DateTime.now().toUtc(),
+        updatedBy: updatedBy,
+      ));
     } on ArgumentError catch (error) {
       return Result.failure(error.message?.toString() ?? 'Invalid classroom edit.');
     } catch (_) {
-      return const Result.failure('Couldn’t submit the classroom edit.');
+      return const Result.failure('Could not save this classroom edit.');
     }
   }
 

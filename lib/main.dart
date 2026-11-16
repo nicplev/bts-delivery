@@ -36,7 +36,7 @@ void main() async {
     options: firebaseEmulatorHost.isEmpty
         ? DefaultFirebaseOptions.currentPlatform
         : const FirebaseOptions(
-            apiKey: 'demo-api-key',
+            apiKey: 'AIza00000000000000000000000000000000000',
             appId: '1:1234567890:ios:1234567890abcdef',
             messagingSenderId: '1234567890',
             projectId: firebaseDemoProject,

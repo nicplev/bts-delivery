@@ -2,14 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/schools_providers.dart';
+import '../../providers/delivery_visit_provider.dart';
 import '../../providers/repository_providers.dart';
 import '../../repositories/classroom_edit.dart';
+import '../../services/offline/field_draft_store.dart';
+import '../../widgets/field_draft_dialog.dart';
 import '../../providers/auth_providers.dart';
 import '../../models/school.dart';
 import '../../models/offline/evidence_upload.dart';
+import '../../models/offline/offline_media.dart';
+import '../../models/delivery_visit.dart';
 import '../../providers/offline_delivery_providers.dart';
+import '../../providers/offline_media_providers.dart';
 import '../../widgets/sync_status_detail_sheet.dart';
-import '../../utils/notification_utils.dart';
+import '../../widgets/offline_media_view.dart';
 import 'package:uuid/uuid.dart';
 
 class ClassroomDetailScreen extends ConsumerWidget {
@@ -28,6 +34,13 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final visit = ref.watch(activeDeliveryVisitProvider);
+    if (deliveryId != null &&
+        (visit?.deliveryId != deliveryId || visit?.schoolId != schoolId)) {
+      return const Scaffold(
+        body: Center(child: Text('Couldn’t open the records for this visit.')),
+      );
+    }
     final classroomsAsync = ref.watch(classroomsProvider((
       schoolId: schoolId,
       yearLevelId: yearLevelId,
@@ -819,7 +832,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
                 ),
                 const Spacer(),
                 ElevatedButton.icon(
-                  onPressed: () => _showAddNoteDialog(context, ref),
+                  onPressed: () => _showNoteDialog(context, ref),
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('Add'),
                 ),
@@ -912,7 +925,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
                               PopupMenuButton<String>(
                                 onSelected: (value) {
                                   if (value == 'edit') {
-                                    _showEditNoteDialog(context, ref, note);
+                                    _showNoteDialog(context, ref, note: note);
                                   } else if (value == 'delete') {
                                     _showDeleteNoteConfirmation(context, ref, note);
                                   }
@@ -1152,7 +1165,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
         if (status == ClassroomCompletionStatus.incomplete) {
           _showActualQuantityDialog(context, ref, classroom, yearLevelId);
         } else {
-          _saveClassroomStatus(context, ref, status, null);
+          _saveClassroomStatus(context, ref, status);
         }
       },
       child: AspectRatio(
@@ -1194,92 +1207,63 @@ class ClassroomDetailScreen extends ConsumerWidget {
     );
   }
 
+  FieldDraftTarget _draftTarget(String form, {String? entityId}) {
+    return FieldDraftTarget(
+      schoolId: schoolId,
+      deliveryId: deliveryId,
+      yearLevelId: yearLevelId,
+      classroomId: classroomId,
+      form: form,
+      entityId: entityId,
+    );
+  }
+
+  static String? _validateCount(String value, {bool optional = false}) {
+    if (value.trim().isEmpty) {
+      return optional ? null : 'Enter a quantity.';
+    }
+    final count = int.tryParse(value.trim());
+    if (count == null || count < 0 || count > 1000000) {
+      return 'Enter a whole number from 0 to 1,000,000.';
+    }
+    return null;
+  }
+
   void _showActualQuantityDialog(
     BuildContext context,
     WidgetRef ref,
     Classroom classroom,
     String yearLevelId,
   ) {
-    // Get the current pack total for reference
-    final packTotalAsync = ref.read(packTotalProvider((
+    final expected = ref.read(packTotalProvider((
       schoolId: schoolId,
       yearLevelId: yearLevelId,
       classroomId: classroom.id,
-    )));
-
-    final expectedTotal = packTotalAsync.value?.total ?? 0;
-
-    final controller = TextEditingController(
-      text: classroom.actualPacksDelivered?.toString() ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    ))).valueOrNull?.total;
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Actual Packs Delivered'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Expected: $expectedTotal packs',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  labelText: 'Actual Packs Delivered',
-                  hintText: 'e.g., 23',
-                  suffixText: 'packs',
-                  helperText: 'Enter the actual number of packs delivered',
-                ),
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter the actual quantity';
-                  }
-                  final number = int.tryParse(value.trim());
-                  if (number == null) {
-                    return 'Please enter a valid number';
-                  }
-                  if (number < 0) {
-                    return 'Quantity cannot be negative';
-                  }
-                  return null;
-                },
-              ),
-            ],
-          ),
+      ref: ref,
+      target: _draftTarget('actualPacks'),
+      title: 'Actual packs delivered',
+      savedLabel: 'Classroom status',
+      description: expected == null ? null : 'Expected $expected packs',
+      inputs: [
+        FieldDraftInput(
+          id: 'quantity',
+          label: 'Packs delivered',
+          initialText: classroom.actualPacksDelivered?.toString() ?? '',
+          keyboardType: TextInputType.number,
+          validator: _validateCount,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (!(formKey.currentState?.validate() ?? false)) return;
-              final actualQuantity = int.parse(controller.text.trim());
-              Navigator.pop(dialogContext);
-              _saveClassroomStatus(
-                context,
-                ref,
-                ClassroomCompletionStatus.incomplete,
-                actualQuantity,
-              );
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.updateClassroomStatus(
+        schoolId,
+        yearLevelId,
+        classroomId,
+        status: ClassroomCompletionStatus.incomplete,
+        actualPacksDelivered: int.parse(draft.values['quantity']!.trim()),
+        editId: draft.revision,
       ),
     );
   }
@@ -1288,7 +1272,6 @@ class ClassroomDetailScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     ClassroomCompletionStatus status,
-    int? actualPacksDelivered,
   ) async {
     final result = await ref.read(schoolsNotifierProvider.notifier)
         .updateClassroomStatus(
@@ -1296,18 +1279,14 @@ class ClassroomDetailScreen extends ConsumerWidget {
           yearLevelId,
           classroomId,
           status: status,
-          actualPacksDelivered: actualPacksDelivered,
+          actualPacksDelivered: null,
         );
     if (!context.mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.when(
-          success: (progress) => switch (progress) {
-            ClassroomEditStatus.saved => 'Classroom status saved',
-            ClassroomEditStatus.pending => 'Classroom status saved on this device · Sync pending',
-            ClassroomEditStatus.unconfirmed => 'Waiting to confirm the classroom status change',
-          },
+          success: (progress) => fieldEditFeedback('Classroom status', progress),
           failure: (message, _) => message,
         )),
       ),
@@ -1319,81 +1298,28 @@ class ClassroomDetailScreen extends ConsumerWidget {
     WidgetRef ref,
     int? currentTotal,
   ) {
-    final controller = TextEditingController(
-      text: currentTotal?.toString() ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title:
-            Text(currentTotal == null ? 'Set Pack Total' : 'Update Pack Total'),
-        content: Form(
-          key: formKey,
-          child: TextFormField(
-            controller: controller,
-            decoration: const InputDecoration(
-              labelText: 'Number of Packs',
-              hintText: 'e.g., 25',
-              suffixText: 'packs',
-            ),
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            autofocus: true,
-            validator: (value) {
-              if (value?.trim().isEmpty ?? true) {
-                return 'Please enter a number';
-              }
-              final number = int.tryParse(value!);
-              if (number == null || number < 0) {
-                return 'Please enter a valid number';
-              }
-              return null;
-            },
-          ),
+      ref: ref,
+      target: _draftTarget('packTotal'),
+      title: currentTotal == null ? 'Set pack total' : 'Update pack total',
+      savedLabel: 'Pack total',
+      inputs: [
+        FieldDraftInput(
+          id: 'quantity',
+          label: 'Number of packs',
+          initialText: currentTotal?.toString() ?? '',
+          keyboardType: TextInputType.number,
+          validator: _validateCount,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final packTotal = PackTotal(
-                id: '',
-                total: int.parse(controller.text.trim()),
-                createdAt: DateTime.now(),
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .updatePackTotal(
-                      schoolId, yearLevelId, classroomId, packTotal);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Pack total updated successfully'
-                        : 'Failed to update pack total'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-
-                // Show notification that sign-off was cleared
-                if (success) {
-                  NotificationUtils.showSignOffClearedNotification(context);
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.saveClassroomPackTotal(
+        schoolId,
+        yearLevelId,
+        classroomId,
+        int.parse(draft.values['quantity']!.trim()),
+        editId: draft.revision,
       ),
     );
   }
@@ -1414,113 +1340,35 @@ class ClassroomDetailScreen extends ConsumerWidget {
   }
 
   void _showSetActualConsumableDialog(
-      BuildContext context, WidgetRef ref, Consumable consumable) {
-    final controller = TextEditingController(
-      text: consumable.actualQuantityDelivered?.toString() ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    BuildContext context,
+    WidgetRef ref,
+    Consumable consumable,
+  ) {
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Set Actual Quantity Delivered'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                consumable.itemName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Expected: ${consumable.quantity} ${consumable.unit}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: controller,
-                decoration: InputDecoration(
-                  labelText: 'Actual Quantity Delivered',
-                  hintText: 'e.g., ${consumable.quantity - 2}',
-                  suffixText: consumable.unit,
-                  helperText: 'Leave empty to clear partial delivery',
-                ),
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return null; // Allow empty to clear
-                  }
-                  final number = int.tryParse(value.trim());
-                  if (number == null) {
-                    return 'Please enter a valid number';
-                  }
-                  if (number < 0) {
-                    return 'Quantity cannot be negative';
-                  }
-                  return null;
-                },
-              ),
-            ],
-          ),
+      ref: ref,
+      target: _draftTarget('actualConsumable', entityId: consumable.id),
+      title: 'Actual quantity delivered',
+      savedLabel: 'Quantity',
+      description: '${consumable.itemName} · Expected ${consumable.quantity} '
+          '${consumable.unit}\n\nLeave the quantity blank to clear it.',
+      inputs: [
+        FieldDraftInput(
+          id: 'quantity',
+          label: 'Delivered quantity',
+          initialText: consumable.actualQuantityDelivered?.toString() ?? '',
+          keyboardType: TextInputType.number,
+          validator: (value) => _validateCount(value, optional: true),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (formKey.currentState?.validate() ?? false) {
-                Navigator.pop(dialogContext);
-
-                final valueText = controller.text.trim();
-                final actualQuantity = valueText.isEmpty
-                    ? null
-                    : int.parse(valueText);
-
-                final updatedConsumable = consumable.copyWith(
-                  actualQuantityDelivered: actualQuantity,
-                );
-
-                final success = await ref
-                    .read(schoolsNotifierProvider.notifier)
-                    .updateClassroomConsumable(
-                  schoolId,
-                  yearLevelId,
-                  classroomId,
-                  updatedConsumable,
-                );
-
-                if (context.mounted && success) {
-                  final message = actualQuantity == null
-                      ? 'Partial delivery cleared for ${consumable.itemName}'
-                      : 'Actual quantity set: $actualQuantity/${consumable.quantity} ${consumable.unit}';
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(message),
-                      backgroundColor:
-                          actualQuantity == null ? Colors.blue : Colors.orange,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.saveClassroomActualQuantity(
+        schoolId,
+        yearLevelId,
+        classroomId,
+        consumable.id,
+        int.tryParse(draft.values['quantity']!.trim()),
+        editId: draft.revision,
       ),
     );
   }
@@ -1776,237 +1624,87 @@ class ClassroomDetailScreen extends ConsumerWidget {
     );
   }
 
-  // Note management methods
-  void _showAddNoteDialog(BuildContext context, WidgetRef ref) {
-    final contentController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    // Get current staff's name for auto-assignment
-    final currentStaff = ref.read(currentStaffProvider).value;
-    final currentUser = ref.read(currentUserProvider).value;
-
-    // Use staff name if available, otherwise use user email (without domain for brevity)
-    String staffName = 'Unknown';
-    if (currentStaff?.name != null) {
-      staffName = currentStaff!.name;
-    } else if (currentUser?.email != null) {
-      // Extract name part from email (everything before @)
-      staffName = currentUser!.email.split('@').first;
-    }
-
-    showDialog(
+  void _showNoteDialog(BuildContext context, WidgetRef ref, {Note? note}) {
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    final staffName = ref.read(currentStaffProvider).valueOrNull?.name;
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Note'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: contentController,
-                decoration: const InputDecoration(
-                  labelText: 'Note',
-                  hintText: 'Enter your note here...',
-                ),
-                maxLines: 3,
-                autofocus: true,
-                validator: (value) => value?.trim().isEmpty ?? true
-                    ? 'Please enter a note'
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.person_outline, size: 16, color: Colors.grey),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Author: $staffName',
-                      style: const TextStyle(fontSize: 13, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+      ref: ref,
+      target: _draftTarget('note', entityId: note?.id),
+      title: note == null ? 'Add note' : 'Edit note',
+      savedLabel: 'Note',
+      inputs: [
+        FieldDraftInput(
+          id: 'content',
+          label: 'Note',
+          initialText: note?.content ?? '',
+          maxLines: 4,
+          keyboardType: TextInputType.multiline,
+          validator: (value) {
+            final content = value.trim();
+            if (content.isEmpty) return 'Enter a note.';
+            if (content.length > 20000) return 'Use 20,000 characters or fewer.';
+            return null;
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final note = Note(
+      ],
+      onSave: (draft) {
+        final content = draft.values['content']!.trim();
+        return schools.saveClassroomNote(
+          schoolId,
+          yearLevelId,
+          classroomId,
+          note?.copyWith(content: content) ??
+              Note(
                 id: '',
-                content: contentController.text.trim(),
+                content: content,
                 author: staffName,
                 createdAt: DateTime.now(),
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .createClassroomNote(schoolId, yearLevelId, classroomId, note);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Note added successfully'
-                        : 'Failed to add note'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditNoteDialog(BuildContext context, WidgetRef ref, Note note) {
-    final contentController = TextEditingController(text: note.content);
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit Note'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: contentController,
-                decoration: const InputDecoration(
-                  labelText: 'Note',
-                  hintText: 'Enter your note here...',
-                ),
-                maxLines: 3,
-                autofocus: true,
-                validator: (value) => value?.trim().isEmpty ?? true
-                    ? 'Please enter a note'
-                    : null,
               ),
-              if (note.author != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.person_outline, size: 16, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Original author: ${note.author}',
-                        style: const TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final updatedNote = Note(
-                id: note.id,
-                content: contentController.text.trim(),
-                author: note.author,  // Keep the original author
-                createdAt: note.createdAt,
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .updateClassroomNote(
-                      schoolId, yearLevelId, classroomId, updatedNote);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Note updated successfully'
-                        : 'Failed to update note'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+          editId: draft.revision,
+        );
+      },
     );
   }
 
-  void _showDeleteNoteConfirmation(
-      BuildContext context, WidgetRef ref, Note note) {
-    showDialog(
+  Future<void> _showDeleteNoteConfirmation(
+    BuildContext context,
+    WidgetRef ref,
+    Note note,
+  ) async {
+    final confirmed = await showDialog<bool>(
       context: context,
+      useRootNavigator: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Note'),
-        content: const Text(
-          'Are you sure you want to delete this note? This action cannot be undone.',
-        ),
+        title: const Text('Delete note?'),
+        content: const Text('This removes the note from this classroom.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .deleteClassroomNote(
-                      schoolId, yearLevelId, classroomId, note.id);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Note deleted successfully'
-                        : 'Failed to delete note'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+    if (confirmed != true || !context.mounted) return;
+
+    final result = await ref.read(schoolsNotifierProvider.notifier)
+        .saveClassroomNoteDeletion(schoolId, yearLevelId, classroomId, note);
+    if (!context.mounted) return;
+    final message = result.when(
+      success: (status) => switch (status) {
+        ClassroomEditStatus.saved => 'Note deleted',
+        ClassroomEditStatus.pending => 'Note removal saved on this device · Sync pending',
+        ClassroomEditStatus.unconfirmed =>
+          'Deletion request saved on this device. Review it when connected.',
+      },
+      failure: (message, _) => message,
+    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // Year Level Breakdown Dialog Methods
@@ -2274,138 +1972,74 @@ class _PhotoCard extends ConsumerWidget {
   const _PhotoCard({
     super.key,
     required this.photo,
+    required this.asset,
+    required this.schoolId,
     required this.onRemove,
   });
 
   final Photo photo;
+  final OfflineMediaAsset? asset;
+  final String schoolId;
   final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final storageRepository = ref.watch(storageRepositoryProvider);
-    final currentUser = ref.watch(currentUserProvider).value;
-    final isAdmin = ref.watch(isAdminProvider);
-    final isManager = ref.watch(isManagerProvider);
+    final owner = ref.watch(offlineMediaOwnerProvider(schoolId));
+    final canRemove = owner != null &&
+        (ref.watch(isAdminProvider) ||
+            ref.watch(isManagerProvider) ||
+            photo.uploadedBy == owner);
+    final source = asset;
 
-    final canRemove = isAdmin ||
-        isManager ||
-        (photo.uploadedBy != null && photo.uploadedBy == currentUser?.uid);
-
-    return FutureBuilder<String>(
-      future: storageRepository.getDownloadUrl(photo.storagePath).then(
-            (result) => result.dataOrNull ?? '',
-          ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Card(
-            child: Center(
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.grey.shade400,
-              ),
-            ),
-          );
-        }
-
-        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
-          return Card(
-            child: Center(
-              child: Icon(Icons.broken_image, color: Colors.grey.shade400),
-            ),
-          );
-        }
-
-        return GestureDetector(
-          onTap: () => _showFullScreenImage(context, snapshot.data!),
-          child: Card(
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  snapshot.data!,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        value: loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded /
-                                loadingProgress.expectedTotalBytes!
-                            : null,
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Center(
-                      child: Icon(Icons.broken_image,
-                          color: Colors.grey.shade400),
-                    );
-                  },
-                ),
-                if (canRemove)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: Material(
-                      color: Colors.black54,
-                      shape: const CircleBorder(),
-                      clipBehavior: Clip.antiAlias,
-                      child: IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, size: 18),
-                        tooltip: 'Remove from classroom',
-                        color: Colors.white,
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                        onPressed: onRemove,
-                      ),
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (owner != null && source != null)
+            Semantics(
+              button: true,
+              label: 'Open classroom photo',
+              child: InkWell(
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => OfflineMediaScreen(
+                      asset: source,
+                      ownerUid: owner,
+                      title: 'Classroom photo',
                     ),
                   ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showFullScreenImage(BuildContext context, String imageUrl) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.black,
-        insetPadding: EdgeInsets.zero,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
+                ),
+                child: OfflineMediaPreview(asset: source, fit: BoxFit.cover),
+              ),
+            )
+          else
+            const Center(child: Icon(Icons.broken_image_outlined)),
+          if (source?.visit != null)
+            Positioned(
+              top: 4,
+              left: 4,
+              child: Material(
+                color: Theme.of(context).colorScheme.surface,
+                shape: const CircleBorder(),
+                child: OfflineMediaDownloadButton(asset: source!),
               ),
             ),
+          if (canRemove)
             Positioned(
-              top: 40,
-              right: 16,
+              top: 4,
+              right: 4,
               child: Material(
-                color: Colors.black54,
+                color: Theme.of(context).colorScheme.surface,
                 shape: const CircleBorder(),
-                clipBehavior: Clip.antiAlias,
                 child: IconButton(
-                  icon: const Icon(Icons.close),
-                  color: Colors.white,
-                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.remove_circle_outline, size: 18),
+                  tooltip: 'Remove from classroom',
+                  onPressed: onRemove,
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -2442,6 +2076,9 @@ class _PhotosSectionState extends ConsumerState<_PhotosSection> {
   @override
   Widget build(BuildContext context) {
     final photos = ref.watch(classroomPhotosProvider(_classroom));
+    final mediaBucket = photos.valueOrNull?.isNotEmpty == true
+        ? ref.watch(offlineMediaBucketProvider)
+        : null;
     final uploads = ref.watch(evidenceUploadsProvider);
     final status = uploads.valueOrNull;
     final worker = ref.watch(evidenceUploadWorkerProvider).valueOrNull;
@@ -2543,9 +2180,24 @@ class _PhotosSectionState extends ConsumerState<_PhotosSection> {
               itemCount: remote.length,
               itemBuilder: (context, index) {
                 final photo = remote[index];
+                final deliveryId = widget.deliveryId;
+                final visit = deliveryId == null
+                    ? null
+                    : DeliveryVisit(deliveryId: deliveryId, schoolId: widget.schoolId);
+                final asset = OfflineMediaAsset.classroomPhoto(
+                  bucket: mediaBucket!,
+                  schoolId: widget.schoolId,
+                  yearLevelId: widget.yearLevelId,
+                  classroomId: widget.classroomId,
+                  photoId: photo.id,
+                  reference: photo.storagePath,
+                  visit: visit,
+                );
                 return _PhotoCard(
                   key: ValueKey(photo.id),
                   photo: photo,
+                  asset: asset,
+                  schoolId: widget.schoolId,
                   onRemove: () => _handleRemovePhoto(photo),
                 );
               },

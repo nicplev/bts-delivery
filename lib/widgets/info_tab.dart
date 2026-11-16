@@ -3,15 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:async';
+import '../models/offline/offline_media.dart';
 import '../models/school.dart';
 import '../providers/schools_providers.dart';
 import '../providers/delivery_visit_provider.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
+import '../providers/offline_media_providers.dart';
 import 'package:uuid/uuid.dart';
+import 'offline_media_view.dart';
 import 'school_timer_history.dart';
 
 class InfoTab extends ConsumerStatefulWidget {
@@ -243,9 +244,18 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   }
 
   Widget _buildSchoolMapCard(School school) {
-    final isAdmin = ref.watch(isAdminProvider);
-    final isManager = ref.watch(isManagerProvider);
-    final canEdit = isAdmin || isManager;
+    final canEdit = ref.watch(canEditSchoolDataProvider);
+    final visit = ref.watch(activeDeliveryVisitProvider);
+    final reference = school.schoolMapStoragePath ?? school.schoolMapUrl;
+    final asset = reference == null
+        ? null
+        : OfflineMediaAsset.schoolMap(
+            bucket: ref.watch(offlineMediaBucketProvider),
+            schoolId: school.id,
+            reference: reference,
+            visit: visit,
+          );
+    final owner = ref.watch(offlineMediaOwnerProvider(school.id));
 
     return Card(
       child: Padding(
@@ -258,424 +268,64 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 Icon(Icons.map_outlined, color: Theme.of(context).primaryColor),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    'School Map',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
+                  child: Text('School map', style: Theme.of(context).textTheme.titleLarge),
                 ),
-                if (canEdit && school.schoolMapUrl != null)
+                if (canEdit && reference != null)
                   IconButton(
                     onPressed: () => _showDeleteMapConfirmation(school),
                     icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Delete Map',
-                    color: Colors.red,
+                    tooltip: 'Delete map',
                   ),
                 if (canEdit)
                   IconButton(
                     onPressed: () => _handleUploadSchoolMap(school),
-                    icon: Icon(school.schoolMapUrl == null ? Icons.add : Icons.edit),
-                    tooltip: school.schoolMapUrl == null ? 'Upload Map' : 'Replace Map',
+                    icon: Icon(reference == null ? Icons.add : Icons.edit),
+                    tooltip: reference == null ? 'Upload map' : 'Replace map',
                   ),
               ],
             ),
-            const SizedBox(height: 12),
-            if (school.schoolMapUrl == null)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Icon(Icons.map_outlined, size: 48, color: Colors.grey[400]),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No school map uploaded',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                      if (canEdit) ...[
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: () => _handleUploadSchoolMap(school),
-                          icon: const Icon(Icons.cloud_upload),
-                          label: const Text('Upload Map'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              )
+            if (reference == null)
+              const Text('No school map uploaded')
+            else if (asset == null)
+              const Text('This school map cannot be opened from its saved reference')
             else ...[
-              // Check if it's a PDF by looking at the storage path (more reliable than URL)
-              Builder(
-                builder: (context) {
-                  final isPdf = school.schoolMapStoragePath?.toLowerCase().endsWith('.pdf') ??
-                                school.schoolMapUrl!.toLowerCase().contains('.pdf');
-
-                  if (isPdf) {
-                    // For PDFs, get fresh URL and show preview using SfPdfViewer with zoom controls
-                    if (school.schoolMapStoragePath != null) {
-                      final storageRepository = ref.read(storageRepositoryProvider);
-                      return FutureBuilder<String>(
-                        future: storageRepository.getDownloadUrl(school.schoolMapStoragePath!).then(
-                          (result) => result.dataOrNull ?? school.schoolMapUrl!,
-                        ),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return Container(
-                              height: 200,
-                              color: Colors.grey[200],
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          }
-
-                          final pdfUrl = snapshot.data ?? school.schoolMapUrl!;
-                          return _buildPdfViewer(pdfUrl);
-                        },
-                      );
-                    }
-
-                    // Fallback for PDF without storage path
-                    return _buildPdfViewer(school.schoolMapUrl!);
-                  }
-
-                  // For images, use FutureBuilder to get fresh URL from storage path
-                  if (school.schoolMapStoragePath != null) {
-                    final storageRepository = ref.read(storageRepositoryProvider);
-                    return FutureBuilder<String>(
-                      future: storageRepository.getDownloadUrl(school.schoolMapStoragePath!).then(
-                        (result) => result.dataOrNull ?? school.schoolMapUrl!,
-                      ),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return Container(
-                            height: 300,
-                            color: Colors.grey[200],
-                            child: const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                          );
-                        }
-
-                        final imageUrl = snapshot.data ?? school.schoolMapUrl!;
-                        return _buildImageViewer(imageUrl);
-                      },
-                    );
-                  }
-
-                  // Fallback: use stored URL directly
-                  return _buildImageViewer(school.schoolMapUrl!);
-                },
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _viewSchoolMap(school.schoolMapUrl!),
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('Open in Browser'),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 250,
+                  child: OfflineMediaPreview(asset: asset),
                 ),
+              ),
+              if (visit != null) OfflineMediaDownloadStatus(asset: asset),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    onPressed: owner == null
+                        ? null
+                        : () => Navigator.of(context).push<void>(
+                              MaterialPageRoute(
+                                builder: (_) => OfflineMediaScreen(
+                                  asset: asset,
+                                  ownerUid: owner,
+                                  title: 'School map',
+                                ),
+                              ),
+                            ),
+                    icon: const Icon(Icons.open_in_full_outlined),
+                    label: const Text('Open map'),
+                  ),
+                  if (visit != null)
+                    OfflineMediaDownloadButton(asset: asset, compact: false),
+                ],
               ),
             ],
+            if (visit != null)
+              OfflineEarlierMapButton(visit: visit, currentMap: asset),
           ],
         ),
       ),
-    );
-  }
-
-  /// Builds PDF viewer with zoom controls
-  Widget _buildPdfViewer(String pdfUrl) {
-    return StatefulBuilder(
-      builder: (context, setLocalState) {
-        final pdfController = PdfViewerController();
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            height: 300,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Stack(
-              children: [
-                SfPdfViewer.network(
-                  pdfUrl,
-                  controller: pdfController,
-                  canShowScrollHead: true,
-                  canShowScrollStatus: true,
-                  enableDoubleTapZooming: true,
-                  enableTextSelection: false,
-                  canShowPaginationDialog: true,
-                  pageLayoutMode: PdfPageLayoutMode.continuous,
-                  scrollDirection: PdfScrollDirection.vertical,
-                  interactionMode: PdfInteractionMode.pan,
-                ),
-                // PDF badge
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.picture_as_pdf, color: Colors.white, size: 16),
-                        SizedBox(width: 4),
-                        Text(
-                          'PDF',
-                          style: TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Zoom controls
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.zoom_out, color: Colors.white, size: 20),
-                          onPressed: () {
-                            final newZoom = (pdfController.zoomLevel - 0.5).clamp(1.0, 4.0);
-                            pdfController.zoomLevel = newZoom;
-                          },
-                          tooltip: 'Zoom out',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.fit_screen, color: Colors.white, size: 20),
-                          onPressed: () {
-                            pdfController.zoomLevel = 1.0;
-                          },
-                          tooltip: 'Reset zoom',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.zoom_in, color: Colors.white, size: 20),
-                          onPressed: () {
-                            final newZoom = (pdfController.zoomLevel + 0.5).clamp(1.0, 4.0);
-                            pdfController.zoomLevel = newZoom;
-                          },
-                          tooltip: 'Zoom in',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Hint text
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.touch_app, color: Colors.white, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          'Double-tap to zoom',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  /// Builds image viewer with zoom controls and double-tap to reset
-  Widget _buildImageViewer(String imageUrl) {
-    return StatefulBuilder(
-      builder: (context, setLocalState) {
-        final transformController = TransformationController();
-        var isZoomed = false;
-
-        void resetZoom() {
-          transformController.value = Matrix4.identity();
-          setLocalState(() {
-            isZoomed = false;
-          });
-        }
-
-        void zoomIn() {
-          final currentScale = transformController.value.getMaxScaleOnAxis();
-          final newScale = (currentScale * 1.5).clamp(1.0, 4.0);
-          transformController.value = Matrix4.diagonal3Values(newScale, newScale, 1);
-          setLocalState(() {
-            isZoomed = newScale > 1.0;
-          });
-        }
-
-        void zoomOut() {
-          final currentScale = transformController.value.getMaxScaleOnAxis();
-          final newScale = (currentScale / 1.5).clamp(1.0, 4.0);
-          if (newScale <= 1.0) {
-            resetZoom();
-          } else {
-            transformController.value = Matrix4.diagonal3Values(newScale, newScale, 1);
-            setLocalState(() {
-              isZoomed = true;
-            });
-          }
-        }
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            height: 300,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Stack(
-              children: [
-                GestureDetector(
-                  onDoubleTap: () {
-                    if (isZoomed) {
-                      resetZoom();
-                    } else {
-                      // Zoom to 2x on double-tap
-                      transformController.value = Matrix4.diagonal3Values(2.0, 2.0, 1);
-                      setLocalState(() {
-                        isZoomed = true;
-                      });
-                    }
-                  },
-                  child: InteractiveViewer(
-                    transformationController: transformController,
-                    minScale: 1.0,
-                    maxScale: 4.0,
-                    panEnabled: true,
-                    scaleEnabled: true,
-                    onInteractionEnd: (_) {
-                      setLocalState(() {
-                        isZoomed = transformController.value.getMaxScaleOnAxis() > 1.0;
-                      });
-                    },
-                    child: CachedNetworkImage(
-                      imageUrl: imageUrl,
-                      height: 300,
-                      width: double.infinity,
-                      fit: BoxFit.contain,
-                      placeholder: (context, url) => Container(
-                        height: 300,
-                        color: Colors.grey[200],
-                        child: const Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                      errorWidget: (context, url, error) => Container(
-                        height: 300,
-                        color: Colors.grey[200],
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.broken_image, size: 48, color: Colors.grey[400]),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Failed to load map',
-                              style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // Zoom controls
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.zoom_out, color: Colors.white, size: 20),
-                          onPressed: zoomOut,
-                          tooltip: 'Zoom out',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.fit_screen, color: Colors.white, size: 20),
-                          onPressed: resetZoom,
-                          tooltip: 'Reset zoom',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.zoom_in, color: Colors.white, size: 20),
-                          onPressed: zoomIn,
-                          tooltip: 'Zoom in',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Hint text
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.touch_app, color: Colors.white, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          'Double-tap to zoom',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -1476,22 +1126,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           backgroundColor: Colors.red,
         ),
       );
-    }
-  }
-
-  void _viewSchoolMap(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not open map: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 

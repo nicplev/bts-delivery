@@ -33,7 +33,13 @@ class DeliveryVisitGate extends ConsumerWidget {
         !state.hasError &&
         (member.hasManagerAccess ||
             member.assignedSchoolIds.contains(visit.schoolId))) {
-      return child;
+      // Imperative pushes can skip a nested GoRouter shell builder. Bind the
+      // repository here so each visit page gets the same scope and access check.
+      return ProviderScope(
+        key: ValueKey(visit),
+        overrides: [activeDeliveryVisitProvider.overrideWithValue(visit)],
+        child: child,
+      );
     }
     return Scaffold(
       appBar: AppBar(

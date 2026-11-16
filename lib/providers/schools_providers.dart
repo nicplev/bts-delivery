@@ -1,8 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/school.dart';
-import '../models/delivery_visit.dart';
 import '../repositories/schools_repository.dart';
 import '../repositories/classroom_edit.dart';
 import '../services/result.dart';
@@ -249,33 +246,6 @@ Map<String, ({int quantity, String unit})> _sumConsumables(
   return totals;
 }
 
-typedef ClassroomLocation = ({
-  String schoolId,
-  String yearLevelId,
-  String classroomId,
-  DeliveryVisit? visit,
-});
-
-final classroomEditFailuresProvider =
-    StateNotifierProvider<ClassroomEditFailures, List<ClassroomLocation>>(
-        (ref) {
-  // A previous account's pending writes must never surface in a new session.
-  ref.watch(authStateProvider.select((auth) => auth.valueOrNull?.uid));
-  return ClassroomEditFailures();
-});
-
-class ClassroomEditFailures extends StateNotifier<List<ClassroomLocation>> {
-  ClassroomEditFailures() : super(const []);
-
-  void record(ClassroomLocation location) {
-    if (mounted && !state.contains(location)) state = [...state, location];
-  }
-
-  void dismiss(ClassroomLocation location) {
-    state = state.where((entry) => entry != location).toList();
-  }
-}
-
 class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
   SchoolsNotifier(this._schoolsRepository, this._ref)
       : super(const AsyncValue.data(null));
@@ -373,23 +343,10 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     String yearLevelId,
     String classroomId, {
     required String name,
-  }) {
-    return _trackClassroomEdit(
-      (
-        schoolId: schoolId,
-        yearLevelId: yearLevelId,
-        classroomId: classroomId,
-        visit: _ref.read(activeDeliveryVisitProvider),
-      ),
-      (updatedBy) => _schoolsRepository.updateClassroomName(
-        schoolId,
-        yearLevelId,
-        classroomId,
-        name: name,
-        updatedBy: updatedBy,
-      ),
-    );
-  }
+    String? editId,
+  }) => _saveClassroomEdit((updatedBy) => _schoolsRepository.updateClassroomName(
+    schoolId, yearLevelId, classroomId, name: name, updatedBy: updatedBy, editId: editId,
+  ));
 
   Future<Result<ClassroomEditStatus>> updateClassroomStatus(
     String schoolId,
@@ -397,46 +354,49 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     String classroomId, {
     required ClassroomCompletionStatus status,
     required int? actualPacksDelivered,
-  }) {
-    return _trackClassroomEdit(
-      (
-        schoolId: schoolId,
-        yearLevelId: yearLevelId,
-        classroomId: classroomId,
-        visit: _ref.read(activeDeliveryVisitProvider),
-      ),
-      (updatedBy) => _schoolsRepository.updateClassroomStatus(
-        schoolId,
-        yearLevelId,
-        classroomId,
-        status: status,
-        actualPacksDelivered: actualPacksDelivered,
-        updatedBy: updatedBy,
-      ),
-    );
-  }
+    String? editId,
+  }) => _saveClassroomEdit((updatedBy) => _schoolsRepository.updateClassroomStatus(
+    schoolId, yearLevelId, classroomId, status: status,
+    actualPacksDelivered: actualPacksDelivered, updatedBy: updatedBy, editId: editId,
+  ));
 
-  Future<Result<ClassroomEditStatus>> _trackClassroomEdit(
-    ClassroomLocation location,
+  Future<Result<ClassroomEditStatus>> saveClassroomNote(
+    String schoolId, String yearLevelId, String classroomId, Note note, {String? editId}
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomNote(
+    schoolId, yearLevelId, classroomId, note, updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomNoteDeletion(
+    String schoolId, String yearLevelId, String classroomId, Note note,
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomNoteDeletion(
+    schoolId, yearLevelId, classroomId, note, updatedBy: updatedBy,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomActualQuantity(
+    String schoolId, String yearLevelId, String classroomId, String consumableId, int? quantity,
+    {String? editId}
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomActualQuantity(
+    schoolId, yearLevelId, classroomId, consumableId, quantity,
+    updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomPackTotal(
+    String schoolId, String yearLevelId, String classroomId, int total, {String? editId}
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomPackTotal(
+    schoolId, yearLevelId, classroomId, total, updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> _saveClassroomEdit(
     Future<Result<ClassroomEditReceipt>> Function(String updatedBy) submit,
   ) async {
     final staff = _ref.read(currentStaffProvider).valueOrNull;
-    if (staff == null) {
+    final user = _ref.read(authRepositoryProvider).currentUser;
+    if (staff == null || user == null || staff.uid != user.uid) {
       return const Result.failure('Link your staff account before editing.');
     }
-    final failures = _ref.read(classroomEditFailuresProvider.notifier);
-    final result = await submit(staff.name);
-    return result.when(
-      success: (receipt) {
-        unawaited(receipt.acknowledgment.then((acknowledgment) {
-          if (acknowledgment.isFailure) failures.record(location);
-        }));
-        return Result.success(receipt.status);
-      },
-      failure: (message, exception) {
-        failures.record(location);
-        return Result.failure(message, exception);
-      },
+    return (await submit(staff.name)).when(
+      success: (receipt) => Result.success(receipt.status),
+      failure: Result<ClassroomEditStatus>.failure,
     );
   }
 

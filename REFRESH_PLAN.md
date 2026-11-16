@@ -59,7 +59,8 @@ Date: 16 November 2026. Baseline: `d1b2a3d`.
 - [x] Recover interrupted queue entries, retain failed work with errors, and implement bounded retry/backoff.
 - [x] Bind pending work to its originating user and prevent cross-account uploads.
 - [x] Show reactive pending/error counts and distinguish connectivity from acknowledged synchronization.
-- [ ] Audit Firestore-backed edits for local-save feedback, narrow field updates, and partial-operation failures.
+- [x] Audit core field edits for local-save feedback, narrow updates and atomic related writes (rename/status, classroom notes, actual consumables, pack-count additions and loading checklist).
+- [ ] Complete the separate review of administrative/template forms and unused school-note APIs.
 - [x] Test restart, failed metadata write, retry, account change, cancellation, and reconnect behavior.
 
 ## Phase 3 — audit history and repeat deliveries
@@ -83,9 +84,11 @@ Date: 16 November 2026. Baseline: `d1b2a3d`.
 - [x] Provide clear empty, error, stale/offline, and retry states; remove endless error spinners.
 - [x] Put sync state at school/classroom points of work, not just home/profile.
 - [ ] Reduce navigation friction for classroom status, counts, photos, notes, and next classroom.
-- [ ] Preserve drafts and pending work when navigating away.
+- [x] Preserve drafts and pending work in common classroom delivery forms when navigating away.
+- [ ] Extend draft preservation to remaining setup/administrative forms.
 - [ ] Keep role-appropriate actions, accessible labels, touch targets, and readable status text.
-- [ ] Verify representative phone layouts, long school names, large text, and keyboard states on an available simulator/device.
+- [x] Verify common field forms at 320 px / 1.8× text with keyboard in widget tests, and native visit/media/recovery flows on iPhone 17 Pro.
+- [ ] Complete exhaustive phone layouts, long content, accessibility and physical-device keyboard checks.
 
 ## Phase 5 — performance and maintainability
 
@@ -134,15 +137,17 @@ Run from the repository root with enough free disk space. Never substitute the p
 /Users/nicplev/Library/development/flutter-3.44.6/bin/flutter test --no-pub --concurrency=1
 /Users/nicplev/Library/development/flutter-3.44.6/bin/flutter analyze --no-pub
 npm --prefix functions test
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 npm --prefix functions run test:emulators
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH npm --prefix functions run test:emulators
 git diff --check
 ```
 
 The emulator suite uses synthetic `demo-bts-delivery` data on Auth 9099, Firestore 8080, Storage 9199 and Functions 5001. It refuses non-local service hosts. Java 21 is required by the installed Firebase CLI. Start all four services, rather than the Functions-only development script, when manually exercising the app.
 
-Debug builds can select that synthetic project using `--dart-define=BTS_FIREBASE_EMULATOR_HOST=127.0.0.1`. Use an isolated demo app installation for native testing, with no production queue. The define is rejected outside debug mode. Local `.env` and generated platform configuration are still required to build; do not commit real credentials or generated Firebase configuration.
+Debug builds select the synthetic project using `--dart-define=BTS_FIREBASE_EMULATOR_HOST=127.0.0.1`; iOS also requires the native demo flag and isolated bundle identifier listed in the reproduction section below. Use a separate demo installation with no production queue. The Dart define is rejected outside debug mode. Local `.env` and generated platform configuration are still required to build; do not commit real credentials or generated Firebase configuration.
 
-## Current implementation evidence and practical limits
+## Baseline checkpoint evidence and practical limits (bfa5ed6)
+
+This records the first refresh checkpoint. The continuation below supersedes its native-build, ordinary-edit recovery, draft and media limitations; remaining release gates still apply.
 
 - Combined Flutter suite: **46 tests passed**, including photo-retention integration, connectivity/assignment gate behaviour and two account-switch stream tests. Includes a real router flow through two separate visits at one school, and blocking an unprepared offline visit before its work repository opens.
 - Final whole-repository analyzer: **zero errors, zero warnings, 26 informational diagnostics** (three existing application lints and 23 print notices in the legacy migration script). The default analyzer exit is 1 because informational diagnostics remain. Focused changed-code analysis passed. This is not a zero-diagnostic claim.
@@ -169,10 +174,69 @@ The new access rules are prototype release candidates. They enforce server-owned
 - Backend final checkpoint: 10/10 synthetic Firebase emulator tests and 3/3 Functions unit tests passed, with a successful TypeScript build. Emulator cases exercise reciprocal links, role/assignment scope, prepared visit isolation, template protection, immutable files including retained photos after live metadata removal, sign-off rules, calendar rotation/scope, and atomic timer/auto-stop history. The scheduled Pub/Sub wrapper was not run; its transaction helper was exercised directly.
 
 
-## Next implementation and release sequence
+## Remaining implementation and release sequence
 
-1. Free several GB of build space and restore the native build connection, then run the refreshed app against the demo Firebase services on iOS. Verify sign-in/invite, Today, two visits, long text, keyboard, photo capture/removal and signed-history screens.
-2. Complete durable recovery for rejected ordinary Firestore edits and unfinished forms. Review each note/count/checklist dialog so losing reception never leaves a misleading success state or an indefinite save spinner.
-3. Add deliberate offline media download/readiness and benchmark first/repeat visit preparation on small and large schools. Expand atomic preparation beyond 499 child documents if representative schools require it; retain the no-partial-ready invariant.
-4. Complete archive/cancel, privacy-conscious crash reporting, and workbook visual verification. Review larger dependency upgrades separately from this structural change.
-5. Run two-device and physical-phone dropout/restart tests, then rehearse the reviewed identity/access migration and coordinated release above. Keep every unchecked checklist item open until its evidence exists.
+1. Complete administrative/template form review, remaining navigation/accessibility improvements, archive/cancel and privacy-conscious crash reporting.
+2. Benchmark first/repeat visit preparation and local-save feedback using representative school data. Expand atomic preparation beyond 499 child documents if real school sizes require it; retain the no-partial-ready invariant.
+3. Complete historical school-only record inventory/migration reporting and workbook visual verification. Review larger dependency upgrades separately.
+4. Run two-device and physical-phone reception, camera, low-storage, restart and reconnection-flapping tests. Simulator outage evidence below covers only the tested subset.
+5. Rehearse the reviewed identity/access migration and coordinated release above. Keep unchecked items open until their evidence exists.
+
+## Continuation — offline recovery and deliberate media downloads
+
+Baseline for this increment: `bfa5ed6` on `codex/app-refresh`. Requested 16 November 2026. Astra orchestrates/reviews; Sol 6.1 implements. Disk availability at restart is approximately 5.3 GiB; native verification will be retried after implementation.
+
+Design constraints:
+- Preserve a durable, account-bound copy of ordinary edit intent before submitting it. Firestore remains responsible for its native pending writes. A recovered intent with uncertain acknowledgement must not silently replay over newer team changes; expose comparison/review and an explicit retry where needed.
+- Bound form save waits and distinguish saved locally, acknowledged, rejected, and unconfirmed. Stable document IDs and atomic related writes prevent duplicate note/count creation or partial classroom metadata updates.
+- Preserve practical field-form drafts by account and visit, including notes and recorded counts. Explicit discard is separate from navigation/dismissal; a failed local save must remain visible.
+- Offline media is deliberate, separately reported from classroom-record readiness, scoped to the signed-in account and visit, and limited in disk use. Download with bounded concurrency into temporary files, publish only complete verified files, and retain interrupted/failing status for retry.
+- Prefer authenticated Firebase Storage references for the configured bucket. Do not turn stored arbitrary URLs into unrestricted download requests. Cache keys distinguish mutable map versions; downloaded media must never mix between accounts or visits.
+- Removing downloaded copies cannot remove pending uploads or remote signed evidence. Offline image/PDF viewers must use verified local files without first fetching a download URL.
+
+Checklist for this increment:
+- [x] Persistent ordinary-edit recovery store, restart reconciliation, account isolation, and review/retry UI.
+- [x] Local acknowledgement and atomic saves for core field notes/count/checklist operations; preserve unrelated fields.
+- [x] Durable drafts for common delivery forms with restore/discard behaviour.
+- [x] Per-visit media inventory, download progress/retry/cancellation, and bounded local cache.
+- [x] Classroom photos and school map/PDF views use downloaded media offline.
+- [x] Regression tests for uncertain acknowledgement, newer remote edits, crash/restart, account changes, interrupted downloads, stale map versions, missing files, and cache limits.
+- [x] Independent Astra review of recovery and media paths; resolve actionable findings.
+- [x] Full Flutter tests, analyzer, relevant backend checks, and native demo verification if tooling permits.
+- [x] Update operator/offline documentation and save a reviewed local checkpoint.
+
+
+Continuation journal (verified local checkpoint):
+- Core recovery covers classroom rename/status, classroom note create/edit/delete, actual consumable counts, pack-count append and loading-checklist marks. Expected/configured consumable editing and unused school-note APIs remain outside this slice.
+- Drafts are persisted separately from submitted edits, with revision-scoped removal and stable operation IDs. Unsaved keystrokes during the visible “Saving draft…” interval are not claimed durable.
+- Media cache limits: 25 MiB/file, 200 MiB across accounts on the device, one native writer, bounded inventory reads. Earlier map copies remain accessible with explicit older-copy labels. Clearing downloaded media is separate from pending uploads and retained edits.
+- First combined run exposed seven deterministic media-test failures caused by macOS file timestamp precision differences; using the same stat representation corrected them, followed by a passing focused run. Final combined verification passed all 76 Flutter tests.
+- Native build now compiles, installs and launches the isolated demo on iPhone 17 Pro / iOS 26.5. Fixed native Firebase demo initialization/key format and app-only bundle identifier overrides. Debug/simulator builds skip crash-symbol upload; production configuration is unchanged.
+- Native dashboard navigation exposed a scope bug masked by earlier declarative-route tests. The actual Open school action must retain visit scope through classroom navigation and dialogs. The fix gates and scopes every visit page directly; the regression now taps the real Today card and verifies two visits remain isolated. Native retesting confirmed the route and scope fix before any delivery writes.
+
+- Final verification: **76/76 Flutter tests**, **11/11 Firebase emulator cases**, and **3/3 Functions unit tests** passed; TypeScript build passed. Whole-repository analyzer reports zero errors/warnings and the same 26 baseline informational diagnostics (default exit 1). Diff whitespace check passed.
+- Fresh Astra review closed the identified recovery durability/admission race, media integrity/removal/earlier-map issues, review-sheet navigation and visit-route scope findings. Sol 6.1 implemented the fixes.
+- Native evidence: isolated demo on iPhone 17 Pro / iOS 26.5 signed in as synthetic field staff, opened the actual Today card and downloaded **2/2** media files (PDF map and JPEG classroom photo). With only this demo's backend processes paused, a force-stop/relaunch opened both downloaded files locally and restored an unfinished **12 packs** draft. Saving returned a local pending state. A second force-stop/relaunch retained the saved-edit review. On backend recovery, server comparison matched the intended values, and Open classroom dismissed both review layers correctly.
+- Independent emulator read after reconnect confirmed first visit `incomplete / actualPacks: 12`; second visit remained `notAttended / actualPacks: null`. This demonstrates this tested operation's restart/reconnect and visit isolation; it is not a universal exactly-once guarantee for every operation.
+- Remaining acceptance: physical airplane/radio changes, connection flapping, camera capture, low storage, simultaneous phones, representative school latency/read costs, and remaining setup/admin forms. No production deploy, real-account migration or GitHub push is included in this increment.
+
+### Reproducing the isolated native demo
+
+Start the four local emulators for `demo-bts-delivery`, then seed the synthetic fixture:
+
+```sh
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 \
+FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 \
+FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1:9199 \
+node functions/scripts/seed-offline-demo.cjs
+```
+
+The seed uses only fixed localhost emulator endpoints and synthetic accounts; existing fixture edits and delivery dates are preserved. Its output supplies the fake sign-in accounts. It refuses missing emulator hosts or a conflicting project setting. Syntax, refusal paths and a repeat run against the existing demo were checked; both visit records and update times stayed unchanged (first count 12, second null). Fresh creation was checked against the preparation schema but has not been rerun against an empty emulator.
+
+For the iOS Debug build, set all three together:
+
+- Dart define `BTS_FIREBASE_EMULATOR_HOST=127.0.0.1` (Xcode `DART_DEFINES=QlRTX0ZJUkVCQVNFX0VNVUxBVE9SX0hPU1Q9MTI3LjAuMC4x`).
+- Xcode `SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG BTS_FIREBASE_DEMO` so native Firebase initializes the same synthetic project before plugin registration.
+- Xcode `BTS_APP_BUNDLE_IDENTIFIER=com.nicplev.btsdeliveryapp.refreshdemo` for a separate demo installation. Do not override `PRODUCT_BUNDLE_IDENTIFIER` globally, which also changes Pod framework identifiers.
+
+Keep production and demo queues separate. Never pause or reset another project's services while simulating an outage. Debug demo analytics is disabled, and debug/simulator builds skip crash-symbol publishing. Release configuration remains unchanged.

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../providers/schools_providers.dart';
-import '../../models/delivery_visit.dart';
+import '../../widgets/saved_edits_review.dart';
 import '../theme/brand_colors.dart';
 
 class AppShell extends ConsumerWidget {
@@ -13,37 +12,13 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentIndex = _getCurrentIndex(context);
-    final failures = ref.watch(classroomEditFailuresProvider);
 
     return Scaffold(
       body: child,
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (failures.isNotEmpty)
-            MaterialBanner(
-              content: Text(failures.length == 1
-                  ? 'Could not sync a classroom change.'
-                  : 'Could not sync ${failures.length} classroom changes.'),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    final location = failures.first;
-                    ref
-                        .read(classroomEditFailuresProvider.notifier)
-                        .dismiss(location);
-                    context.push(schoolWorkPath(
-                      location.schoolId,
-                      visit: location.visit,
-                      suffix:
-                          '/year/${Uri.encodeComponent(location.yearLevelId)}'
-                          '/classrooms/${Uri.encodeComponent(location.classroomId)}',
-                    ));
-                  },
-                  child: const Text('Review'),
-                ),
-              ],
-            ),
+          const SavedEditsBanner(),
           NavigationBar(
             onDestinationSelected: (index) {
               switch (index) {
