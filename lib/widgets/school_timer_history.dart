@@ -8,12 +8,14 @@ import '../app/theme/brand_colors.dart';
 
 class SchoolTimerHistory extends ConsumerWidget {
   final String schoolId;
+  final bool readOnly;
   final VoidCallback? onAddPressed;
 
   const SchoolTimerHistory({
     super.key,
     required this.schoolId,
     this.onAddPressed,
+    this.readOnly = false,
   });
 
   String _formatDuration(Duration d) {
@@ -26,7 +28,7 @@ class SchoolTimerHistory extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final historyAsync = ref.watch(schoolTimerHistoryProvider(schoolId));
-    final isAdmin = ref.watch(isAdminProvider);
+    final isAdmin = !readOnly && ref.watch(isAdminProvider);
 
     return historyAsync.when(
       data: (timers) {

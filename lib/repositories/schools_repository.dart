@@ -1,13 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:uuid/uuid.dart';
 import '../services/result.dart';
+import '../models/offline/evidence_upload.dart';
 import '../models/school.dart';
+import '../models/delivery_visit.dart';
+import '../models/signoff_snapshot.dart';
 import '../models/school_timer.dart';
-import 'storage_repository.dart';
+import 'scoped_query_stream.dart';
+import 'classroom_edit.dart';
+import 'signoff_snapshot_reader.dart';
 
 abstract class SchoolsRepository {
-  Stream<List<School>> watchSchools();
+  Stream<List<School>> watchSchools({List<String>? schoolIds});
   Future<Result<List<School>>> getSchools();
   Future<Result<School>> createSchool(School school);
   Future<Result<School>> updateSchool(School school);
@@ -25,8 +31,21 @@ abstract class SchoolsRepository {
   Stream<List<Classroom>> watchClassrooms(String schoolId, String yearLevelId);
   Future<Result<Classroom>> createClassroom(
       String schoolId, String yearLevelId, Classroom classroom);
-  Future<Result<Classroom>> updateClassroom(
-      String schoolId, String yearLevelId, Classroom classroom);
+  Future<Result<ClassroomEditReceipt>> updateClassroomName(
+    String schoolId,
+    String yearLevelId,
+    String classroomId, {
+    required String name,
+    required String updatedBy,
+  });
+  Future<Result<ClassroomEditReceipt>> updateClassroomStatus(
+    String schoolId,
+    String yearLevelId,
+    String classroomId, {
+    required ClassroomCompletionStatus status,
+    required int? actualPacksDelivered,
+    required String updatedBy,
+  });
   Future<Result<void>> deleteClassroom(
       String schoolId, String yearLevelId, String classroomId);
 
@@ -48,11 +67,11 @@ abstract class SchoolsRepository {
 
   // Photos
   Stream<List<Photo>> watchClassroomPhotos(
-      String schoolId, String yearLevelId, String classroomId);
+    String schoolId, String yearLevelId, String classroomId, {String? deliveryId});
   Future<Result<Photo>> addClassroomPhoto(
-      String schoolId, String yearLevelId, String classroomId, Photo photo);
+    String schoolId, String yearLevelId, String classroomId, Photo photo, {String? deliveryId});
   Future<Result<void>> deleteClassroomPhoto(
-      String schoolId, String yearLevelId, String classroomId, String photoId);
+    String schoolId, String yearLevelId, String classroomId, String photoId, {String? deliveryId});
 
   // Pack Totals
   Stream<PackTotal?> watchLatestPackTotal(
@@ -79,10 +98,14 @@ abstract class SchoolsRepository {
       String yearLevelId, String classroomId, String consumableId);
 
   // Sign-off
+  Future<SignOffSnapshot> readSignOffDraft(String schoolId, {required bool server, String? deliveryId});
+  Stream<SignedEvidence?> watchSignedEvidence(String schoolId, String? deliveryId);
+  Future<List<SignedEvidence>> readSignOffHistory(String schoolId, String? deliveryId);
+  Future<void> persistQueuedSignOff(
+    EvidenceUpload item, {
+    required void Function() requireOwner,
+  });
   Stream<SignOff?> watchSignOff(String schoolId);
-  Future<Result<SignOff>> createOrUpdateSignOff(
-      String schoolId, SignOff signOff);
-  Future<Result<void>> clearSignOff(String schoolId);
 
   // Contacts
   Stream<List<Contact>> watchContacts(String schoolId);
@@ -111,8 +134,6 @@ abstract class SchoolsRepository {
       String schoolId, String yearLevelId, String classroomId, String noteId);
 
   // Signed School Summaries
-  Future<Result<SignedSchoolSummary>> createSignedSchoolSummary(
-      String schoolId, String signedBy, String? signatureUrl);
   Future<Result<SignedSchoolSummary?>> getSignedSchoolSummary(String schoolId);
 
   // Bulk Import
@@ -199,9 +220,19 @@ class ConsumableImportData {
 
 class FirebaseSchoolsRepository implements SchoolsRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final StorageRepository _storageRepository;
 
-  FirebaseSchoolsRepository(this._storageRepository);
+  FirebaseSchoolsRepository({DeliveryVisit? visit}) : _visit = visit;
+
+  final DeliveryVisit? _visit;
+
+  DocumentReference<Map<String, dynamic>> _recordsFor(String schoolId) {
+    final visit = _visit;
+    if (visit == null) return _firestore.collection('schools').doc(schoolId);
+    if (schoolId != visit.schoolId) {
+      throw ArgumentError.value(schoolId, 'schoolId', 'Invalid school for this delivery');
+    }
+    return _firestore.doc(visit.workspacePath);
+  }
 
   // Helper method to update classroom's last modified metadata
   Future<void> _updateClassroomLastModified(
@@ -230,9 +261,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
         }
       }
 
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -248,22 +277,24 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   }
 
   @override
-  Stream<List<School>> watchSchools() {
-    return _firestore
-        .collection('schools')
-        .orderBy('name')
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        // Remove any id field from data to prevent overwriting
-        data.remove('id');
+  Stream<List<School>> watchSchools({List<String>? schoolIds}) {
+    final collection = _firestore.collection('schools');
 
-        return School.fromJson({
-          'id': doc.id,
-          ...data,
-        });
-      }).toList();
+    Stream<List<School>> watch(Query<Map<String, dynamic>> query) {
+      return query.snapshots().map((snapshot) {
+        return [
+          for (final doc in snapshot.docs)
+            School.fromJson({...doc.data(), 'id': doc.id}),
+        ];
+      });
+    }
+
+    if (schoolIds == null) return watch(collection.orderBy('name'));
+    return watchInChunks(
+      schoolIds,
+      (ids) => watch(collection.where(FieldPath.documentId, whereIn: ids)),
+    ).map((schools) {
+      return [...schools]..sort((a, b) => a.name.compareTo(b.name));
     });
   }
 
@@ -326,9 +357,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   // Year Levels
   @override
   Stream<List<YearLevel>> watchYearLevels(String schoolId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('yearLevels')
         .orderBy('createdAt')
         .snapshots()
@@ -367,15 +396,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Remove the id field as Firestore will generate it
       data.remove('id');
 
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('yearLevels')
           .add(data);
       final created = yearLevel.copyWith(id: docRef.id);
 
-      // Clear sign-off since structure changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -387,15 +412,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<YearLevel>> updateYearLevel(
       String schoolId, YearLevel yearLevel) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevel.id)
           .update(yearLevel.toJson());
 
-      // Clear sign-off since structure changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(yearLevel);
     } catch (e) {
@@ -407,15 +428,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<void>> deleteYearLevel(
       String schoolId, String yearLevelId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .delete();
 
-      // Clear sign-off since structure changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -426,9 +443,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   // Classrooms
   @override
   Stream<List<Classroom>> watchClassrooms(String schoolId, String yearLevelId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('yearLevels')
         .doc(yearLevelId)
         .collection('classrooms')
@@ -466,17 +481,13 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Remove the id field as Firestore will generate it
       data.remove('id');
 
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
           .add(data);
       final created = classroom.copyWith(id: docRef.id);
 
-      // Clear sign-off since classroom structure changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -485,27 +496,76 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   }
 
   @override
-  Future<Result<Classroom>> updateClassroom(
-      String schoolId, String yearLevelId, Classroom classroom) async {
+  Future<Result<ClassroomEditReceipt>> updateClassroomName(
+    String schoolId,
+    String yearLevelId,
+    String classroomId, {
+    required String name,
+    required String updatedBy,
+  }) {
+    return _editClassroom(
+      schoolId,
+      yearLevelId,
+      classroomId,
+      () => ClassroomEdit.rename(name),
+      updatedBy,
+    );
+  }
+
+  @override
+  Future<Result<ClassroomEditReceipt>> updateClassroomStatus(
+    String schoolId,
+    String yearLevelId,
+    String classroomId, {
+    required ClassroomCompletionStatus status,
+    required int? actualPacksDelivered,
+    required String updatedBy,
+  }) {
+    return _editClassroom(
+      schoolId,
+      yearLevelId,
+      classroomId,
+      () => ClassroomEdit.status(status, actualPacksDelivered),
+      updatedBy,
+    );
+  }
+
+  Future<Result<ClassroomEditReceipt>> _editClassroom(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    ClassroomEdit Function() edit,
+    String updatedBy,
+  ) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final fields = edit().fields;
+      final editId = const Uuid().v4();
+      final classroom = _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
-          .doc(classroom.id)
-          .update(classroom.toJson());
+          .doc(classroomId);
 
-      // Update classroom's last modified metadata
-      await _updateClassroomLastModified(schoolId, yearLevelId, classroom.id);
+      final pendingEditIds = classroom
+          .snapshots(includeMetadataChanges: true)
+          .map((snapshot) => snapshot.metadata.hasPendingWrites
+              ? (snapshot.data()?['lastEditId'] as String?)
+              : null);
 
-      // Clear sign-off since classroom data changed
-      await _clearSignOffOnDataChange(schoolId);
-
-      return Result.success(classroom);
-    } catch (e) {
-      return Result.failure('Failed to update classroom: $e');
+      return await observeClassroomEdit(
+        editId: editId,
+        pendingEditIds: pendingEditIds,
+        write: () => classroom.update({
+          ...fields,
+          'lastEditId': editId,
+          'lastUpdatedBy': updatedBy,
+          'lastUpdatedAt': FieldValue.serverTimestamp(),
+        }),
+      );
+    } on ArgumentError catch (error) {
+      return Result.failure(error.message?.toString() ?? 'Invalid classroom edit.');
+    } catch (_) {
+      return const Result.failure('Couldn’t submit the classroom edit.');
     }
   }
 
@@ -515,9 +575,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
     try {
       debugPrint(
           'Deleting classroom: schoolId=$schoolId, yearLevelId=$yearLevelId, classroomId=$classroomId');
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -525,8 +583,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
           .delete();
       debugPrint('Classroom deleted successfully');
 
-      // Clear sign-off since classroom structure changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -539,9 +595,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Stream<List<YearLevelBreakdown>> watchYearLevelBreakdowns(
       String schoolId, String yearLevelId, String classroomId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('yearLevels')
         .doc(yearLevelId)
         .collection('classrooms')
@@ -583,9 +637,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final data = breakdown.toJson();
       data.remove('id');
 
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -597,8 +649,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom data changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -613,9 +663,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       String classroomId,
       YearLevelBreakdown breakdown) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -627,8 +675,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom data changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(breakdown);
     } catch (e) {
@@ -640,9 +686,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<void>> deleteYearLevelBreakdown(String schoolId,
       String yearLevelId, String classroomId, String breakdownId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -654,8 +698,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom data changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -664,16 +706,23 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   }
 
   // Photos
+  DocumentReference<Map<String, dynamic>> _photoClassroom(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    String? deliveryId,
+  ) {
+    final root = deliveryId == null
+        ? _firestore.collection('schools').doc(schoolId)
+        : _firestore.doc(DeliveryVisit(deliveryId: deliveryId, schoolId: schoolId).workspacePath);
+    return root.collection('yearLevels').doc(yearLevelId)
+        .collection('classrooms').doc(classroomId);
+  }
+
   @override
   Stream<List<Photo>> watchClassroomPhotos(
-      String schoolId, String yearLevelId, String classroomId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
-        .collection('yearLevels')
-        .doc(yearLevelId)
-        .collection('classrooms')
-        .doc(classroomId)
+      String schoolId, String yearLevelId, String classroomId, {String? deliveryId}) {
+    return _photoClassroom(schoolId, yearLevelId, classroomId, deliveryId)
         .collection('photos')
         .orderBy('uploadedAt', descending: true)
         .snapshots()
@@ -691,77 +740,75 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   }
 
   @override
-  Future<Result<Photo>> addClassroomPhoto(String schoolId, String yearLevelId,
-      String classroomId, Photo photo) async {
+  Future<Result<Photo>> addClassroomPhoto(
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    Photo photo, {
+    String? deliveryId,
+  }) async {
     try {
-      final docRef = _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('yearLevels')
-          .doc(yearLevelId)
-          .collection('classrooms')
-          .doc(classroomId)
-          .collection('photos')
-          .doc(photo.id);
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || (photo.uploadedBy != null && photo.uploadedBy != user.uid)) {
+        return const Result.failure('Sign in as the original photo owner');
+      }
+      final classroom = _photoClassroom(schoolId, yearLevelId, classroomId, deliveryId);
+      final ref = classroom.collection('photos').doc(photo.id);
+      final saved = photo.copyWith(uploadedBy: user.uid);
 
-      await docRef.set(photo.copyWith(id: docRef.id).toJson());
-      final created = photo.copyWith(id: docRef.id);
+      await _firestore.runTransaction<void>((transaction) async {
+        final existing = await transaction.get(ref);
+        if (FirebaseAuth.instance.currentUser?.uid != user.uid) {
+          throw StateError('The authenticated user changed');
+        }
+        if (existing.exists) {
+          final data = existing.data()!;
+          if (data['storagePath'] != saved.storagePath ||
+              data['uploadedBy'] != saved.uploadedBy) {
+            throw StateError('Photo ID already belongs to other evidence');
+          }
+          return;
+        }
 
-      // Update classroom's last modified metadata
-      await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
-
-      return Result.success(created);
-    } catch (e) {
-      return Result.failure('Failed to add photo: $e');
+        transaction.set(ref, saved.toJson());
+        transaction.update(classroom, {
+          'lastUpdatedBy': user.displayName ?? user.email?.split('@').first ?? 'Unknown',
+          'lastUpdatedAt': FieldValue.serverTimestamp(),
+        });
+      }, timeout: const Duration(seconds: 30));
+      return Result.success(saved);
+    } on FirebaseException catch (error) {
+      return Result.failure('Could not sync photo', error);
+    } catch (_) {
+      return const Result.failure('Could not sync photo');
     }
   }
 
   @override
   Future<Result<void>> deleteClassroomPhoto(String schoolId, String yearLevelId,
-      String classroomId, String photoId) async {
+      String classroomId, String photoId, {String? deliveryId}) async {
     try {
-      // First, get the photo document to retrieve the storage path
-      final photoDoc = await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('yearLevels')
-          .doc(yearLevelId)
-          .collection('classrooms')
-          .doc(classroomId)
-          .collection('photos')
-          .doc(photoId)
-          .get();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return const Result.failure('Sign in to remove the photo');
 
-      if (!photoDoc.exists) {
-        return const Result.failure('Photo not found');
-      }
-
-      final photoData = photoDoc.data();
-      if (photoData == null) {
-        return const Result.failure('Photo data is null');
-      }
-
-      // Get the storage path from the photo document
-      final storagePath = photoData['storagePath'] as String?;
-
-      // Delete the file from Firebase Storage if storagePath exists
-      if (storagePath != null && storagePath.isNotEmpty) {
-        final storageResult = await _storageRepository.deleteFile(storagePath);
-        if (!storageResult.isSuccess) {
-          debugPrint('Warning: Failed to delete file from storage: ${storageResult.errorOrNull}');
-          // Continue to delete Firestore document even if storage deletion fails
-        }
-      }
-
-      // Delete the Firestore document
-      await photoDoc.reference.delete();
-
-      // Update classroom's last modified metadata
-      await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
+      final classroom =
+          _photoClassroom(schoolId, yearLevelId, classroomId, deliveryId);
+      final batch = _firestore.batch();
+      // Signed snapshots can still reference the original Storage object.
+      batch.delete(classroom.collection('photos').doc(photoId));
+      batch.update(classroom, {
+        'lastUpdatedBy':
+            user.displayName ?? user.email?.split('@').first ?? 'Unknown',
+        'lastUpdatedAt': FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
 
       return const Result.success(null);
-    } catch (e) {
-      return Result.failure('Failed to delete photo: $e');
+    } on FirebaseException catch (error) {
+      return Result.failure(
+        'Could not remove the photo from the classroom',
+        error,
+      );
     }
   }
 
@@ -769,9 +816,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Stream<PackTotal?> watchLatestPackTotal(
       String schoolId, String yearLevelId, String classroomId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('yearLevels')
         .doc(yearLevelId)
         .collection('classrooms')
@@ -794,9 +839,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<PackTotal>> updatePackTotal(String schoolId, String yearLevelId,
       String classroomId, PackTotal packTotal) async {
     try {
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -808,8 +851,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since pack totals changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -820,9 +861,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   // Consumables
   @override
   Stream<List<Consumable>> watchConsumables(String schoolId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('consumables')
         .orderBy('itemName')
         .snapshots()
@@ -848,15 +887,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final json = consumable.toJson();
       json.remove('id');
 
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('consumables')
           .add(json);
       final created = consumable.copyWith(id: docRef.id);
 
-      // Clear sign-off since consumables changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -876,15 +911,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final json = consumable.toJson();
       json.remove('id');
 
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('consumables')
           .doc(consumable.id)
           .update(json);
 
-      // Clear sign-off since consumables changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(consumable);
     } catch (e) {
@@ -896,15 +927,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<void>> deleteConsumable(
       String schoolId, String consumableId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('consumables')
           .doc(consumableId)
           .delete();
 
-      // Clear sign-off since consumables changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -916,9 +943,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Stream<List<Consumable>> watchClassroomConsumables(
       String schoolId, String yearLevelId, String classroomId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('yearLevels')
         .doc(yearLevelId)
         .collection('classrooms')
@@ -946,9 +971,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final data = consumable.toJson();
       data.remove('id');
 
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -960,8 +983,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom consumables changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -981,9 +1002,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final json = consumable.toJson();
       json.remove('id');
 
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -995,8 +1014,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom consumables changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(consumable);
     } catch (e) {
@@ -1008,9 +1025,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<void>> deleteClassroomConsumable(String schoolId,
       String yearLevelId, String classroomId, String consumableId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -1022,8 +1037,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom consumables changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -1032,6 +1045,85 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   }
 
   // Sign-off
+  @override
+  Future<SignOffSnapshot> readSignOffDraft(
+    String schoolId, {
+    required bool server,
+    String? deliveryId,
+  }) {
+    return readSignOffSnapshot(
+      _firestore.collection('schools').doc(schoolId),
+      server ? Source.server : Source.cache,
+      workspace: deliveryId == null
+          ? null
+          : _firestore.doc(DeliveryVisit(deliveryId: deliveryId, schoolId: schoolId).workspacePath),
+    );
+  }
+
+  @override
+  Stream<SignedEvidence?> watchSignedEvidence(String schoolId, String? deliveryId) {
+    final school = _firestore.collection('schools').doc(schoolId);
+    return school
+        .collection('signoffPointers')
+        .doc(SignedEvidence.scopeKey(deliveryId))
+        .snapshots()
+        .asyncMap((pointer) async {
+      final evidenceId = pointer.data()?['evidenceId'] as String?;
+      if (evidenceId == null) return null;
+      final ref = school.collection('signoffs').doc(evidenceId);
+      final evidence = await ref.get();
+      final data = evidence.data();
+      if (data == null) throw StateError('Signed evidence unavailable');
+      return SignedEvidence.fromDocument(data);
+    });
+  }
+
+  @override
+  Future<List<SignedEvidence>> readSignOffHistory(String schoolId, String? deliveryId) async {
+    final history = _firestore.collection('schools').doc(schoolId).collection('signoffs');
+    final query = deliveryId == null
+        ? history.where('deliveryId', isNull: true)
+        : history.where('deliveryId', isEqualTo: deliveryId);
+    final snapshot = await query.orderBy('capturedAt', descending: true).limit(25).get();
+    return snapshot.docs.map((doc) => SignedEvidence.fromDocument(doc.data())).toList();
+  }
+
+  @override
+  Future<void> persistQueuedSignOff(
+    EvidenceUpload item, {
+    required void Function() requireOwner,
+  }) async {
+    final signed = SignedEvidence.fromUpload(item);
+    final school = _firestore.collection('schools').doc(signed.schoolId);
+    final evidence = school.collection('signoffs').doc(signed.id);
+    final pointer = school.collection('signoffPointers')
+        .doc(SignedEvidence.scopeKey(signed.deliveryId));
+    requireOwner();
+    await _firestore.runTransaction<void>((transaction) async {
+      requireOwner();
+      final existing = await transaction.get(evidence);
+      requireOwner();
+      if (existing.exists) {
+        final previous = SignedEvidence.fromDocument(existing.data()!);
+        if (!signed.matches(previous)) {
+          throw StateError('Signature ID already belongs to different evidence');
+        }
+        return;
+      }
+      final latest = await transaction.get(pointer);
+      requireOwner();
+      transaction.set(evidence, signed.toDocument());
+      final previousTime = latest.data()?['capturedAt'] as Timestamp?;
+      if (previousTime == null || !signed.capturedAt.isBefore(previousTime.toDate())) {
+        transaction.set(pointer, {
+          'evidenceId': signed.id,
+          'deliveryId': signed.deliveryId,
+          'capturedAt': Timestamp.fromDate(signed.capturedAt),
+        });
+      }
+    }, timeout: const Duration(seconds: 30));
+  }
+
   @override
   Stream<SignOff?> watchSignOff(String schoolId) {
     return _firestore
@@ -1044,86 +1136,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       if (!snapshot.exists) return null;
       return SignOff.fromJson(snapshot.data()!);
     });
-  }
-
-  @override
-  Future<Result<SignOff>> createOrUpdateSignOff(
-      String schoolId, SignOff signOff) async {
-    try {
-      debugPrint('Saving sign-off for school: $schoolId');
-      debugPrint('Sign-off data: ${signOff.toJson()}');
-
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('meta')
-          .doc('signoff')
-          .set(signOff.toJson());
-
-      debugPrint('Sign-off saved successfully');
-      return Result.success(signOff);
-    } catch (e) {
-      debugPrint('Error saving sign-off: $e');
-      return Result.failure('Failed to save sign-off: $e');
-    }
-  }
-
-  @override
-  Future<Result<void>> clearSignOff(String schoolId) async {
-    try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('meta')
-          .doc('signoff')
-          .delete();
-      return const Result.success(null);
-    } catch (e) {
-      // If document doesn't exist, that's fine
-      return const Result.success(null);
-    }
-  }
-
-  /// Helper method to clear sign-off when data changes
-  /// This should be called whenever pack totals, consumables, or structure changes
-  /// Returns true if a sign-off was cleared, false if there was no sign-off to clear
-  Future<bool> _clearSignOffOnDataChange(String schoolId) async {
-    try {
-      // Check if sign-off exists before trying to delete
-      final signOffDoc = await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('meta')
-          .doc('signoff')
-          .get();
-
-      if (!signOffDoc.exists) {
-        // No sign-off to clear
-        return false;
-      }
-
-      // Delete the sign-off document
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('meta')
-          .doc('signoff')
-          .delete();
-
-      // Update school document to mark as not signed off
-      await _firestore.collection('schools').doc(schoolId).update({
-        'isSignedOff': false,
-        'lastSignOffDate': null,
-        'signedBy': null,
-      });
-
-      debugPrint('Sign-off cleared for school $schoolId due to data changes');
-      return true;
-    } catch (e) {
-      // If sign-off doesn't exist, that's fine - no need to clear it
-      debugPrint('Note: Could not clear sign-off (may not exist): $e');
-      return false;
-    }
   }
 
   // Contacts
@@ -1246,9 +1258,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   // Notes
   @override
   Stream<List<Note>> watchNotes(String schoolId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('notes')
         .orderBy('createdAt', descending: true)
         .snapshots()
@@ -1265,15 +1275,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Future<Result<Note>> createNote(String schoolId, Note note) async {
     try {
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('notes')
           .add(note.toJson());
       final created = note.copyWith(id: docRef.id);
 
-      // Clear sign-off since notes changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -1284,15 +1290,11 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Future<Result<void>> deleteNote(String schoolId, String noteId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('notes')
           .doc(noteId)
           .delete();
 
-      // Clear sign-off since notes changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -1304,9 +1306,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Stream<List<Note>> watchClassroomNotes(
       String schoolId, String yearLevelId, String classroomId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('yearLevels')
         .doc(yearLevelId)
         .collection('classrooms')
@@ -1338,9 +1338,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final json = note.toJson();
       json.remove('id');
 
-      final docRef = await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      final docRef = await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -1352,8 +1350,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom notes changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(created);
     } catch (e) {
@@ -1372,9 +1368,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final json = note.toJson();
       json.remove('id');
 
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -1386,8 +1380,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom notes changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(note);
     } catch (e) {
@@ -1399,9 +1391,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   Future<Result<void>> deleteClassroomNote(
       String schoolId, String yearLevelId, String classroomId, String noteId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('yearLevels')
           .doc(yearLevelId)
           .collection('classrooms')
@@ -1413,8 +1403,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Update classroom's last modified metadata
       await _updateClassroomLastModified(schoolId, yearLevelId, classroomId);
 
-      // Clear sign-off since classroom notes changed
-      await _clearSignOffOnDataChange(schoolId);
 
       return const Result.success(null);
     } catch (e) {
@@ -1424,521 +1412,17 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
 
   // Signed School Summaries
   @override
-  Future<Result<SignedSchoolSummary>> createSignedSchoolSummary(
-      String schoolId, String signedBy, String? signatureUrl) async {
-    try {
-      debugPrint('=== Starting createSignedSchoolSummary ===');
-      debugPrint('School ID: $schoolId');
-      debugPrint('Signed By: $signedBy');
-      debugPrint('Signature URL: $signatureUrl');
-
-      // Get school data
-      debugPrint('Step 1: Fetching school document...');
-      final schoolDoc =
-          await _firestore.collection('schools').doc(schoolId).get();
-      if (!schoolDoc.exists) {
-        final error = 'School not found: $schoolId';
-        debugPrint('ERROR: $error');
-        return Result.failure(error);
-      }
-
-      final schoolData = schoolDoc.data()!;
-      schoolData.remove('id');
-      final school = School.fromJson({'id': schoolDoc.id, ...schoolData});
-      debugPrint('School loaded: ${school.name}');
-
-      // Get all year levels
-      debugPrint('Step 2: Fetching year levels...');
-      final yearLevelsSnapshot = await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('yearLevels')
-          .orderBy('createdAt')
-          .get();
-      debugPrint('Found ${yearLevelsSnapshot.docs.length} year levels');
-
-      int totalPacks = 0;
-      Map<String, int> packTotalsByYearLevel = {};
-      Map<String, Map<String, int>> packTotalsByClassroom = {};
-      Map<String, ConsumableSummary> consumablesTotals = {};
-      Map<String, Map<String, ConsumableSummary>> consumablesByYearLevel = {};
-      Map<String, Map<String, Map<String, ConsumableSummary>>>
-          consumablesByClassroom = {};
-      Map<String, Map<String, List<String>>> notesByClassroom = {};
-      List<String> photoUrls = [];
-      List<String> criticalErrors = [];
-      List<ClassroomDeliveryDetail> classroomDeliveryDetails = [];
-
-      // Process each year level
-      debugPrint('Step 3: Processing year levels and classrooms...');
-      for (final yearLevelDoc in yearLevelsSnapshot.docs) {
-        try {
-          final yearLevelId = yearLevelDoc.id;
-          final yearLevelData = yearLevelDoc.data();
-          final yearLevelLabel =
-              yearLevelData['label'] ?? yearLevelData['name'] ?? 'Unknown';
-          debugPrint('  Processing year level: $yearLevelLabel (ID: $yearLevelId)');
-
-          int yearLevelPackTotal = 0;
-          Map<String, ConsumableSummary> yearLevelConsumables = {};
-          Map<String, int> yearLevelClassrooms = {};
-          Map<String, Map<String, ConsumableSummary>>
-              yearLevelClassroomConsumables = {};
-
-          // Get all classrooms for this year level
-          final classroomsSnapshot = await _firestore
-              .collection('schools')
-              .doc(schoolId)
-              .collection('yearLevels')
-              .doc(yearLevelId)
-              .collection('classrooms')
-              .orderBy('createdAt')
-              .get();
-          debugPrint('    Found ${classroomsSnapshot.docs.length} classrooms');
-
-          // Process each classroom
-          for (final classroomDoc in classroomsSnapshot.docs) {
-            try {
-              final classroomId = classroomDoc.id;
-              final classroomName = classroomDoc.data()['name'] ?? 'Unknown';
-              debugPrint('      Processing classroom: $classroomName');
-
-              // Get year level breakdowns for composite class support
-              final breakdownsSnapshot = await _firestore
-                  .collection('schools')
-                  .doc(schoolId)
-                  .collection('yearLevels')
-                  .doc(yearLevelId)
-                  .collection('classrooms')
-                  .doc(classroomId)
-                  .collection('yearLevelBreakdowns')
-                  .get();
-
-              // Get pack total for this classroom
-              final packTotalsSnapshot = await _firestore
-                  .collection('schools')
-                  .doc(schoolId)
-                  .collection('yearLevels')
-                  .doc(yearLevelId)
-                  .collection('classrooms')
-                  .doc(classroomId)
-                  .collection('packTotals')
-                  .orderBy('createdAt', descending: true)
-                  .limit(1)
-                  .get();
-
-              if (packTotalsSnapshot.docs.isNotEmpty) {
-                final packTotalData = packTotalsSnapshot.docs.first.data();
-                final packTotal = (packTotalData['total'] ?? 0) as int;
-
-                // For composite classes, distribute packs proportionally across year levels
-                // For now, we add the full pack total to the current year level
-                // TODO: Future enhancement - proportionally distribute based on student counts
-                totalPacks += packTotal;
-                yearLevelPackTotal += packTotal;
-                yearLevelClassrooms[classroomName] = packTotal;
-
-                // Log if this is a composite class
-                if (breakdownsSnapshot.docs.isNotEmpty) {
-                  final breakdownCount = breakdownsSnapshot.docs.length;
-                  debugPrint('        Pack total: $packTotal (Composite class with $breakdownCount year levels)');
-
-                  // Log the breakdown details
-                  for (final breakdownDoc in breakdownsSnapshot.docs) {
-                    final breakdownData = breakdownDoc.data();
-                    final breakdownLabel = breakdownData['yearLevelLabel'] ?? 'Unknown';
-                    final studentCount = breakdownData['studentCount'] ?? 0;
-                    debugPrint('          - $breakdownLabel: $studentCount students');
-                  }
-                } else {
-                  debugPrint('        Pack total: $packTotal');
-                }
-              }
-
-              // Get consumables for this classroom
-              final consumablesSnapshot = await _firestore
-                  .collection('schools')
-                  .doc(schoolId)
-                  .collection('yearLevels')
-                  .doc(yearLevelId)
-                  .collection('classrooms')
-                  .doc(classroomId)
-                  .collection('consumables')
-                  .get();
-
-              Map<String, ConsumableSummary> classroomConsumables = {};
-
-              for (final consumableDoc in consumablesSnapshot.docs) {
-                try {
-                  final data = consumableDoc.data();
-                  final itemName = (data['itemName'] ?? 'Unknown') as String;
-                  final quantity = (data['quantity'] ?? 0) as int;
-                  final unit = (data['unit'] ?? 'pcs') as String;
-
-                  final summary = ConsumableSummary(
-                    itemName: itemName,
-                    quantity: quantity,
-                    unit: unit,
-                  );
-
-                  // Add to classroom consumables
-                  classroomConsumables[itemName] = summary;
-
-                  // Add to year level totals
-                  if (yearLevelConsumables.containsKey(itemName)) {
-                    final existing = yearLevelConsumables[itemName]!;
-                    yearLevelConsumables[itemName] = ConsumableSummary(
-                      itemName: itemName,
-                      quantity: existing.quantity + quantity,
-                      unit: unit,
-                    );
-                  } else {
-                    yearLevelConsumables[itemName] = summary;
-                  }
-
-                  // Add to school totals
-                  if (consumablesTotals.containsKey(itemName)) {
-                    final existing = consumablesTotals[itemName]!;
-                    consumablesTotals[itemName] = ConsumableSummary(
-                      itemName: itemName,
-                      quantity: existing.quantity + quantity,
-                      unit: unit,
-                    );
-                  } else {
-                    consumablesTotals[itemName] = summary;
-                  }
-                } catch (e) {
-                  debugPrint('        WARNING: Failed to process consumable ${consumableDoc.id}: $e');
-                  // Continue with other consumables
-                }
-              }
-              debugPrint('        Consumables: ${classroomConsumables.length} types');
-
-              yearLevelClassroomConsumables[classroomName] = classroomConsumables;
-
-              // Get photos for this classroom
-              final photosSnapshot = await _firestore
-                  .collection('schools')
-                  .doc(schoolId)
-                  .collection('yearLevels')
-                  .doc(yearLevelId)
-                  .collection('classrooms')
-                  .doc(classroomId)
-                  .collection('photos')
-                  .get();
-
-              for (final photoDoc in photosSnapshot.docs) {
-                try {
-                  final photoData = photoDoc.data();
-                  final storagePath = photoData['storagePath'];
-                  if (storagePath != null && storagePath is String) {
-                    photoUrls.add(storagePath);
-                  }
-                } catch (e) {
-                  debugPrint('        WARNING: Failed to process photo ${photoDoc.id}: $e');
-                }
-              }
-              debugPrint('        Photos: ${photosSnapshot.docs.length}');
-
-              // Get notes for this classroom
-              final classroomNotesSnapshot = await _firestore
-                  .collection('schools')
-                  .doc(schoolId)
-                  .collection('yearLevels')
-                  .doc(yearLevelId)
-                  .collection('classrooms')
-                  .doc(classroomId)
-                  .collection('notes')
-                  .get();
-
-              List<String> classroomNotesList = [];
-              for (final noteDoc in classroomNotesSnapshot.docs) {
-                try {
-                  final noteData = noteDoc.data();
-                  final content = noteData['content'];
-                  final author = noteData['author'];
-                  if (content != null && content is String) {
-                    final noteText = author != null && author is String
-                        ? '$content (by $author)'
-                        : content;
-                    classroomNotesList.add(noteText);
-                  }
-                } catch (e) {
-                  debugPrint('        WARNING: Failed to process note ${noteDoc.id}: $e');
-                }
-              }
-
-              if (classroomNotesList.isNotEmpty) {
-                if (!notesByClassroom.containsKey(yearLevelLabel)) {
-                  notesByClassroom[yearLevelLabel] = {};
-                }
-                notesByClassroom[yearLevelLabel]![classroomName] = classroomNotesList;
-              }
-              debugPrint('        Notes: ${classroomNotesList.length}');
-
-              // Capture classroom delivery details for Excel export
-              final classroomData = classroomDoc.data();
-              final completionStatusString = classroomData['completionStatus'] as String?;
-              final completionStatus = completionStatusString != null
-                  ? ClassroomCompletionStatus.values.firstWhere(
-                      (e) => e.toString() == 'ClassroomCompletionStatus.$completionStatusString',
-                      orElse: () => ClassroomCompletionStatus.notAttended,
-                    )
-                  : ClassroomCompletionStatus.notAttended;
-
-              final actualPacksDelivered = classroomData['actualPacksDelivered'] as int?;
-              final expectedPacks = packTotalsSnapshot.docs.isNotEmpty
-                  ? (packTotalsSnapshot.docs.first.data()['total'] ?? 0) as int
-                  : 0;
-
-              // Build consumable delivery details
-              Map<String, ConsumableDeliveryDetail> consumableDetails = {};
-              for (final consumableDoc in consumablesSnapshot.docs) {
-                try {
-                  final data = consumableDoc.data();
-                  final itemName = (data['itemName'] ?? 'Unknown') as String;
-                  final expectedQuantity = (data['quantity'] ?? 0) as int;
-                  final actualQuantityDelivered = data['actualQuantityDelivered'] as int?;
-                  final unit = (data['unit'] ?? 'pcs') as String;
-
-                  consumableDetails[itemName] = ConsumableDeliveryDetail(
-                    itemName: itemName,
-                    expectedQuantity: expectedQuantity,
-                    actualQuantityDelivered: actualQuantityDelivered,
-                    unit: unit,
-                  );
-                } catch (e) {
-                  debugPrint('        WARNING: Failed to build consumable detail: $e');
-                }
-              }
-
-              // Calculate actual delivery status using same logic as sign-off tab
-              ClassroomCompletionStatus actualStatus = completionStatus;
-
-              if (completionStatus == ClassroomCompletionStatus.notAttended) {
-                actualStatus = ClassroomCompletionStatus.notAttended;
-              } else if (completionStatus == ClassroomCompletionStatus.complete) {
-                // Check for partial pack deliveries
-                final hasPartialPacks = actualPacksDelivered != null &&
-                    actualPacksDelivered != expectedPacks;
-
-                // Check for partial consumable deliveries
-                final hasPartialConsumables = consumableDetails.values.any((consumable) {
-                  return consumable.actualQuantityDelivered != null &&
-                      consumable.actualQuantityDelivered != consumable.expectedQuantity;
-                });
-
-                // Check for unattended consumables (no actual quantity set)
-                final hasUnattendedConsumables = consumableDetails.values.any((consumable) {
-                  return consumable.actualQuantityDelivered == null;
-                });
-
-                // If ANY packs or consumables are incomplete or not attended, show as incomplete
-                if (hasPartialPacks || hasPartialConsumables || hasUnattendedConsumables) {
-                  actualStatus = ClassroomCompletionStatus.incomplete;
-                } else {
-                  actualStatus = ClassroomCompletionStatus.complete;
-                }
-              }
-
-              // Add classroom delivery detail with calculated status
-              classroomDeliveryDetails.add(ClassroomDeliveryDetail(
-                yearLevel: yearLevelLabel,
-                classroomName: classroomName,
-                status: actualStatus,
-                expectedPacks: expectedPacks,
-                actualPacksDelivered: actualPacksDelivered,
-                consumables: consumableDetails,
-              ));
-            } catch (e) {
-              debugPrint('      ERROR processing classroom: $e');
-              criticalErrors.add('Classroom error: $e');
-              // Continue with other classrooms
-            }
-          }
-
-          packTotalsByYearLevel[yearLevelLabel] = yearLevelPackTotal;
-          packTotalsByClassroom[yearLevelLabel] = yearLevelClassrooms;
-          consumablesByYearLevel[yearLevelLabel] = yearLevelConsumables;
-          consumablesByClassroom[yearLevelLabel] = yearLevelClassroomConsumables;
-          debugPrint('    Year level totals - Packs: $yearLevelPackTotal, Consumables: ${yearLevelConsumables.length} types');
-        } catch (e) {
-          debugPrint('  ERROR processing year level: $e');
-          criticalErrors.add('Year level error: $e');
-          // Continue with other year levels
-        }
-      }
-
-      // Check if we had too many critical errors
-      if (criticalErrors.length > 10) {
-        final errorMsg = 'Too many errors during data collection (${criticalErrors.length} errors)';
-        debugPrint('FATAL: $errorMsg');
-        debugPrint('First 5 errors: ${criticalErrors.take(5).join(', ')}');
-        return Result.failure(errorMsg);
-      }
-
-      // Get notes
-      final notesSnapshot = await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('notes')
-          .orderBy('createdAt', descending: true)
-          .get();
-
-      String? notes;
-      if (notesSnapshot.docs.isNotEmpty) {
-        notes = notesSnapshot.docs
-            .map((doc) => doc.data()['content'] as String)
-            .join('\n\n');
-      }
-
-      // Create the summary document
-      final summary = SignedSchoolSummary(
-        id: '',
-        schoolId: schoolId,
-        schoolName: school.name,
-        schoolAddress: school.address,
-        signedBy: signedBy,
-        signatureUrl: signatureUrl,
-        signedDate: DateTime.now(),
-        totalPacks: totalPacks,
-        packTotalsByYearLevel: packTotalsByYearLevel,
-        packTotalsByClassroom: packTotalsByClassroom,
-        consumablesTotals: consumablesTotals,
-        consumablesByYearLevel: consumablesByYearLevel,
-        consumablesByClassroom: consumablesByClassroom,
-        classroomDeliveryDetails: classroomDeliveryDetails,
-        photoUrls: photoUrls,
-        notes: notes,
-        notesByClassroom: notesByClassroom,
-        createdAt: DateTime.now(),
-      );
-
-      // Save to Firestore
-      debugPrint(
-          'Saving summary with $totalPacks total packs and ${consumablesTotals.length} consumable types');
-
-      // Manually serialize nested consumables to ensure proper JSON conversion
-      final Map<String, dynamic> consumablesTotalsJson = {};
-      for (final entry in consumablesTotals.entries) {
-        consumablesTotalsJson[entry.key] = entry.value.toJson();
-      }
-
-      final Map<String, dynamic> consumablesByYearLevelJson = {};
-      for (final yearEntry in consumablesByYearLevel.entries) {
-        final yearMap = <String, dynamic>{};
-        for (final itemEntry in yearEntry.value.entries) {
-          yearMap[itemEntry.key] = itemEntry.value.toJson();
-        }
-        consumablesByYearLevelJson[yearEntry.key] = yearMap;
-      }
-
-      final Map<String, dynamic> consumablesByClassroomJson = {};
-      for (final yearEntry in consumablesByClassroom.entries) {
-        final yearMap = <String, dynamic>{};
-        for (final classEntry in yearEntry.value.entries) {
-          final classMap = <String, dynamic>{};
-          for (final itemEntry in classEntry.value.entries) {
-            classMap[itemEntry.key] = itemEntry.value.toJson();
-          }
-          yearMap[classEntry.key] = classMap;
-        }
-        consumablesByClassroomJson[yearEntry.key] = yearMap;
-      }
-
-      // Serialize classroom delivery details with manual consumables conversion
-      final List<Map<String, dynamic>> classroomDeliveryDetailsJson = [];
-      for (final detail in classroomDeliveryDetails) {
-        // Manually convert consumables map
-        final Map<String, dynamic> consumablesJson = {};
-        for (final entry in detail.consumables.entries) {
-          consumablesJson[entry.key] = entry.value.toJson();
-        }
-
-        classroomDeliveryDetailsJson.add({
-          'yearLevel': detail.yearLevel,
-          'classroomName': detail.classroomName,
-          'status': detail.status.toString().split('.').last, // Enum to string
-          'expectedPacks': detail.expectedPacks,
-          'actualPacksDelivered': detail.actualPacksDelivered,
-          'consumables': consumablesJson,
-        });
-      }
-
-      final data = {
-        'schoolId': schoolId,
-        'schoolName': school.name,
-        'schoolAddress': school.address,
-        'signedBy': signedBy,
-        'signatureUrl': signatureUrl,
-        'signedDate': Timestamp.fromDate(DateTime.now()),
-        'totalPacks': totalPacks,
-        'packTotalsByYearLevel': packTotalsByYearLevel,
-        'packTotalsByClassroom': packTotalsByClassroom,
-        'consumablesTotals': consumablesTotalsJson,
-        'consumablesByYearLevel': consumablesByYearLevelJson,
-        'consumablesByClassroom': consumablesByClassroomJson,
-        'classroomDeliveryDetails': classroomDeliveryDetailsJson,
-        'photoUrls': photoUrls,
-        'notes': notes,
-        'notesByClassroom': notesByClassroom,
-        'createdAt': Timestamp.fromDate(DateTime.now()),
-      };
-
-      debugPrint('Summary data prepared, saving to Firestore...');
-      debugPrint('Total packs: $totalPacks, Consumable types: ${consumablesTotals.length}, Photos: ${photoUrls.length}');
-      if (criticalErrors.isNotEmpty) {
-        debugPrint('WARNING: ${criticalErrors.length} non-fatal errors occurred during data collection');
-      }
-
-      // Use schoolId as the document ID so each school only has one summary
-      // This prevents creating multiple similar documents
-      try {
-        await _firestore
-            .collection('signed_school_summaries')
-            .doc(schoolId)
-            .set(data);
-        debugPrint('✓ Summary saved successfully to Firestore with ID: $schoolId');
-      } catch (e) {
-        final errorMsg = 'Failed to write to Firestore: $e';
-        debugPrint('✗ FIRESTORE ERROR: $errorMsg');
-        return Result.failure(errorMsg);
-      }
-      final created = summary.copyWith(id: schoolId);
-      return Result.success(created);
-    } catch (e) {
-      debugPrint('Error creating signed school summary: $e');
-      debugPrint('Stack trace: ${StackTrace.current}');
-      return Result.failure('Failed to create signed school summary: $e');
-    }
-  }
-
-  @override
   Future<Result<SignedSchoolSummary?>> getSignedSchoolSummary(String schoolId) async {
     try {
-      debugPrint('Fetching signed school summary for: $schoolId');
-      final doc = await _firestore
-          .collection('signed_school_summaries')
-          .doc(schoolId)
-          .get();
-
-      if (!doc.exists) {
-        debugPrint('No signed summary found for school: $schoolId');
-        return const Result.success(null);
-      }
-
+      final doc = await _firestore.collection('signed_school_summaries').doc(schoolId).get();
       final data = doc.data();
-      if (data == null) {
-        debugPrint('Document exists but has no data for school: $schoolId');
-        return const Result.success(null);
-      }
-
-      final summary = SignedSchoolSummary.fromJson({'id': doc.id, ...data});
-      debugPrint('Successfully fetched signed summary');
-      return Result.success(summary);
-    } catch (e) {
-      debugPrint('Error fetching signed school summary: $e');
-      return Result.failure('Failed to fetch signed school summary: $e');
+      return Result.success(data == null
+          ? null
+          : SignedSchoolSummary.fromJson({...data, 'id': doc.id}));
+    } on FirebaseException catch (error) {
+      return Result.failure('Could not load the earlier signed summary', error);
+    } catch (_) {
+      return const Result.failure('Could not read the earlier signed summary');
     }
   }
 
@@ -1957,9 +1441,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final Map<String, String> yearLevelIdMap = {};
 
       for (final yearLevelData in yearLevels) {
-        final yearLevelQuery = await _firestore
-            .collection('schools')
-            .doc(schoolId)
+        final yearLevelQuery = await _recordsFor(schoolId)
             .collection('yearLevels')
             .where('label', isEqualTo: yearLevelData.label)
             .limit(1)
@@ -1975,9 +1457,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
           final json = yearLevel.toJson();
           json.remove('id');
 
-          final docRef = await _firestore
-              .collection('schools')
-              .doc(schoolId)
+          final docRef = await _recordsFor(schoolId)
               .collection('yearLevels')
               .add(json);
 
@@ -2001,9 +1481,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       // Pre-fetch any year levels referenced in breakdowns but not in import
       for (final label in allBreakdownLabels) {
         if (!yearLevelIdMap.containsKey(label)) {
-          final query = await _firestore
-              .collection('schools')
-              .doc(schoolId)
+          final query = await _recordsFor(schoolId)
               .collection('yearLevels')
               .where('label', isEqualTo: label)
               .limit(1)
@@ -2021,9 +1499,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
 
         for (final classroomData in yearLevelData.classrooms) {
           // Check if classroom already exists
-          final classroomQuery = await _firestore
-              .collection('schools')
-              .doc(schoolId)
+          final classroomQuery = await _recordsFor(schoolId)
               .collection('yearLevels')
               .doc(yearLevelId)
               .collection('classrooms')
@@ -2043,9 +1519,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
             final json = classroom.toJson();
             json.remove('id');
 
-            final docRef = await _firestore
-                .collection('schools')
-                .doc(schoolId)
+            final docRef = await _recordsFor(schoolId)
                 .collection('yearLevels')
                 .doc(yearLevelId)
                 .collection('classrooms')
@@ -2068,9 +1542,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
             final json = packTotal.toJson();
             json.remove('id');
 
-            await _firestore
-                .collection('schools')
-                .doc(schoolId)
+            await _recordsFor(schoolId)
                 .collection('yearLevels')
                 .doc(yearLevelId)
                 .collection('classrooms')
@@ -2098,9 +1570,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
             final json = breakdown.toJson();
             json.remove('id');
 
-            await _firestore
-                .collection('schools')
-                .doc(schoolId)
+            await _recordsFor(schoolId)
                 .collection('yearLevels')
                 .doc(yearLevelId)
                 .collection('classrooms')
@@ -2111,9 +1581,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
 
           // Create consumables for this classroom
           for (final consumableData in classroomData.consumables) {
-            final consumableQuery = await _firestore
-                .collection('schools')
-                .doc(schoolId)
+            final consumableQuery = await _recordsFor(schoolId)
                 .collection('yearLevels')
                 .doc(yearLevelId)
                 .collection('classrooms')
@@ -2135,9 +1603,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
               final json = consumable.toJson();
               json.remove('id');
 
-              await _firestore
-                  .collection('schools')
-                  .doc(schoolId)
+              await _recordsFor(schoolId)
                   .collection('yearLevels')
                   .doc(yearLevelId)
                   .collection('classrooms')
@@ -2159,8 +1625,6 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
         }
       }
 
-      // Clear sign-off since bulk data was imported
-      await _clearSignOffOnDataChange(schoolId);
 
       return Result.success(BulkImportSummary(
         yearLevelsCreated: yearLevelsCreated,
@@ -2176,9 +1640,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   // School Timers
   @override
   Stream<SchoolTimer?> watchActiveTimer(String schoolId) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('timers')
         .doc('active')
         .snapshots()
@@ -2192,17 +1654,15 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
         return null;
       }
       return SchoolTimer.fromJson({
-        'id': snapshot.id,
         ...data,
+        'id': _timerSessionId(data),
       });
     });
   }
 
   @override
   Stream<List<SchoolTimer>> watchTimerHistory(String schoolId, {int limit = 20}) {
-    return _firestore
-        .collection('schools')
-        .doc(schoolId)
+    return _recordsFor(schoolId)
         .collection('timers')
         .doc('active')
         .collection('history')
@@ -2221,95 +1681,74 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
     });
   }
 
+  String _timerSessionId(Map<String, dynamic> data) {
+    final session = data['sessionId'];
+    if (session is String && session.isNotEmpty) return session;
+    final startedAt = data['startedAt'] as Timestamp;
+    return 'legacy-${startedAt.seconds}-${startedAt.nanoseconds}';
+  }
+
   @override
-  Future<Result<SchoolTimer>> startTimer(String schoolId, SchoolTimer timer) async {
+  Future<Result<SchoolTimer>> startTimer(
+    String schoolId,
+    SchoolTimer timer,
+  ) async {
+    final ref = _recordsFor(schoolId)
+        .collection('timers').doc('active');
     try {
-      // Check if there's already an active timer
-      final activeDoc = await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('timers')
-          .doc('active')
-          .get();
-
-      if (activeDoc.exists && activeDoc.data()?['isActive'] == true) {
-        return const Result.failure('A timer is already running for this school');
-      }
-
-      // Create the timer document
-      final data = timer.toJson();
-      data.remove('id');
-
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('timers')
-          .doc('active')
-          .set(data);
-
-      final created = timer.copyWith(id: 'active');
-      debugPrint('Timer started for school $schoolId by ${timer.startedByName}');
-      return Result.success(created);
+      return await _firestore.runTransaction((transaction) async {
+        final data = (await transaction.get(ref)).data();
+        if (data?['isActive'] == true) {
+          if (_timerSessionId(data!) == timer.id) return Result.success(timer);
+          return const Result.failure('A timer is already running for this school');
+        }
+        final history = await transaction.get(ref.collection('history').doc(timer.id));
+        if (history.exists) {
+          return const Result.failure('This timer has already finished');
+        }
+        transaction.set(ref, timer.toJson()
+          ..remove('id')
+          ..['sessionId'] = timer.id
+          ..['startedAt'] = FieldValue.serverTimestamp()
+          ..['createdAt'] = FieldValue.serverTimestamp());
+        return Result.success(timer);
+      });
     } catch (e) {
-      debugPrint('Error starting timer: $e');
       return Result.failure('Failed to start timer: $e');
     }
   }
 
   @override
   Future<Result<void>> stopTimer(
-      String schoolId, String timerId, String stoppedByUid, String stoppedByName) async {
+    String schoolId,
+    String timerId,
+    String stoppedByUid,
+    String stoppedByName,
+  ) async {
+    final ref = _recordsFor(schoolId)
+        .collection('timers').doc('active');
+    final history = ref.collection('history').doc(timerId);
+    final stoppedAt = FieldValue.serverTimestamp();
     try {
-      final activeDoc = await _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('timers')
-          .doc('active')
-          .get();
+      return await _firestore.runTransaction((transaction) async {
+        final data = (await transaction.get(ref)).data();
+        if (data == null || data['isActive'] != true || _timerSessionId(data) != timerId) {
+          if ((await transaction.get(history)).exists) return const Result.success(null);
+          return const Result.failure('That timer is no longer active');
+        }
 
-      if (!activeDoc.exists || activeDoc.data()?['isActive'] != true) {
-        return const Result.failure('No active timer found');
-      }
-
-      final activeData = activeDoc.data()!;
-      final stoppedAt = DateTime.now();
-
-      // Move to history with stopped info
-      final historyData = {
-        ...activeData,
-        'isActive': false,
-        'stoppedAt': Timestamp.fromDate(stoppedAt),
-        'stoppedByUid': stoppedByUid,
-        'stoppedByName': stoppedByName,
-      };
-
-      // Use a batch to ensure atomicity
-      final batch = _firestore.batch();
-
-      // Add to history subcollection
-      final historyRef = _firestore
-          .collection('schools')
-          .doc(schoolId)
-          .collection('timers')
-          .doc('active')
-          .collection('history')
-          .doc();
-      batch.set(historyRef, historyData);
-
-      // Clear the active timer (set isActive to false)
-      batch.update(activeDoc.reference, {
-        'isActive': false,
-        'stoppedAt': Timestamp.fromDate(stoppedAt),
-        'stoppedByUid': stoppedByUid,
-        'stoppedByName': stoppedByName,
+        final changes = {
+          'sessionId': timerId,
+          'isActive': false,
+          'stoppedAt': stoppedAt,
+          'stoppedByUid': stoppedByUid,
+          'stoppedByName': stoppedByName,
+        };
+        transaction.set(history, {...data, ...changes});
+        transaction.update(ref, changes);
+        return const Result.success(null);
       });
-
-      await batch.commit();
-
-      debugPrint('Timer stopped for school $schoolId by $stoppedByName');
-      return const Result.success(null);
     } catch (e) {
-      debugPrint('Error stopping timer: $e');
       return Result.failure('Failed to stop timer: $e');
     }
   }
@@ -2321,9 +1760,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final data = timer.toJson();
       data.remove('id');
 
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('timers')
           .doc('active')
           .collection('history')
@@ -2344,9 +1781,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       final data = timer.toJson();
       data.remove('id');
 
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('timers')
           .doc('active')
           .collection('history')
@@ -2364,9 +1799,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Future<Result<void>> deleteTimerHistoryEntry(String schoolId, String timerId) async {
     try {
-      await _firestore
-          .collection('schools')
-          .doc(schoolId)
+      await _recordsFor(schoolId)
           .collection('timers')
           .doc('active')
           .collection('history')

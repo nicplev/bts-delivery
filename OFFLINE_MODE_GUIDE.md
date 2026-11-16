@@ -1,322 +1,37 @@
-# Offline Mode Enhancement Guide
-
-## Overview
-
-The BTS Delivery App now features comprehensive offline mode support, allowing delivery drivers to complete their work even without internet connectivity. All data is automatically queued and synced when connection is restored.
-
-## Features
-
-### 1. **Full Offline Delivery Completion**
-- Complete deliveries without internet connection
-- Capture signatures offline
-- Take photos offline
-- Add notes and completion details
-- All data stored securely on device
-
-### 2. **Intelligent Sync Queue**
-- Automatic background synchronization
-- Manual sync trigger available
-- Retry logic for failed uploads
-- WiFi-only sync option (configurable)
-- Priority-based queue processing
-
-### 3. **Visual Status Indicators**
-- **Offline Mode Banner**: Shows when device is offline with pending item count
-- **Syncing Banner**: Displays progress during active sync
-- **Sync Complete**: Silent success (no banner)
-- **Partial Sync**: Warning for items that failed
-- **Waiting for WiFi**: Shown when WiFi-only mode is enabled
-
-### 4. **Detailed Sync Status**
-- Tap the offline/sync banner to view details
-- See pending delivery completions
-- View storage usage
-- Monitor sync progress
-- Manual sync trigger
-
-## How It Works
-
-### For Delivery Drivers
-
-#### Completing a Delivery Offline
-
-1. **Navigate to delivery** (works offline with cached data)
-2. **Capture signature** - Saved locally to device storage
-3. **Take photos** - Compressed and stored on device
-4. **Add notes** - Stored with delivery completion
-5. **Submit** - Queued for upload when online
-
-#### Monitoring Sync Status
-
-- **Blue banner**: "Offline Mode • X pending" - You have pending items
-- **Tap banner**: View detailed sync status
-- **Green checkmark**: Item successfully synced
-- **Yellow warning**: Some items need retry
-- **Red error**: Sync failed (will retry automatically)
-
-#### Manual Sync
-
-1. Tap the offline mode banner
-2. View pending items in detail sheet
-3. Tap "Sync Now" button
-4. Monitor progress in real-time
-
-### Data Storage
-
-#### Local Storage Structure
-
-```
-/pending_uploads/
-  ├── signature_[deliveryId]_[timestamp].png
-  ├── photo_[deliveryId]_0_[timestamp].jpg
-  ├── photo_[deliveryId]_1_[timestamp].jpg
-  └── ...
-```
-
-#### Hive Boxes
-
-- `pending_delivery_completions`: Delivery completion metadata
-- `local_photos`: Photo upload queue
-- `sync_queue`: General sync operations
-- `app_settings`: User preferences
-
-### Sync Process
-
-1. **Queue Creation**
-   - User completes action offline
-   - Data saved to Hive database
-   - Files saved to local storage
-   - Queued for sync
-
-2. **Connectivity Detection**
-   - App monitors connectivity status
-   - Detects when device comes online
-   - Checks WiFi-only preference
-
-3. **Auto Sync**
-   - Triggers automatically when online
-   - Processes queue in priority order
-   - Uploads signatures first
-   - Then photos (compressed)
-   - Finally metadata
-
-4. **Error Handling**
-   - Failed items marked for retry
-   - Max 3 retry attempts
-   - Exponential backoff
-   - User notified of persistent failures
-
-## Configuration
-
-### App Settings (Configurable in Profile)
+# Offline work in the refresh branch
 
-```dart
-AppSettings {
-  autoSync: true,              // Auto-sync when online
-  wifiOnlySync: true,          // Only sync on WiFi
-  syncInterval: 15,            // Minutes between sync attempts
-  compressImages: true,        // Compress photos before upload
-  imageQuality: 80,            // JPEG quality (0-100)
-  offlineModeEnabled: true,    // Allow offline usage
-  maxRetries: 3,               // Max sync retry attempts
-}
-```
+This describes the local refresh implementation, not a deployed release. See [REFRESH_PLAN.md](REFRESH_PLAN.md) for validation and rollout gates.
 
-### Customization
+## Before entering a school
 
-To change sync behavior, update `AppSettings` in Hive:
+Sign in and open each scheduled delivery while connected. Each delivery has its own visit records. Opening a visit prepares its classroom expectations on the server and downloads classroom records to this device. The school hub reports whether classroom records are ready on this device or available only while connected. A visit never opened and prepared on this device cannot be assumed available offline.
 
-```dart
-final settings = await offlineStorage.getAppSettings();
-final updated = settings.copyWith(
-  wifiOnlySync: false,  // Sync on any connection
-  syncInterval: 5,      // Sync every 5 minutes
-);
-await offlineStorage.updateAppSettings(updated);
-```
+School contacts and map metadata are included in preparation. This does not download every map or photo file for offline viewing. Keep required maps separately available until media download readiness is implemented.
 
-## API Reference
+## Recording work
 
-### OfflineDeliveryService
+Classroom status and name changes use Firestore's local write queue. The app distinguishes local confirmation, server acknowledgement, and an unconfirmed write. Rejected classroom changes appear in a Review banner while the app session remains active. That rejection banner is not yet a durable recovery journal across app termination.
 
-```dart
-// Save delivery completion offline
-final completionId = await offlineDeliveryService.saveDeliveryCompletion(
-  deliveryId: 'delivery_123',
-  schoolId: 'school_456',
-  completedBy: 'user_789',
-  signatureFile: signatureFile,
-  photoFiles: [photo1, photo2],
-  notes: 'Delivery completed successfully',
-  signedBy: 'John Smith',
-);
+Photos and signatures use a separate durable evidence journal. The app saves their files and metadata before starting an upload, and retains local media until the server acknowledges the metadata. Uploads resume when the app can run after restart, reconnect, or returning to the foreground. iOS may suspend work while the app is in the background; continuous background transfer is not promised.
 
-// Get pending completions
-final pending = await offlineDeliveryService.getPendingCompletions();
+Pending evidence belongs to the account that captured it. Switching accounts does not upload another person's queue. Sign back into the original account to continue its pending uploads.
 
-// Check if delivery has pending completion
-final hasPending = await offlineDeliveryService.hasPendingCompletion('delivery_123');
+## Understanding upload status
 
-// Get storage size
-final bytes = await offlineDeliveryService.getPendingStorageSize();
-final formatted = offlineDeliveryService.formatStorageSize(bytes);
+Tap the evidence status indicator to see pending photos/signatures, retry errors, or pause/resume an upload. “Saved on this device” does not mean another team member can see it yet. A detected network connection does not prove that Firebase can be reached. Retry preserves the queued evidence when Wi-Fi has no usable internet.
 
-// Mark as uploaded (called by sync manager)
-await offlineDeliveryService.markAsUploaded(completionId);
+The evidence indicator counts photo and signature uploads. It is not a global acknowledgement indicator for every Firestore edit, note, or checklist item.
 
-// Clear uploaded completions (cleanup)
-await offlineDeliveryService.clearUploadedCompletions();
-```
+## Sign-off and corrections
 
-### Providers
+A signature freezes the delivery summary reviewed at capture time. Each signature has its own immutable record and image path; later corrections create another record. A cached or incomplete summary remains marked for review and is never silently promoted to a server-fresh sign-off after reconnection. “Data read” describes when the client read the summary; it is not independent server verification of its truth or a transaction across all source documents.
 
-```dart
-// Watch offline delivery service
-final service = ref.watch(offlineDeliveryServiceProvider);
+Visit histories are separate. Legacy school-only records remain available for historical reading/export and are not automatically assigned to a guessed visit.
 
-// Watch pending completions (stream)
-final completionsAsync = ref.watch(pendingDeliveryCompletionsProvider);
+## Older pending work
 
-// Watch pending count
-final countAsync = ref.watch(pendingDeliveryCountProvider);
+The previous app's local queue records are preserved. Photos migrate automatically only when their original account can be established. Unattributed older records remain on the device for review. Administrators can export recoverable older photo files through the upload detail sheet. Do not clear app storage or uninstall the app while unrecovered evidence remains.
 
-// Watch storage size
-final sizeAsync = ref.watch(pendingStorageSizeProvider);
+## Remaining release checks
 
-// Check specific delivery
-final hasPendingAsync = ref.watch(
-  hasPendingCompletionProvider('delivery_123')
-);
-```
-
-## UI Components
-
-### ConnectivityIndicator
-
-Shows at top of screens to indicate offline/sync status.
-
-```dart
-Column(
-  children: [
-    const ConnectivityIndicator(),
-    Expanded(child: YourContent()),
-  ],
-)
-```
-
-### SyncStatusDetailSheet
-
-Modal bottom sheet with detailed sync information.
-
-```dart
-// Show programmatically
-SyncStatusDetailSheet.show(context);
-
-// Or tap the ConnectivityIndicator banner
-```
-
-## Testing Offline Mode
-
-### Enable Airplane Mode
-
-1. Turn on Airplane Mode on your test device
-2. Complete a delivery with signature and photos
-3. Verify data saved locally
-4. Turn off Airplane Mode
-5. Observe automatic sync
-
-### Simulate Poor Connection
-
-1. Use network throttling tools
-2. Complete deliveries
-3. Verify retry logic works
-4. Check error handling
-
-### Test WiFi-Only Mode
-
-1. Enable WiFi-only sync in settings
-2. Complete delivery on cellular
-3. Verify "Waiting for WiFi" banner
-4. Connect to WiFi
-5. Verify automatic sync
-
-## Performance Optimization
-
-### Image Compression
-
-- Photos compressed before storage
-- JPEG quality: 80 (configurable)
-- Max dimensions: 1600x1600
-- Typical size: 100-300KB per photo
-
-### Storage Management
-
-- Auto-cleanup of uploaded files
-- Periodic storage size monitoring
-- User alerts if storage exceeds threshold
-- Manual cleanup option available
-
-### Battery Optimization
-
-- Sync only when device charging (optional)
-- Reduced sync frequency on low battery
-- Background sync suspension configurable
-
-## Troubleshooting
-
-### Items Not Syncing
-
-1. **Check connectivity**: Verify device is online
-2. **Check WiFi setting**: Disable WiFi-only if on cellular
-3. **View sync status**: Tap banner to see errors
-4. **Manual sync**: Try triggering sync manually
-5. **Check storage**: Ensure device has available space
-
-### Photos Not Uploading
-
-1. **Verify file exists**: Check local storage path
-2. **Check permissions**: Ensure storage permissions granted
-3. **Check file size**: Very large photos may timeout
-4. **Retry**: Failed uploads retry automatically
-
-### Sync Stuck
-
-1. **Kill and restart app**: Force close and reopen
-2. **Clear sync queue**: Use settings to clear failed items
-3. **Check Firebase**: Verify Firebase connection
-4. **Contact support**: Persistent issues may need investigation
-
-## Best Practices
-
-### For Developers
-
-1. **Always queue offline operations** - Never assume connectivity
-2. **Provide visual feedback** - Show pending status clearly
-3. **Handle errors gracefully** - Don't lose user data
-4. **Test offline scenarios** - Simulate various network conditions
-5. **Monitor storage usage** - Alert users before running out
-
-### For Users
-
-1. **Sync regularly** - Trigger manual sync when on WiFi
-2. **Monitor pending items** - Check sync status periodically
-3. **Free up storage** - Clear uploaded items when safe
-4. **Report issues** - Contact support if sync fails repeatedly
-
-## Future Enhancements
-
-- [ ] Offline delivery route optimization
-- [ ] Offline map caching
-- [ ] Voice notes support
-- [ ] Delivery completion templates
-- [ ] Batch photo upload
-- [ ] Offline analytics dashboard
-- [ ] Push notification for sync completion
-- [ ] Conflict resolution for concurrent edits
-
-## Support
-
-For issues or questions:
-- Email: support@btsdelivery.com
-- GitHub: [Issue Tracker](https://github.com/your-repo/issues)
-- Docs: [Full Documentation](https://docs.btsdelivery.com)
+Automated tests cover simulated restart/retry, metadata failure, duplicate IDs, account changes, and frozen snapshots. Physical-device tests must still cover app termination, low storage, camera capture, Wi-Fi without internet, connection flapping, two-device changes, and native Storage retry behaviour. Offline preparation time and the performance targets in the plan have not yet been measured on a representative school.

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/schools_providers.dart';
+import '../providers/auth_providers.dart';
 import '../models/school.dart';
+import '../models/delivery_visit.dart';
+import '../providers/delivery_visit_provider.dart';
 import '../utils/year_level_colors.dart';
 
 class RecordsTab extends ConsumerWidget {
@@ -28,22 +31,23 @@ class RecordsTab extends ConsumerWidget {
                     Text(
                       'Year Levels',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
                     const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _showAddYearLevelDialog(context, ref),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Year Level'),
-                    ),
+                    if (ref.watch(canEditSchoolDataProvider))
+                      TextButton.icon(
+                        onPressed: () => _showAddYearLevelDialog(context, ref),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add Year Level'),
+                      ),
                   ],
                 ),
               ),
-              
               Expanded(
                 child: yearLevelsAsync.when(
-                  loading: () => const Center(child: CircularProgressIndicator()),
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
                   error: (error, _) => Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -53,7 +57,8 @@ class RecordsTab extends ConsumerWidget {
                         Text('Error: $error'),
                         const SizedBox(height: 16),
                         FilledButton(
-                          onPressed: () => ref.invalidate(yearLevelsProvider(schoolId)),
+                          onPressed: () =>
+                              ref.invalidate(yearLevelsProvider(schoolId)),
                           child: const Text('Retry'),
                         ),
                       ],
@@ -65,7 +70,8 @@ class RecordsTab extends ConsumerWidget {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.class_outlined, size: 48, color: Colors.grey),
+                            Icon(Icons.class_outlined,
+                                size: 48, color: Colors.grey),
                             SizedBox(height: 16),
                             Text('No year levels found'),
                             SizedBox(height: 8),
@@ -157,7 +163,8 @@ class _YearLevelCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final classroomsAsync = ref.watch(classroomsProvider((schoolId: schoolId, yearLevelId: yearLevel.id)));
+    final classroomsAsync = ref.watch(
+        classroomsProvider((schoolId: schoolId, yearLevelId: yearLevel.id)));
     final backgroundColor = YearLevelColors.getBackgroundColor(yearLevel.label);
     final iconColor = YearLevelColors.getIconColor(yearLevel.label);
     final needsBorder = YearLevelColors.needsBorder(yearLevel.label);
@@ -166,7 +173,11 @@ class _YearLevelCard extends ConsumerWidget {
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push('/schools/$schoolId/year/${yearLevel.id}/classrooms'),
+        onTap: () => context.push(schoolWorkPath(
+          schoolId,
+          visit: ref.read(activeDeliveryVisitProvider),
+          suffix: '/year/${Uri.encodeComponent(yearLevel.id)}/classrooms',
+        )),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -187,7 +198,6 @@ class _YearLevelCard extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 16),
-              
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -195,13 +205,15 @@ class _YearLevelCard extends ConsumerWidget {
                     Text(
                       yearLevel.label,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
                     const SizedBox(height: 4),
                     classroomsAsync.when(
-                      loading: () => const Text('Loading classrooms...', style: TextStyle(color: Colors.grey)),
-                      error: (_, __) => const Text('Error loading classrooms', style: TextStyle(color: Colors.red)),
+                      loading: () => const Text('Loading classrooms...',
+                          style: TextStyle(color: Colors.grey)),
+                      error: (_, __) => const Text('Error loading classrooms',
+                          style: TextStyle(color: Colors.red)),
                       data: (classrooms) => Text(
                         '${classrooms.length} classroom${classrooms.length != 1 ? 's' : ''}',
                         style: const TextStyle(color: Colors.grey),
@@ -210,65 +222,67 @@ class _YearLevelCard extends ConsumerWidget {
                   ],
                 ),
               ),
-
-              PopupMenuButton<String>(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+              if (ref.watch(canEditSchoolDataProvider))
+                PopupMenuButton<String>(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 4,
+                  offset: const Offset(0, 8),
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _showEditYearLevelDialog(context, ref, yearLevel);
+                    } else if (value == 'delete') {
+                      _showDeleteConfirmation(context, ref, yearLevel);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'edit',
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.edit_outlined,
+                            size: 20,
+                            color: Colors.grey.shade700,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Edit',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.delete_outline,
+                            size: 20,
+                            color: Colors.red,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Delete',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.red.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                elevation: 4,
-                offset: const Offset(0, 8),
-                onSelected: (value) {
-                  if (value == 'edit') {
-                    _showEditYearLevelDialog(context, ref, yearLevel);
-                  } else if (value == 'delete') {
-                    _showDeleteConfirmation(context, ref, yearLevel);
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'edit',
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.edit_outlined,
-                          size: 20,
-                          color: Colors.grey.shade700,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Edit',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey.shade900,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.delete_outline,
-                          size: 20,
-                          color: Colors.red,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Delete',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.red.shade700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),

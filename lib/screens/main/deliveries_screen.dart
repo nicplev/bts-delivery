@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:uuid/uuid.dart';
+import 'package:table_calendar/table_calendar.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/calendar_sync_providers.dart';
-import '../../providers/staff_providers.dart';
 import '../../services/offline/connectivity_service.dart';
 import '../../widgets/connectivity_indicator.dart';
 import '../../widgets/deliveries_calendar_view.dart';
+import '../../widgets/delivery_day_list.dart';
 import '../../widgets/calendar_subscription_dialog.dart';
-import '../../app/theme/brand_colors.dart';
 
 class DeliveriesScreen extends ConsumerStatefulWidget {
   const DeliveriesScreen({super.key});
@@ -22,10 +20,27 @@ class DeliveriesScreen extends ConsumerStatefulWidget {
 
 class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
   bool _isRefreshing = false;
+  bool _showCalendar = false;
+  late DateTime _focusedDay;
+  late DateTime _selectedDay;
+  late DateTime _calendarFirstDay;
+  late DateTime _calendarLastDay;
+  CalendarFormat _calendarFormat = CalendarFormat.month;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _focusedDay = _selectedDay = now;
+    _calendarFirstDay = DateTime(now.year, now.month, now.day - 365);
+    _calendarLastDay = DateTime(now.year, now.month, now.day + 365);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final canViewAllDeliveries = ref.watch(canViewAllDeliveriesProvider);
+    // Administrators always see all schools. Managers can filter to their own.
+    final isAdmin = ref.watch(isAdminProvider);
+    final canFilter = !isAdmin && ref.watch(canViewAllDeliveriesProvider);
     final canAssignDeliveries = ref.watch(canAssignDeliveriesProvider);
     final showAllDeliveries = ref.watch(allDeliveriesProvider);
     final connectivityAsync = ref.watch(connectivityStatusProvider);
@@ -61,70 +76,28 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
             tooltip: 'Calendar options',
             onSelected: (value) {
               if (value == 'subscribe') {
-                _showCalendarSubscriptionDialog(context);
+                _showCalendarSubscriptionDialog();
               } else if (value == 'manual_sync') {
                 _showCalendarSyncDialog(context);
               }
             },
-            itemBuilder: (context) => [
+            itemBuilder: (context) => const [
               PopupMenuItem(
                 value: 'subscribe',
-                child: Row(
-                  children: [
-                    const Icon(Icons.sync, size: 20, color: BrandColors.kakaBlue),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Subscribe to Calendar',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).textTheme.bodyLarge?.color,
-                          ),
-                        ),
-                        Text(
-                          'Auto-updates',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                child: Text('Subscribe to Calendar'),
               ),
               PopupMenuItem(
                 value: 'manual_sync',
-                child: Row(
-                  children: [
-                    const Icon(Icons.cloud_upload, size: 20, color: BrandColors.kakaBlue),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Manual Sync (Legacy)',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).textTheme.bodyLarge?.color,
-                          ),
-                        ),
-                        Text(
-                          'One-time sync',
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                child: Text('Manual Sync (Legacy)'),
               ),
             ],
           ),
-          if (canViewAllDeliveries)
+          if (canFilter)
             PopupMenuButton<String>(
               icon: const Icon(Icons.filter_list),
-              tooltip: 'Filter deliveries',
+              tooltip: showAllDeliveries
+                  ? 'Filter deliveries (all schools)'
+                  : 'Filter deliveries (my schools)',
               onSelected: (value) {
                 if (value == 'toggle_filter') {
                   ref.read(allDeliveriesProvider.notifier).state =
@@ -134,37 +107,119 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
               itemBuilder: (context) => [
                 PopupMenuItem(
                   value: 'toggle_filter',
-                  child: Row(
-                    children: [
-                      Icon(
-                        showAllDeliveries ? Icons.person : Icons.group,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Text(showAllDeliveries
-                          ? 'Show My Deliveries'
-                          : 'Show All Deliveries'),
-                    ],
-                  ),
+                  child: Text(showAllDeliveries
+                      ? 'Show My Deliveries'
+                      : 'Show All Deliveries'),
                 ),
               ],
             ),
         ],
       ),
-      body: const Column(
+      body: Column(
         children: [
-          ConnectivityIndicator(),
-          Expanded(
-            child: DeliveriesCalendarView(),
+          const ConnectivityIndicator(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.today_outlined),
+                  label: Text('Today'),
+                ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.calendar_month_outlined),
+                  label: Text('Calendar'),
+                ),
+              ],
+              selected: {_showCalendar},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) {
+                setState(() => _showCalendar = selection.single);
+              },
+            ),
           ),
+          Expanded(child: _buildDeliveries(isAdmin)),
         ],
       ),
       floatingActionButton: canAssignDeliveries
           ? FloatingActionButton(
               onPressed: () => context.push('/deliveries/add'),
+              tooltip: 'Add delivery',
               child: const Icon(Icons.add),
             )
           : null,
+    );
+  }
+
+  Widget _buildDeliveries(bool isAdmin) {
+    if (!isAdmin) {
+      final staff = ref.watch(currentStaffProvider);
+      if (staff.hasError) {
+        return Center(
+          child: DeliveryMessage(
+            icon: Icons.error_outline,
+            title: 'Couldn’t load your staff account',
+            action: TextButton(
+              onPressed: () => ref.invalidate(currentStaffProvider),
+              child: const Text('Retry'),
+            ),
+          ),
+        );
+      }
+      if (staff.isLoading && !staff.hasValue) {
+        final isOffline = ref.watch(connectivityStatusProvider).valueOrNull ==
+            ConnectivityStatus.offline;
+        return Center(
+          child: isOffline
+              ? const DeliveryMessage(
+                  icon: Icons.cloud_off_outlined,
+                  title: 'Checking your saved staff account',
+                  description:
+                      'A connection may be needed to load your deliveries.',
+                )
+              : const CircularProgressIndicator(),
+        );
+      }
+      if (staff.valueOrNull == null) {
+        return Center(
+          child: DeliveryMessage(
+            icon: Icons.link_off,
+            title: 'Link your staff account',
+            description: 'A linked staff account is needed to view deliveries.',
+            action: FilledButton(
+              onPressed: () => context.push('/staff-link'),
+              child: const Text('Link account'),
+            ),
+          ),
+        );
+      }
+    }
+
+    if (_showCalendar) {
+      return DeliveriesCalendarView(
+        firstDay: _calendarFirstDay,
+        lastDay: _calendarLastDay,
+        focusedDay: _focusedDay,
+        selectedDay: _selectedDay,
+        format: _calendarFormat,
+        onDaySelected: (selected, focused) {
+          setState(() {
+            _selectedDay = selected;
+            _focusedDay = focused;
+          });
+        },
+        onPageChanged: (focused) => setState(() => _focusedDay = focused),
+        onFormatChanged: (format) => setState(() => _calendarFormat = format),
+      );
+    }
+
+    final today = ref.watch(deliveryTodayProvider);
+    return DeliveryDayList(
+      date: today,
+      deliveries: ref.watch(todayDeliveriesProvider),
+      onRetry: () => ref.invalidate(todayDeliveriesProvider),
     );
   }
 
@@ -183,7 +238,7 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
 
       // Show feedback
       if (mounted) {
-        final status = await ref.read(connectivityStatusProvider.future);
+        final status = connectivityService.currentStatus;
         final isOnline = status == ConnectivityStatus.online;
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -238,70 +293,28 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
     );
   }
 
-  Future<void> _showCalendarSubscriptionDialog(BuildContext dialogContext) async {
-    // Get current staff
-    var currentStaff = await ref.read(currentStaffProvider.future);
+  Future<void> _showCalendarSubscriptionDialog() async {
+    try {
+      final staff = await ref.read(currentStaffProvider.future);
+      if (!mounted) return;
 
-    if (!mounted) return;
-
-    // If no staff record exists, check if user is an admin and create one
-    if (currentStaff == null) {
-      final currentUser = await ref.read(currentUserProvider.future);
-
-      if (currentUser?.isAdmin ?? false) {
-        // Auto-create staff record for admin
-        final staffRepository = ref.read(staffRepositoryProvider);
-        final firestore = FirebaseFirestore.instance;
-
-        try {
-          // Generate token before creating the document
-          const uuid = Uuid();
-          final token = uuid.v4();
-
-          // Create staff record for admin with token
-          final staffDoc = await firestore.collection('staff').add({
-            'name': currentUser!.email.split('@')[0], // Use email username as name
-            'uid': currentUser.uid,
-            'role': 'admin',
-            'assignedSchoolIds': [],
-            'calendarToken': token, // Include token in initial creation
-            'createdAt': Timestamp.fromDate(DateTime.now()),
-          });
-
-          // Fetch the newly created staff
-          final result = await staffRepository.getStaffById(staffDoc.id);
-          if (result.isSuccess && result.dataOrNull != null) {
-            currentStaff = result.dataOrNull;
-          }
-        } catch (e) {
-          if (mounted && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to create staff record: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-          return;
-        }
-      } else {
-        // Regular user without staff record
-        if (mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Please link your account to a staff member first'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
+      if (staff == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content:
+                  Text('Link a staff account to subscribe to the calendar.')),
+        );
         return;
       }
-    }
-
-    if (currentStaff != null && mounted && context.mounted) {
-      showDialog(
+      await showDialog<void>(
         context: context,
-        builder: (context) => CalendarSubscriptionDialog(staff: currentStaff!),
+        builder: (context) => CalendarSubscriptionDialog(staff: staff),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Couldn’t load your calendar subscription.')),
       );
     }
   }
@@ -311,7 +324,8 @@ class _CalendarSyncDialog extends ConsumerStatefulWidget {
   const _CalendarSyncDialog();
 
   @override
-  ConsumerState<_CalendarSyncDialog> createState() => _CalendarSyncDialogState();
+  ConsumerState<_CalendarSyncDialog> createState() =>
+      _CalendarSyncDialogState();
 }
 
 class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
@@ -411,7 +425,8 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
       if (!hasPermissions) {
         setState(() {
           _isSyncing = false;
-          _resultMessage = 'Calendar permission denied. Please enable it in Settings.';
+          _resultMessage =
+              'Calendar permission denied. Please enable it in Settings.';
           _isSuccess = false;
         });
         return;
@@ -426,7 +441,8 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
       setState(() {
         _isSyncing = false;
         _resultMessage = result.message;
-        _isSuccess = result.allSucceeded || (!result.allFailed && result.successCount > 0);
+        _isSuccess = result.allSucceeded ||
+            (!result.allFailed && result.successCount > 0);
       });
     } catch (e) {
       setState(() {

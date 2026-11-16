@@ -19,6 +19,7 @@ class SchoolTimerWidget extends ConsumerStatefulWidget {
 
 class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
   Timer? _displayTimer;
+  ({String id, DateTime startedAt})? _displaySession;
   Duration _displayedElapsed = Duration.zero;
 
   @override
@@ -27,25 +28,20 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
     super.dispose();
   }
 
-  void _startDisplayTimer(SchoolTimer activeTimer) {
+  void _startDisplayTimer(DateTime startedAt) {
     _displayTimer?.cancel();
-    _updateDisplayedTime(activeTimer);
     _displayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
-        _updateDisplayedTime(activeTimer);
+        setState(() => _displayedElapsed = DateTime.now().difference(startedAt));
       }
-    });
-  }
-
-  void _updateDisplayedTime(SchoolTimer activeTimer) {
-    setState(() {
-      _displayedElapsed = DateTime.now().difference(activeTimer.startedAt);
     });
   }
 
   void _stopDisplayTimer() {
     _displayTimer?.cancel();
     _displayTimer = null;
+    _displaySession = null;
+    _displayedElapsed = Duration.zero;
   }
 
   String _formatDuration(Duration d) {
@@ -64,16 +60,18 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
     return activeTimerAsync.when(
       data: (activeTimer) {
         if (activeTimer != null && activeTimer.isActive) {
-          // Start the display timer when we have an active timer
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_displayTimer == null || !_displayTimer!.isActive) {
-              _startDisplayTimer(activeTimer);
-            }
-          });
+          final session = (id: activeTimer.id, startedAt: activeTimer.startedAt);
+          if (session != _displaySession) {
+            _stopDisplayTimer();
+            _displaySession = session;
+            _displayedElapsed = DateTime.now().difference(session.startedAt);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _displaySession != session) return;
+              _startDisplayTimer(session.startedAt);
+            });
+          }
         } else {
-          // Stop display timer when no active timer
           _stopDisplayTimer();
-          _displayedElapsed = Duration.zero;
         }
 
         return Container(
@@ -214,8 +212,8 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
             : () async {
                 final notifier = ref.read(schoolTimerNotifierProvider.notifier);
                 if (isRunning) {
-                  final success = await notifier.stopTimer(widget.schoolId);
-                  if (!success && mounted) {
+                  final success = await notifier.stopTimer(widget.schoolId, activeTimer.id);
+                  if (!success && context.mounted) {
                     final error = ref.read(schoolTimerNotifierProvider).error;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -226,7 +224,7 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
                   }
                 } else {
                   final success = await notifier.startTimer(widget.schoolId);
-                  if (!success && mounted) {
+                  if (!success && context.mounted) {
                     final error = ref.read(schoolTimerNotifierProvider).error;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(

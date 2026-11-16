@@ -5,6 +5,7 @@ import '../../models/school.dart';
 import '../../models/staff.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../providers/staff_providers.dart';
 import '../../app/theme/brand_colors.dart';
 
 class SchoolStaffAllocationScreen extends ConsumerStatefulWidget {
@@ -237,36 +238,17 @@ class _SchoolStaffAllocationScreenState
 
       await staffListResult.when(
         success: (allStaff) async {
-          // Update each staff member's assignedSchoolIds
+          final changes = <String, bool>{};
           for (final staff in allStaff) {
-            final shouldBeAssigned = _selectedStaffIds.contains(staff.id);
-            final isCurrentlyAssigned =
-                staff.assignedSchoolIds.contains(widget.school.id);
-
-            // Only update if there's a change
-            if (shouldBeAssigned != isCurrentlyAssigned) {
-              final updatedSchoolIds =
-                  List<String>.from(staff.assignedSchoolIds);
-
-              if (shouldBeAssigned) {
-                updatedSchoolIds.add(widget.school.id);
-              } else {
-                updatedSchoolIds.remove(widget.school.id);
-              }
-
-              final updatedStaff = staff.copyWith(
-                assignedSchoolIds: updatedSchoolIds,
-              );
-
-              final result = await deliveriesRepo.updateStaff(updatedStaff);
-
-              result.when(
-                success: (_) {}, // Continue with other staff
-                failure: (message, _) {
-                  throw Exception('Failed to update ${staff.name}: $message');
-                },
-              );
+            final selected = _selectedStaffIds.contains(staff.id);
+            if (selected != staff.assignedSchoolIds.contains(widget.school.id)) {
+              changes[staff.id] = selected;
             }
+          }
+          final result = await ref.read(staffRepositoryProvider)
+              .setSchoolAssignments(widget.school.id, changes);
+          if (result.isFailure) {
+            throw Exception(result.errorOrNull);
           }
 
           // Refresh providers

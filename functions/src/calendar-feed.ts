@@ -1,116 +1,94 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import ical, {ICalCalendar, ICalEventData} from "ical-generator";
 import {toZonedTime} from "date-fns-tz";
 import {Delivery, Staff} from "./types";
+import {validRole} from "./staff-access";
 
 /**
  * HTTP Cloud Function that generates an iCal calendar feed for a staff member
  * GET /calendar/:token.ics
  */
 export const generateCalendarFeed = functions.https.onRequest(async (req, res) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("X-Robots-Tag", "noindex");
+  if (req.method !== "GET") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  const token = /^\/([A-Za-z0-9_-]{32})\.ics$/.exec(req.path)?.[1];
+  if (!token) {
+    res.status(404).send("Calendar not found");
+    return;
+  }
+
   try {
-      // Only allow GET requests
-      if (req.method !== "GET") {
-        res.status(405).send("Method Not Allowed");
-        return;
-      }
+    const db = admin.firestore();
+    const feed = await db.runTransaction(async (tx) => {
+      const tokens = await tx.get(db.collection("calendar_tokens")
+        .where("token", "==", token).limit(2));
+      if (tokens.size !== 1) return null;
 
-      // Extract token from URL path: /calendar/:token.ics
-      const pathParts = req.path.split("/");
-      const tokenWithExt = pathParts[pathParts.length - 1];
-      const token = tokenWithExt?.replace(".ics", "");
+      const subscription = tokens.docs[0];
+      const staffId = subscription.id;
+      const uid = subscription.get("uid");
+      if (typeof uid !== "string" || !uid || uid.includes("/")) return null;
 
-      if (!token || token.length < 10) {
-        res.status(400).send("Invalid calendar token");
-        return;
-      }
+      const link = await tx.get(db.collection("staff_access").doc(uid));
+      if (link.get("staffId") !== staffId) return null;
+      const doc = await tx.get(db.collection("staff").doc(staffId));
+      const data = doc.data();
+      if (!data || data.uid !== uid || !validRole(data.role)) return null;
+      const staff = {...data, id: staffId} as Staff;
+      const deliveries = await fetchDeliveriesForStaff(db, tx, staff);
+      return {staff, deliveries};
+    }, {readOnly: true});
 
-      functions.logger.info(`Calendar feed requested for token: ${token.substring(0, 8)}...`);
+    if (!feed) {
+      res.status(404).send("Calendar not found");
+      return;
+    }
 
-      // Find staff member by calendar token
-      const db = admin.firestore();
-      const staffSnapshot = await db.collection("staff")
-        .where("calendarToken", "==", token)
-        .limit(1)
-        .get();
-
-      if (staffSnapshot.empty) {
-        functions.logger.warn(`No staff found for token: ${token.substring(0, 8)}...`);
-        res.status(404).send("Calendar not found");
-        return;
-      }
-
-      const staffDoc = staffSnapshot.docs[0];
-      const staff = {id: staffDoc.id, ...staffDoc.data()} as Staff;
-
-      functions.logger.info(`Generating calendar for staff: ${staff.name} (${staff.role})`);
-
-      // Update calendar access metadata
-      await updateCalendarMetadata(db, staff.id, token);
-
-      // Fetch deliveries based on staff role and permissions
-      const deliveries = await fetchDeliveriesForStaff(db, staff);
-
-      // Generate iCal calendar
-      const calendar = generateICalCalendar(staff, deliveries);
-
-      // Set response headers for calendar subscription
-      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
-      res.setHeader("Cache-Control", "no-cache, must-revalidate");
-      res.setHeader("X-Robots-Tag", "noindex");
-
-      // Send calendar
-      res.status(200).send(calendar.toString());
-
-      functions.logger.info(`Calendar generated successfully with ${deliveries.length} deliveries`);
-  } catch (error) {
-    functions.logger.error("Error generating calendar feed:", error);
+    const calendar = generateICalCalendar(feed.staff, feed.deliveries);
+    await updateCalendarMetadata(db, feed.staff.id, token);
+    res.type("text/calendar").status(200).send(calendar.toString());
+  } catch {
+    functions.logger.error("Calendar feed generation failed.");
     res.status(500).send("Internal server error");
   }
 });
 
-/**
- * Fetch deliveries based on staff role and permissions
- */
+export function schoolQueries(role: unknown, schools: unknown): string[][] | null {
+  if (role === "admin" || role === "manager") return null;
+  if (role !== "staff" || !Array.isArray(schools)) return [];
+  const ids = [...new Set(schools.filter((id): id is string =>
+    typeof id === "string" && id.length > 0 && !id.includes("/")))];
+  const chunks: string[][] = [];
+  for (let offset = 0; offset < ids.length; offset += 30) {
+    chunks.push(ids.slice(offset, offset + 30));
+  }
+  return chunks;
+}
+
 async function fetchDeliveriesForStaff(
   db: FirebaseFirestore.Firestore,
+  tx: FirebaseFirestore.Transaction,
   staff: Staff
 ): Promise<Delivery[]> {
-  const now = new Date();
-  // Fetch deliveries from 1 year ago to 2 years in the future
-  const startDate = new Date(now.getFullYear() - 1, 0, 1);
-  const endDate = new Date(now.getFullYear() + 2, 11, 31);
+  const year = new Date().getFullYear();
+  const query = db.collection("deliveries")
+    .where("date", ">=", Timestamp.fromDate(new Date(year - 1, 0, 1)))
+    .where("date", "<", Timestamp.fromDate(new Date(year + 3, 0, 1)));
 
-  let query = db.collection("deliveries")
-    .where("date", ">=", admin.firestore.Timestamp.fromDate(startDate))
-    .where("date", "<=", admin.firestore.Timestamp.fromDate(endDate));
-
-  // Filter by assigned schools for non-admin/manager staff
-  if (staff.role === "staff" && staff.assignedSchoolIds.length > 0) {
-    // Firestore 'in' query supports up to 10 items, so we need to handle larger arrays
-    if (staff.assignedSchoolIds.length <= 10) {
-      query = query.where("schoolId", "in", staff.assignedSchoolIds);
-    } else {
-      // For more than 10 schools, we'll fetch all and filter in memory
-      functions.logger.info(`Staff has ${staff.assignedSchoolIds.length} schools, filtering in memory`);
-    }
-  }
-
-  const snapshot = await query.get();
-  let deliveries = snapshot.docs.map((doc) => ({
-    id: doc.id,
+  const scope = schoolQueries(staff.role, staff.assignedSchoolIds);
+  const queries = scope === null ? [query] : scope.map((ids) => query.where("schoolId", "in", ids));
+  const snapshots = await Promise.all(queries.map((scoped) => tx.get(scoped)));
+  return snapshots.flatMap((snapshot) => snapshot.docs.map((doc) => ({
     ...doc.data(),
-  })) as Delivery[];
-
-  // Filter in memory if needed (for staff with > 10 assigned schools)
-  if (staff.role === "staff" && staff.assignedSchoolIds.length > 10) {
-    deliveries = deliveries.filter((d) => staff.assignedSchoolIds.includes(d.schoolId));
-  }
-
-  functions.logger.info(`Fetched ${deliveries.length} deliveries for ${staff.role} ${staff.name}`);
-
-  return deliveries;
+    id: doc.id,
+  } as Delivery))).sort((a, b) => a.date.toMillis() - b.date.toMillis());
 }
 
 /**
@@ -199,30 +177,18 @@ async function updateCalendarMetadata(
   token: string
 ): Promise<void> {
   const metadataRef = db.collection("calendar_metadata").doc(staffId);
-
   try {
-    await db.runTransaction(async (transaction) => {
-      const doc = await transaction.get(metadataRef);
-
-      if (doc.exists) {
-        // Update existing metadata
-        transaction.update(metadataRef, {
-          lastAccessed: admin.firestore.FieldValue.serverTimestamp(),
-          accessCount: admin.firestore.FieldValue.increment(1),
-        });
-      } else {
-        // Create new metadata
-        transaction.set(metadataRef, {
-          staffId,
-          token,
-          lastAccessed: admin.firestore.FieldValue.serverTimestamp(),
-          accessCount: 1,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
+    await db.runTransaction(async (tx) => {
+      const current = await tx.get(db.collection("calendar_tokens").doc(staffId));
+      if (current.get("token") !== token) return;
+      tx.set(metadataRef, {
+        staffId,
+        lastAccessed: FieldValue.serverTimestamp(),
+        accessCount: FieldValue.increment(1),
+        token: FieldValue.delete(),
+      }, {merge: true});
     });
-  } catch (error) {
-    functions.logger.error("Error updating calendar metadata:", error);
-    // Don't fail the request if metadata update fails
+  } catch {
+    functions.logger.error("Calendar access metadata update failed.");
   }
 }

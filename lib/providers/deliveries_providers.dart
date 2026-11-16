@@ -1,177 +1,143 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../models/delivery.dart';
-import '../../models/staff.dart';
-import '../../repositories/deliveries_repository.dart';
+import '../models/delivery.dart';
+import '../models/staff.dart';
+import '../repositories/deliveries_repository.dart';
+import '../services/date_utils.dart';
 import 'repository_providers.dart';
 import 'auth_providers.dart';
 
 final allDeliveriesProvider = StateProvider<bool>((ref) => false);
 
-final todayDeliveriesProvider = StreamProvider.autoDispose<List<Delivery>>((ref) {
-  final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
-  final showAll = ref.watch(allDeliveriesProvider);
-  final currentStaffAsync = ref.watch(currentStaffProvider);
-  final isAdmin = ref.watch(isAdminProvider);
-
-  return currentStaffAsync.when(
-    loading: () => const Stream.empty(),
-    error: (error, _) => Stream.error(error),
-    data: (currentStaff) {
-      // Admins can see all deliveries
-      if (isAdmin) {
-        return deliveriesRepository.watchTodayDeliveries();
-      }
-
-      if (currentStaff == null) {
-        // User is not linked to a staff member, return empty stream
-        return Stream.value(<Delivery>[]);
-      }
-
-      if (showAll && currentStaff.hasManagerAccess == true) {
-        return deliveriesRepository.watchTodayDeliveries();
-      } else {
-        // Staff see deliveries for schools they're assigned to
-        return deliveriesRepository.watchTodayDeliveries().map((deliveries) {
-          return deliveries.where((delivery) {
-            return currentStaff.assignedSchoolIds.contains(delivery.schoolId);
-          }).toList();
-        });
-      }
-    },
-  );
+final deliveryTodayProvider = Provider.autoDispose<DateTime>((ref) {
+  final now = DateTime.now();
+  final today = DateTimeUtils.startOfDay(now);
+  final tomorrow = DateTime(today.year, today.month, today.day + 1);
+  final timer = Timer(tomorrow.difference(now), ref.invalidateSelf);
+  ref.onDispose(timer.cancel);
+  return today;
 });
 
-final upcomingDeliveriesProvider = StreamProvider.autoDispose<List<Delivery>>((ref) {
-  final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
-  final showAll = ref.watch(allDeliveriesProvider);
-  final currentStaffAsync = ref.watch(currentStaffProvider);
-  final isAdmin = ref.watch(isAdminProvider);
-
-  return currentStaffAsync.when(
-    loading: () => const Stream.empty(),
-    error: (error, _) => Stream.error(error),
-    data: (currentStaff) {
-      // Admins can see all deliveries
-      if (isAdmin) {
-        return deliveriesRepository.watchUpcomingDeliveries();
-      }
-
-      if (currentStaff == null) {
-        // User is not linked to a staff member, return empty stream
-        return Stream.value(<Delivery>[]);
-      }
-
-      if (showAll && currentStaff.hasManagerAccess == true) {
-        return deliveriesRepository.watchUpcomingDeliveries();
-      } else {
-        // Staff see deliveries for schools they're assigned to
-        return deliveriesRepository.watchUpcomingDeliveries().map((deliveries) {
-          return deliveries.where((delivery) {
-            return currentStaff.assignedSchoolIds.contains(delivery.schoolId);
-          }).toList();
-        });
-      }
-    },
+final todayDeliveriesProvider =
+    StreamProvider.autoDispose<List<Delivery>>((ref) {
+  final deliveryDate = ref.watch(deliveryTodayProvider);
+  final tomorrow = DateTime(
+    deliveryDate.year,
+    deliveryDate.month,
+    deliveryDate.day + 1,
   );
+  final repository = ref.watch(deliveriesRepositoryProvider);
+  return _watchVisibleDeliveries(ref, (schoolIds) {
+    return repository.watchDeliveriesByDateRange(
+      deliveryDate,
+      tomorrow,
+      schoolIds: schoolIds,
+    );
+  }).map((deliveries) => [...deliveries]..sort(compareDeliveryTimes));
 });
 
-final pastDeliveriesProvider = StreamProvider.autoDispose<List<Delivery>>((ref) {
-  final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
+typedef DeliveryDateRange = ({DateTime start, DateTime end});
+
+final calendarDeliveriesProvider =
+    StreamProvider.autoDispose.family<List<Delivery>, DeliveryDateRange>(
+  (ref, range) {
+    final repository = ref.watch(deliveriesRepositoryProvider);
+    return _watchVisibleDeliveries(ref, (schoolIds) {
+      return repository.watchDeliveriesByDateRange(
+        range.start,
+        range.end,
+        schoolIds: schoolIds,
+      );
+    });
+  },
+);
+
+final upcomingDeliveriesProvider = StreamProvider.autoDispose<List<Delivery>>(
+  (ref) {
+    final repository = ref.watch(deliveriesRepositoryProvider);
+    return _watchVisibleDeliveries(ref, (schoolIds) {
+      return repository.watchUpcomingDeliveries(schoolIds: schoolIds);
+    });
+  },
+);
+
+final pastDeliveriesProvider = StreamProvider.autoDispose<List<Delivery>>(
+  (ref) {
+    final repository = ref.watch(deliveriesRepositoryProvider);
+    return _watchVisibleDeliveries(ref, (schoolIds) {
+      return repository.watchPastDeliveries(schoolIds: schoolIds);
+    });
+  },
+);
+
+// Full history is fetched only for explicit legacy calendar sync.
+final allDeliveriesListProvider = StreamProvider.autoDispose<List<Delivery>>(
+  (ref) {
+    final repository = ref.watch(deliveriesRepositoryProvider);
+    return _watchVisibleDeliveries(ref, (schoolIds) {
+      return repository.watchAllDeliveries(schoolIds: schoolIds);
+    });
+  },
+);
+
+Stream<List<Delivery>> _watchVisibleDeliveries(
+  Ref ref,
+  Stream<List<Delivery>> Function(List<String>? schoolIds) watch,
+) {
+  if (ref.watch(isAdminProvider)) return watch(null);
+
   final showAll = ref.watch(allDeliveriesProvider);
-  final currentStaffAsync = ref.watch(currentStaffProvider);
-  final isAdmin = ref.watch(isAdminProvider);
-
-  return currentStaffAsync.when(
-    loading: () => const Stream.empty(),
-    error: (error, _) => Stream.error(error),
-    data: (currentStaff) {
-      // Admins can see all deliveries
-      if (isAdmin) {
-        return deliveriesRepository.watchPastDeliveries();
-      }
-
-      if (currentStaff == null) {
-        // User is not linked to a staff member, return empty stream
-        return Stream.value(<Delivery>[]);
-      }
-
-      if (showAll && currentStaff.hasManagerAccess == true) {
-        return deliveriesRepository.watchPastDeliveries();
-      } else {
-        // Staff see deliveries for schools they're assigned to
-        return deliveriesRepository.watchPastDeliveries().map((deliveries) {
-          return deliveries.where((delivery) {
-            return currentStaff.assignedSchoolIds.contains(delivery.schoolId);
-          }).toList();
-        });
-      }
-    },
-  );
-});
-
-// Provider for all deliveries across all time periods (for calendar view)
-final allDeliveriesListProvider = StreamProvider.autoDispose<List<Delivery>>((ref) {
-  final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
-  final showAll = ref.watch(allDeliveriesProvider);
-  final currentStaffAsync = ref.watch(currentStaffProvider);
-  final isAdmin = ref.watch(isAdminProvider);
-
-  return currentStaffAsync.when(
-    loading: () => const Stream.empty(),
-    error: (error, _) => Stream.error(error),
-    data: (currentStaff) {
-      // Admins can see all deliveries
-      if (isAdmin) {
-        return deliveriesRepository.watchAllDeliveries();
-      }
-
-      if (currentStaff == null) {
-        // User is not linked to a staff member, return empty stream
-        return Stream.value(<Delivery>[]);
-      }
-
-      if (showAll && currentStaff.hasManagerAccess == true) {
-        return deliveriesRepository.watchAllDeliveries();
-      } else {
-        // Staff see deliveries for schools they're assigned to
-        return deliveriesRepository.watchAllDeliveries().map((deliveries) {
-          return deliveries.where((delivery) {
-            // Show deliveries for schools the staff has access to
-            return currentStaff.assignedSchoolIds.contains(delivery.schoolId);
-          }).toList();
-        });
-      }
-    },
-  );
-});
+  return ref.watch(currentStaffProvider).when(
+        loading: () => const Stream.empty(),
+        error: Stream.error,
+        data: (staff) {
+          if (staff == null ||
+              (!staff.hasManagerAccess && staff.assignedSchoolIds.isEmpty)) {
+            return Stream.value(const <Delivery>[]);
+          }
+          return watch(showAll && staff.hasManagerAccess
+              ? null
+              : staff.assignedSchoolIds);
+        },
+      );
+}
 
 final staffListProvider = FutureProvider<List<Staff>>((ref) async {
   final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
   final result = await deliveriesRepository.getAllStaff();
-  return result.dataOrNull ?? [];
+  return result.when(
+    success: (staff) => staff,
+    failure: (message, exception) => throw exception ?? StateError(message),
+  );
 });
 
 // Provider to get staff assigned to a specific school
-final schoolStaffProvider = FutureProvider.family<List<Staff>, String>((ref, schoolId) async {
+final schoolStaffProvider = FutureProvider.autoDispose
+    .family<List<Staff>, String>((ref, schoolId) async {
   final staffList = await ref.watch(staffListProvider.future);
-  return staffList.where((staff) => staff.assignedSchoolIds.contains(schoolId)).toList();
+  return staffList
+      .where((staff) => staff.assignedSchoolIds.contains(schoolId))
+      .toList();
 });
 
-final deliveryByIdProvider = FutureProvider.family<Delivery?, String>((ref, deliveryId) async {
+final deliveryByIdProvider =
+    FutureProvider.family<Delivery?, String>((ref, deliveryId) async {
   final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
   final result = await deliveriesRepository.getDeliveryById(deliveryId);
   return result.dataOrNull;
 });
 
 class DeliveriesNotifier extends StateNotifier<AsyncValue<void>> {
-  DeliveriesNotifier(this._deliveriesRepository) : super(const AsyncValue.data(null));
+  DeliveriesNotifier(this._deliveriesRepository)
+      : super(const AsyncValue.data(null));
 
   final DeliveriesRepository _deliveriesRepository;
 
   Future<bool> createDelivery(Delivery delivery) async {
     state = const AsyncValue.loading();
     final result = await _deliveriesRepository.createDelivery(delivery);
-    
+
     return result.when(
       success: (_) {
         state = const AsyncValue.data(null);
@@ -187,7 +153,7 @@ class DeliveriesNotifier extends StateNotifier<AsyncValue<void>> {
   Future<bool> updateDelivery(Delivery delivery) async {
     state = const AsyncValue.loading();
     final result = await _deliveriesRepository.updateDelivery(delivery);
-    
+
     return result.when(
       success: (_) {
         state = const AsyncValue.data(null);
@@ -203,7 +169,7 @@ class DeliveriesNotifier extends StateNotifier<AsyncValue<void>> {
   Future<bool> deleteDelivery(String deliveryId) async {
     state = const AsyncValue.loading();
     final result = await _deliveriesRepository.deleteDelivery(deliveryId);
-    
+
     return result.when(
       success: (_) {
         state = const AsyncValue.data(null);
@@ -217,7 +183,8 @@ class DeliveriesNotifier extends StateNotifier<AsyncValue<void>> {
   }
 }
 
-final deliveriesNotifierProvider = StateNotifierProvider<DeliveriesNotifier, AsyncValue<void>>((ref) {
+final deliveriesNotifierProvider =
+    StateNotifierProvider<DeliveriesNotifier, AsyncValue<void>>((ref) {
   final deliveriesRepository = ref.watch(deliveriesRepositoryProvider);
   return DeliveriesNotifier(deliveriesRepository);
 });

@@ -163,7 +163,7 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
                           'Deliveries', preview.deliveryCount.toString()),
                       _buildPreviewRow(
                           'Staff Members', preview.staffCount.toString()),
-                      _buildPreviewRow('Signed Summaries',
+                      _buildPreviewRow('Signed snapshots and earlier summaries',
                           preview.signedSummaryCount.toString()),
                       _buildPreviewRow(
                           'Timer Entries', preview.timerEntryCount.toString()),

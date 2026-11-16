@@ -76,9 +76,9 @@ class ProfileScreen extends ConsumerWidget {
                         _InfoTile(
                           icon: Icons.security,
                           label: 'Role',
-                          value: user?.role == 'admin'
+                          value: isAdmin
                               ? 'Administrator'
-                              : user?.role == 'manager'
+                              : isManager
                                   ? 'Manager'
                                   : 'Staff Member',
                         ),

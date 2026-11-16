@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../providers/staff_providers.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../models/staff.dart';
 import '../../app/theme/brand_colors.dart';
@@ -159,7 +161,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                           final calendarMetadataAsync = ref.watch(calendarMetadataProvider(staff.id));
                           return calendarMetadataAsync.when(
                             data: (metadata) {
-                              final hasCalendar = staff.hasCalendarToken;
+                              final hasCalendar = metadata != null;
                               final isActive = metadata?.isActive ?? false;
 
                               if (hasCalendar && isActive) {
@@ -220,8 +222,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                         case 'edit':
                           _showEditStaffDialog(staff);
                           break;
-                        case 'regenerate_pin':
-                          _showRegeneratePinDialog(staff);
+                        case 'issue_invite':
+                          _issueInvite(staff);
                           break;
                         case 'manage_calendar':
                           _showCalendarManagementDialog(staff);
@@ -254,7 +256,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                         ),
                       ),
                       PopupMenuItem(
-                        value: 'regenerate_pin',
+                        value: 'issue_invite',
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         child: Row(
                           children: [
@@ -265,7 +267,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                             ),
                             const SizedBox(width: 12),
                             Text(
-                              staff.linkPin == null ? 'Generate PIN' : 'Regenerate PIN',
+                              'Create invitation',
                               style: TextStyle(
                                 fontSize: 15,
                                 color: Colors.grey.shade900,
@@ -336,7 +338,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     if (staff.id.isEmpty) {
       _showError('Cannot edit this staff member: Invalid data. Please contact support.');
       if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
+        debugPrint('Staff record is missing its document ID');
       }
       return;
     }
@@ -404,12 +406,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     );
   }
 
-  String _generatePin() {
-    // Generate a random 4-digit PIN
-    final random = DateTime.now().millisecondsSinceEpoch % 10000;
-    return random.toString().padLeft(4, '0');
-  }
-
   Future<void> _saveStaff(
       Staff? existingStaff, String name, String role) async {
     if (name.trim().isEmpty) {
@@ -420,25 +416,16 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     Navigator.of(context, rootNavigator: false).pop();
 
     if (existingStaff == null) {
-      // Generate a unique 4-digit PIN for account linking
-      final linkPin = _generatePin();
-
-      // Create new staff
       final newStaff = Staff(
-        id: '', // Will be set by Firestore
+        id: '',
         name: name.trim(),
         role: role,
-        linkPin: linkPin,
         createdAt: DateTime.now(),
       );
-
-      final success = await _createStaff(newStaff);
-      if (success) {
+      final created = await _createStaff(newStaff);
+      if (created != null && mounted) {
         ref.invalidate(staffListProvider);
-        if (mounted) {
-          // Show PIN to admin/manager
-          _showPinDialog(name.trim(), linkPin);
-        }
+        await _issueInvite(created);
       }
     } else {
       // Update existing staff
@@ -462,22 +449,12 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     }
   }
 
-  Future<bool> _createStaff(Staff staff) async {
-    try {
-      final deliveriesRepository = ref.read(deliveriesRepositoryProvider);
-      final result = await deliveriesRepository.createStaff(staff);
-
-      return result.when(
-        success: (_) => true,
-        failure: (message, exception) {
-          _showError(message);
-          return false;
-        },
-      );
-    } catch (e) {
-      _showError('Unexpected error: $e');
-      return false;
+  Future<Staff?> _createStaff(Staff staff) async {
+    final result = await ref.read(staffRepositoryProvider).createStaff(staff);
+    if (result.isFailure && mounted) {
+      _showError(result.errorOrNull ?? 'Could not add staff.');
     }
+    return result.dataOrNull;
   }
 
   Future<bool> _updateStaff(Staff staff) async {
@@ -498,227 +475,45 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     }
   }
 
-  void _showPinDialog(String staffName, String pin) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green[600], size: 28),
-            const SizedBox(width: 12),
-            const Text('Staff Member Added'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$staffName has been added successfully.',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue[200]!, width: 2),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.lock, color: Colors.blue[700], size: 20),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Account Linking PIN',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue[300]!, width: 1),
-                    ),
-                    child: Text(
-                      pin,
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 8,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Share this PIN with $staffName',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey[700],
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!, width: 1),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, color: Colors.orange[800], size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'They will need this PIN to link their account when they first sign in.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.orange[900],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Got It'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showRegeneratePinDialog(Staff staff) {
-    // Debug: Check if staff ID is empty
-    if (staff.id.isEmpty) {
-      _showError('Cannot regenerate PIN for this staff member: Invalid data. Please contact support.');
-      if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
-      }
+  Future<void> _issueInvite(Staff staff) async {
+    final result = await ref.read(staffRepositoryProvider).issueInvite(staff.id);
+    if (!mounted) return;
+    final code = result.dataOrNull;
+    if (code == null) {
+      _showError(result.errorOrNull ?? 'Could not create an invitation.');
       return;
     }
 
-    final actionText = staff.linkPin == null ? 'generate' : 'regenerate';
-    final titleText = staff.linkPin == null ? 'Generate PIN' : 'Regenerate PIN';
-
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(titleText),
+        title: Text('Invitation for ${staff.name}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Are you sure you want to $actionText a PIN for "${staff.name}"?'),
+            const Text(
+              'Share this code privately with the staff member. It expires in 24 hours and can be used once. Creating a new code replaces this one.',
+            ),
             const SizedBox(height: 12),
-            if (staff.linkPin != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange[200]!, width: 1),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.warning_outlined, color: Colors.orange[800], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'This will replace the existing PIN. The old PIN will no longer work.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.orange[900],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ] else ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!, width: 1),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue[800], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'A new 4-digit PIN will be generated for account linking.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.blue[900],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            SelectableText(code),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: const Text('Close'),
           ),
           FilledButton(
             onPressed: () async {
-              // Close dialog first
-              Navigator.of(context).pop();
-              // Then regenerate PIN
-              await _regeneratePin(staff);
+              await Clipboard.setData(ClipboardData(text: code));
+              if (context.mounted) Navigator.of(context).pop();
             },
-            child: Text(staff.linkPin == null ? 'Generate' : 'Regenerate'),
+            child: const Text('Copy code'),
           ),
         ],
       ),
     );
-  }
-
-  Future<void> _regeneratePin(Staff staff) async {
-    // Generate a new PIN
-    final newPin = _generatePin();
-
-    // Update staff with new PIN
-    final updatedStaff = staff.copyWith(linkPin: newPin);
-
-    final success = await _updateStaff(updatedStaff);
-    if (success) {
-      ref.invalidate(staffListProvider);
-      if (mounted) {
-        // Show the new PIN to admin
-        _showPinDialog(staff.name, newPin);
-      }
-    }
   }
 
   void _showCalendarManagementDialog(Staff staff) {
@@ -726,7 +521,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     if (staff.id.isEmpty) {
       _showError('Cannot manage calendar for this staff member: Invalid data. Please contact support.');
       if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
+        debugPrint('Staff record is missing its document ID');
       }
       return;
     }
@@ -745,7 +540,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     if (staff.id.isEmpty) {
       _showError('Cannot delete this staff member: Invalid data. Please contact support.');
       if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
+        debugPrint('Staff record is missing its document ID');
       }
       return;
     }

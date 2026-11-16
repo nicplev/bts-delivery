@@ -11,13 +11,14 @@ final calendarMetadataProvider =
         .doc(staffId)
         .get();
 
-    if (!doc.exists || doc.data() == null) {
+    if (doc.data()?['subscriptionActive'] != true) {
       return null;
     }
 
     return CalendarMetadata.fromJson({
-      'staffId': doc.id,
       ...doc.data()!,
+      'staffId': doc.id,
+      'token': '',
     });
   } catch (e) {
     // Return null if there's an error (metadata might not exist yet)
@@ -33,13 +34,14 @@ final calendarMetadataStreamProvider =
       .doc(staffId)
       .snapshots()
       .map((doc) {
-    if (!doc.exists || doc.data() == null) {
+    if (doc.data()?['subscriptionActive'] != true) {
       return null;
     }
 
     return CalendarMetadata.fromJson({
-      'staffId': doc.id,
       ...doc.data()!,
+      'staffId': doc.id,
+      'token': '',
     });
   });
 });

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_providers.dart';
@@ -22,6 +21,9 @@ import '../../screens/admin/pre_delivery_checklist_management_screen.dart';
 import '../../screens/admin/season_export_screen.dart';
 import '../../screens/main/profile_screen.dart';
 import '../../models/school.dart';
+import '../../models/delivery_visit.dart';
+import '../../providers/delivery_visit_provider.dart';
+import '../../widgets/delivery_visit_gate.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -76,20 +78,14 @@ class GoRouterRefreshNotifier extends ChangeNotifier {
   GoRouterRefreshNotifier(this._ref) {
     _ref.listen(authStateProvider, (previous, next) {
       // Only notify if the auth state actually changed (logged in/out)
-      if (previous?.value?.uid != next.value?.uid) {
+      if (previous?.valueOrNull?.uid != next.valueOrNull?.uid) {
         notifyListeners();
       }
     });
     _ref.listen(currentStaffProvider, (previous, next) {
-      // Only notify if staff link status changed
-      if (previous?.value?.id != next.value?.id) {
-        notifyListeners();
-      }
-    });
-    _ref.listen(currentUserProvider, (previous, next) {
-      // Only notify if user role changed or user loaded for first time
-      if (previous?.value?.role != next.value?.role ||
-          (previous?.value == null && next.value != null)) {
+      if (previous?.valueOrNull != next.valueOrNull ||
+          previous?.isLoading != next.isLoading ||
+          previous?.hasError != next.hasError) {
         notifyListeners();
       }
     });
@@ -98,98 +94,33 @@ class GoRouterRefreshNotifier extends ChangeNotifier {
   final Ref _ref;
 }
 
-// Cache the router to prevent recreation
-GoRouter? _cachedRouter;
-
 final appRouterProvider = Provider<GoRouter>((ref) {
-  // If router already exists, return it
-  if (_cachedRouter != null) {
-    return _cachedRouter!;
-  }
-
   final notifier = GoRouterRefreshNotifier(ref);
 
-  _cachedRouter = GoRouter(
+  String? requireTemplateAccess(BuildContext context, GoRouterState state) {
+    if (ref.read(canEditSchoolDataProvider)) return null;
+    return schoolWorkPath(state.pathParameters['schoolId']!);
+  }
+
+  final router = GoRouter(
     refreshListenable: notifier,
     navigatorKey: _rootNavigatorKey,
     debugLogDiagnostics: true,
     initialLocation: '/login',
     redirect: (context, state) {
-      // Read the latest values from providers
-      final authState = ref.read(authStateProvider);
-      final currentStaff = ref.read(currentStaffProvider);
-      final currentUser = ref.read(currentUserProvider);
+      final user = ref.read(authStateProvider).valueOrNull;
+      final staff = ref.read(currentStaffProvider);
+      final onLogin = state.matchedLocation == '/login';
+      final onStaffLink = state.matchedLocation == '/staff-link';
 
-      final authStateValue = authState.value;
-      final currentStaffValue = currentStaff.value;
-      final currentUserValue = currentUser.value;
-      final userLoading = currentUser.isLoading;
-
-      final isLoggedIn = authStateValue != null;
-      final hasStaff = currentStaffValue != null;
-      final isAdmin = currentUserValue?.isAdmin ?? false;
-
-      final isLoginPage = state.matchedLocation == '/login';
-      final isStaffLinkPage = state.matchedLocation == '/staff-link';
-
-      // Debug logging
-      if (kDebugMode) {
-        debugPrint('Router redirect check:');
-        debugPrint('  - isLoggedIn: $isLoggedIn');
-        debugPrint('  - hasStaff: $hasStaff');
-        debugPrint('  - userLoading: $userLoading');
-        debugPrint('  - isAdmin: $isAdmin');
-        debugPrint('  - currentUser: $currentUserValue');
-        debugPrint('  - location: ${state.matchedLocation}');
-        debugPrint('  - fullPath: ${state.fullPath}');
-        debugPrint('  - uri: ${state.uri}');
+      if (user == null) return onLogin ? null : '/login';
+      if (staff.isLoading && !staff.hasValue) return null;
+      if (staff.hasError) {
+        return state.matchedLocation == '/home' ? null : '/home';
       }
-
-      // Not logged in -> go to login
-      if (!isLoggedIn) {
-        return isLoginPage ? null : '/login';
-      }
-
-      // If user is logged in but still on login page, redirect immediately
-      // even if user document is still loading
-      if (isLoggedIn && isLoginPage) {
-        // Default to /schools while loading, will re-redirect if needed once loaded
-        return '/schools';
-      }
-
-      // Wait for user document to load before redirecting to other pages
-      if (userLoading) {
-        return null; // Don't redirect while loading
-      }
-
-      // Admin users skip staff linking and go directly to schools
-      if (isAdmin) {
-        if (isLoginPage || isStaffLinkPage) {
-          return '/schools';
-        }
-        return null;
-      }
-
-      // Allow access to main app routes even without staff link for authenticated users
-      final allowedRoutesWithoutStaff = ['/schools', '/home', '/profile'];
-      final isAllowedRoute = allowedRoutesWithoutStaff.any((route) => state.matchedLocation.startsWith(route));
-
-      // Regular users need staff linking, but allow access to main app routes
-      if (!hasStaff && !isAdmin && !isAllowedRoute) {
-        return isStaffLinkPage ? null : '/staff-link';
-      }
-
-      // Logged in with staff but on auth pages -> go to schools
-      if (isLoggedIn && hasStaff && (isLoginPage || isStaffLinkPage)) {
-        return '/schools';
-      }
-
-      // Fallback: if user is logged in and not on login page, allow access to main app
-      // This prevents getting stuck on staff-link page
-      if (isLoggedIn && !isLoginPage) {
-        return null; // Allow access to the current route
-      }
-
+      final linked = staff.valueOrNull?.uid == user.uid;
+      if (!linked) return onStaffLink ? null : '/staff-link';
+      if (onLogin || onStaffLink) return '/home';
       return null;
     },
     routes: [
@@ -297,6 +228,75 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               ),
             ),
           ),
+          ShellRoute(
+            builder: (context, state, child) {
+              final visit = DeliveryVisit(
+                deliveryId: state.pathParameters['deliveryId']!,
+                schoolId: state.pathParameters['schoolId']!,
+              );
+              return ProviderScope(
+                key: ValueKey(visit),
+                overrides: [
+                  activeDeliveryVisitProvider.overrideWithValue(visit)
+                ],
+                child: DeliveryVisitGate(visit: visit, child: child),
+              );
+            },
+            routes: [
+              GoRoute(
+                path: '/deliveries/:deliveryId/schools/:schoolId',
+                pageBuilder: (context, state) => _buildPageWithSlideTransition(
+                  context: context,
+                  state: state,
+                  child: SchoolHubScreen(
+                    schoolId: state.pathParameters['schoolId']!,
+                    deliveryId: state.pathParameters['deliveryId']!,
+                  ),
+                ),
+                routes: [
+                  GoRoute(
+                    path: 'year/:yearLevelId/classrooms',
+                    pageBuilder: (context, state) =>
+                        _buildPageWithSlideTransition(
+                      context: context,
+                      state: state,
+                      child: ClassroomsScreen(
+                        schoolId: state.pathParameters['schoolId']!,
+                        yearLevelId: state.pathParameters['yearLevelId']!,
+                      ),
+                    ),
+                    routes: [
+                      GoRoute(
+                        path: ':classroomId',
+                        pageBuilder: (context, state) =>
+                            _buildPageWithSlideTransition(
+                          context: context,
+                          state: state,
+                          child: ClassroomDetailScreen(
+                            schoolId: state.pathParameters['schoolId']!,
+                            yearLevelId: state.pathParameters['yearLevelId']!,
+                            classroomId: state.pathParameters['classroomId']!,
+                            deliveryId: state.pathParameters['deliveryId'],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  GoRoute(
+                    path: 'consumables',
+                    pageBuilder: (context, state) =>
+                        _buildPageWithSlideTransition(
+                      context: context,
+                      state: state,
+                      child: ConsumablesScreen(
+                        schoolId: state.pathParameters['schoolId']!,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
           GoRoute(
             path: '/schools/bulk-import',
             pageBuilder: (context, state) => _buildPageWithSlideTransition(
@@ -327,6 +327,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/schools/:schoolId/year/:yearLevelId/classrooms',
+            redirect: requireTemplateAccess,
             pageBuilder: (context, state) => _buildPageWithSlideTransition(
               context: context,
               state: state,
@@ -339,6 +340,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path:
                 '/schools/:schoolId/year/:yearLevelId/classrooms/:classroomId',
+            redirect: requireTemplateAccess,
             pageBuilder: (context, state) => _buildPageWithSlideTransition(
               context: context,
               state: state,
@@ -351,6 +353,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/schools/:schoolId/consumables',
+            redirect: requireTemplateAccess,
             pageBuilder: (context, state) => _buildPageWithSlideTransition(
               context: context,
               state: state,
@@ -361,6 +364,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/schools/:schoolId/bulk-import',
+            redirect: requireTemplateAccess,
             pageBuilder: (context, state) => _buildPageWithSlideTransition(
               context: context,
               state: state,
@@ -375,5 +379,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 
-  return _cachedRouter!;
+  ref.onDispose(() {
+    router.dispose();
+    notifier.dispose();
+  });
+  return router;
 });

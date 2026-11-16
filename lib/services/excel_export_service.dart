@@ -14,7 +14,10 @@ import 'package:intl/intl.dart';
 class ExcelExportService {
   /// Export a signed school summary to a formatted Excel file
   static Future<String?> exportSummaryToExcel(
-      SignedSchoolSummary summary) async {
+    SignedSchoolSummary summary, {
+    DateTime? snapshotReadAt,
+    String? deliveryId,
+  }) async {
     try {
       // Create a new Excel document
       final Workbook workbook = Workbook();
@@ -25,9 +28,24 @@ class ExcelExportService {
 
       // === HEADER SECTION ===
       currentRow = _addHeaderSection(sheet, summary, currentRow);
+      if (snapshotReadAt != null) {
+        _addKeyValue(sheet, currentRow++, 'Evidence ID', summary.id);
+        _addKeyValue(sheet, currentRow++, 'Delivery visit',
+            deliveryId ?? 'School-level record');
+        _addKeyValue(sheet, currentRow++, 'Delivery data read',
+            _formatDateTime(snapshotReadAt));
+        _addKeyValue(sheet, currentRow++, 'Quantity aggregates',
+            'Expected quantities at capture');
+        currentRow++;
+      }
 
       // === PACK TOTALS SUMMARY ===
-      currentRow = _addPackTotalsSummary(sheet, summary, currentRow);
+      currentRow = _addPackTotalsSummary(
+        sheet,
+        summary,
+        currentRow,
+        expected: snapshotReadAt != null,
+      );
 
       // === PACK TOTALS BY YEAR LEVEL ===
       currentRow = _addPackTotalsByYearLevel(sheet, summary, currentRow);
@@ -183,14 +201,19 @@ class ExcelExportService {
   }
 
   static int _addPackTotalsSummary(
-      Worksheet sheet, SignedSchoolSummary summary, int row) {
+    Worksheet sheet,
+    SignedSchoolSummary summary,
+    int row, {
+    required bool expected,
+  }) {
     // Section header
     _addSectionHeader(sheet, row++, 'PACK TOTALS SUMMARY', '#4CAF50'); // Green
 
     // Total packs highlight
     final totalPacksRange = sheet.getRangeByIndex(row, 1, row, 2);
     totalPacksRange.merge();
-    totalPacksRange.setText('Total Packs Delivered');
+    totalPacksRange
+        .setText(expected ? 'Total Expected Packs' : 'Total Packs Delivered');
     totalPacksRange.cellStyle.bold = true;
     totalPacksRange.cellStyle.fontSize = 14;
     totalPacksRange.cellStyle.backColor = '#E8F5E9';

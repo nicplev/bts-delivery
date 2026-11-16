@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/schools_providers.dart';
 import '../../models/school.dart';
+import '../../models/delivery_visit.dart';
+import '../../providers/delivery_visit_provider.dart';
+import '../../repositories/classroom_edit.dart';
 import '../../utils/notification_utils.dart';
 import '../../utils/year_level_colors.dart';
 
@@ -294,9 +297,11 @@ class _ClassroomCard extends ConsumerWidget {
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push(
-          '/schools/$schoolId/year/$yearLevelId/classrooms/${classroom.id}',
-        ),
+        onTap: () => context.push(schoolWorkPath(
+          schoolId,
+          visit: ref.read(activeDeliveryVisitProvider),
+          suffix: '/year/${Uri.encodeComponent(yearLevelId)}/classrooms/${Uri.encodeComponent(classroom.id)}',
+        )),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -539,33 +544,26 @@ class _ClassroomCard extends ConsumerWidget {
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
 
+              final name = nameController.text.trim();
               Navigator.pop(dialogContext);
 
-              final updatedClassroom = Classroom(
-                id: classroom.id,
-                name: nameController.text.trim(),
-                createdAt: classroom.createdAt,
-              );
-
-              final success = await ref
+              final result = await ref
                   .read(schoolsNotifierProvider.notifier)
-                  .updateClassroom(schoolId, yearLevelId, updatedClassroom);
+                  .updateClassroomName(schoolId, yearLevelId, classroom.id, name: name);
+              if (!context.mounted) return;
 
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Classroom updated successfully'
-                        : 'Failed to update classroom'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-
-                // Show notification that sign-off was cleared
-                if (success) {
-                  NotificationUtils.showSignOffClearedNotification(context);
-                }
-              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(result.when(
+                    success: (progress) => switch (progress) {
+                      ClassroomEditStatus.saved => 'Classroom name saved',
+                      ClassroomEditStatus.pending => 'Classroom name saved on this device · Sync pending',
+                      ClassroomEditStatus.unconfirmed => 'Waiting to confirm the classroom name change',
+                    },
+                    failure: (message, _) => message,
+                  )),
+                ),
+              );
             },
             child: const Text('Save'),
           ),

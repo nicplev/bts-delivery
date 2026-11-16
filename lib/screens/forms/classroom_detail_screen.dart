@@ -1,45 +1,16 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../providers/schools_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../repositories/classroom_edit.dart';
 import '../../providers/auth_providers.dart';
 import '../../models/school.dart';
-import '../../models/offline/offline_models.dart';
-import '../../services/offline/offline_storage_service.dart';
+import '../../models/offline/evidence_upload.dart';
+import '../../providers/offline_delivery_providers.dart';
+import '../../widgets/sync_status_detail_sheet.dart';
 import '../../utils/notification_utils.dart';
 import 'package:uuid/uuid.dart';
-
-/// Represents a photo that is being uploaded
-class _PendingPhoto {
-  final String id;
-  final File localFile;
-  final bool hasError;
-  final String? errorMessage;
-
-  const _PendingPhoto({
-    required this.id,
-    required this.localFile,
-    this.hasError = false,
-    this.errorMessage,
-  });
-
-  _PendingPhoto copyWith({
-    String? id,
-    File? localFile,
-    bool? hasError,
-    String? errorMessage,
-  }) {
-    return _PendingPhoto(
-      id: id ?? this.id,
-      localFile: localFile ?? this.localFile,
-      hasError: hasError ?? this.hasError,
-      errorMessage: errorMessage ?? this.errorMessage,
-    );
-  }
-}
 
 class ClassroomDetailScreen extends ConsumerWidget {
   const ClassroomDetailScreen({
@@ -47,11 +18,13 @@ class ClassroomDetailScreen extends ConsumerWidget {
     required this.schoolId,
     required this.yearLevelId,
     required this.classroomId,
+    this.deliveryId,
   });
 
   final String schoolId;
   final String yearLevelId;
   final String classroomId;
+  final String? deliveryId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -97,8 +70,8 @@ class ClassroomDetailScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Completion Status Card
-          classroomsAsync.when(
+          if (deliveryId != null)
+            classroomsAsync.when(
             data: (classrooms) {
               final classroom = classrooms.firstWhere(
                 (c) => c.id == classroomId,
@@ -381,40 +354,44 @@ class ClassroomDetailScreen extends ConsumerWidget {
                                     ),
                                     // Only admins can edit/delete breakdowns
                                     if (isAdmin)
-                                      PopupMenuButton(
+                                      PopupMenuButton<bool>(
                                         icon: const Icon(Icons.more_vert, size: 20),
-                                        itemBuilder: (context) => [
+                                        onSelected: (edit) {
+                                          if (!context.mounted) return;
+                                          if (edit) {
+                                            _showEditYearLevelBreakdownDialog(
+                                              context,
+                                              ref,
+                                              breakdown,
+                                            );
+                                          } else {
+                                            _deleteYearLevelBreakdown(
+                                              context,
+                                              ref,
+                                              breakdown,
+                                            );
+                                          }
+                                        },
+                                        itemBuilder: (_) => const [
                                           PopupMenuItem(
-                                            child: const Row(
+                                            value: true,
+                                            child: Row(
                                               children: [
                                                 Icon(Icons.edit, size: 16),
                                                 SizedBox(width: 8),
                                                 Text('Edit'),
                                               ],
                                             ),
-                                            onTap: () {
-                                              Future.delayed(Duration.zero, () {
-                                                _showEditYearLevelBreakdownDialog(
-                                                  context,
-                                                  ref,
-                                                  breakdown,
-                                                );
-                                              });
-                                            },
                                           ),
                                           PopupMenuItem(
-                                            child: const Row(
+                                            value: false,
+                                            child: Row(
                                               children: [
                                                 Icon(Icons.delete, size: 16, color: Colors.red),
                                                 SizedBox(width: 8),
                                                 Text('Delete', style: TextStyle(color: Colors.red)),
                                               ],
                                             ),
-                                            onTap: () {
-                                              Future.delayed(Duration.zero, () {
-                                                _deleteYearLevelBreakdown(context, ref, breakdown);
-                                              });
-                                            },
                                           ),
                                         ],
                                       ),
@@ -816,11 +793,12 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
           const SizedBox(height: 24),
 
-          // Photos Section (with optimistic upload support)
+          // Photos
           _PhotosSection(
             schoolId: schoolId,
             yearLevelId: yearLevelId,
             classroomId: classroomId,
+            deliveryId: deliveryId,
           ),
 
           const SizedBox(height: 24),
@@ -1170,44 +1148,11 @@ class ClassroomDetailScreen extends ConsumerWidget {
     final isSelected = classroom.completionStatus == status;
 
     return GestureDetector(
-      onTap: () async {
-        // Get current staff's name
-        final currentStaff = ref.read(currentStaffProvider).value;
-        final currentUser = ref.read(currentUserProvider).value;
-
-        // Use staff name if available, otherwise use user email
-        String staffName = 'Unknown';
-        if (currentStaff?.name != null) {
-          staffName = currentStaff!.name;
-        } else if (currentUser?.email != null) {
-          staffName = currentUser!.email.split('@').first;
-        }
-
-        // If status is incomplete, show dialog to enter actual quantity
+      onTap: () {
         if (status == ClassroomCompletionStatus.incomplete) {
           _showActualQuantityDialog(context, ref, classroom, yearLevelId);
         } else {
-          // For complete or not attended, clear actual quantity
-          final updatedClassroom = classroom.copyWith(
-            completionStatus: status,
-            actualPacksDelivered: null,
-            lastUpdatedBy: staffName,
-            lastUpdatedAt: DateTime.now(),
-          );
-
-          final success = await ref
-              .read(schoolsNotifierProvider.notifier)
-              .updateClassroom(schoolId, yearLevelId, updatedClassroom);
-
-          if (context.mounted && success) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Status updated to $label'),
-                backgroundColor: color,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
+          _saveClassroomStatus(context, ref, status, null);
         }
       },
       child: AspectRatio(
@@ -1321,50 +1266,50 @@ class ClassroomDetailScreen extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () async {
-              if (formKey.currentState?.validate() ?? false) {
-                Navigator.pop(dialogContext);
-
-                // Get current staff's name
-                final currentStaff = ref.read(currentStaffProvider).value;
-                final currentUser = ref.read(currentUserProvider).value;
-
-                // Use staff name if available, otherwise use user email
-                String staffName = 'Unknown';
-                if (currentStaff?.name != null) {
-                  staffName = currentStaff!.name;
-                } else if (currentUser?.email != null) {
-                  staffName = currentUser!.email.split('@').first;
-                }
-
-                final actualQuantity = int.parse(controller.text.trim());
-                final updatedClassroom = classroom.copyWith(
-                  completionStatus: ClassroomCompletionStatus.incomplete,
-                  actualPacksDelivered: actualQuantity,
-                  lastUpdatedBy: staffName,
-                  lastUpdatedAt: DateTime.now(),
-                );
-
-                final success = await ref
-                    .read(schoolsNotifierProvider.notifier)
-                    .updateClassroom(schoolId, yearLevelId, updatedClassroom);
-
-                if (context.mounted && success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Status updated: $actualQuantity/$expectedTotal packs delivered',
-                      ),
-                      backgroundColor: Colors.orange,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              }
+            onPressed: () {
+              if (!(formKey.currentState?.validate() ?? false)) return;
+              final actualQuantity = int.parse(controller.text.trim());
+              Navigator.pop(dialogContext);
+              _saveClassroomStatus(
+                context,
+                ref,
+                ClassroomCompletionStatus.incomplete,
+                actualQuantity,
+              );
             },
             child: const Text('Save'),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _saveClassroomStatus(
+    BuildContext context,
+    WidgetRef ref,
+    ClassroomCompletionStatus status,
+    int? actualPacksDelivered,
+  ) async {
+    final result = await ref.read(schoolsNotifierProvider.notifier)
+        .updateClassroomStatus(
+          schoolId,
+          yearLevelId,
+          classroomId,
+          status: status,
+          actualPacksDelivered: actualPacksDelivered,
+        );
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.when(
+          success: (progress) => switch (progress) {
+            ClassroomEditStatus.saved => 'Classroom status saved',
+            ClassroomEditStatus.pending => 'Classroom status saved on this device · Sync pending',
+            ClassroomEditStatus.unconfirmed => 'Waiting to confirm the classroom status change',
+          },
+          failure: (message, _) => message,
+        )),
       ),
     );
   }
@@ -2246,14 +2191,16 @@ class ClassroomDetailScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
+              if (!context.mounted ||
+                  !(formKey.currentState?.validate() ?? false)) {
+                return;
+              }
 
               final updated = breakdown.copyWith(
                 studentCount: int.parse(studentCountController.text),
               );
 
+              Navigator.pop(dialogContext);
               final success = await ref
                   .read(schoolsNotifierProvider.notifier)
                   .updateYearLevelBreakdown(
@@ -2293,6 +2240,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
+              if (!context.mounted) return;
               Navigator.pop(dialogContext);
 
               final success = await ref
@@ -2322,15 +2270,15 @@ class ClassroomDetailScreen extends ConsumerWidget {
   }
 }
 
-/// Widget to display a photo card with delete option
 class _PhotoCard extends ConsumerWidget {
   const _PhotoCard({
+    super.key,
     required this.photo,
-    required this.onDelete,
+    required this.onRemove,
   });
 
   final Photo photo;
-  final VoidCallback onDelete;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2339,12 +2287,9 @@ class _PhotoCard extends ConsumerWidget {
     final isAdmin = ref.watch(isAdminProvider);
     final isManager = ref.watch(isManagerProvider);
 
-    // Determine if user can delete this photo
-    // Admins and managers can delete any photo
-    // Regular staff can only delete photos they uploaded
-    final canDelete = isAdmin ||
-                      isManager ||
-                      (photo.uploadedBy != null && photo.uploadedBy == currentUser?.uid);
+    final canRemove = isAdmin ||
+        isManager ||
+        (photo.uploadedBy != null && photo.uploadedBy == currentUser?.uid);
 
     return FutureBuilder<String>(
       future: storageRepository.getDownloadUrl(photo.storagePath).then(
@@ -2399,7 +2344,7 @@ class _PhotoCard extends ConsumerWidget {
                     );
                   },
                 ),
-                if (canDelete)
+                if (canRemove)
                   Positioned(
                     top: 4,
                     right: 4,
@@ -2408,14 +2353,15 @@ class _PhotoCard extends ConsumerWidget {
                       shape: const CircleBorder(),
                       clipBehavior: Clip.antiAlias,
                       child: IconButton(
-                        icon: const Icon(Icons.delete, size: 18),
+                        icon: const Icon(Icons.remove_circle_outline, size: 18),
+                        tooltip: 'Remove from classroom',
                         color: Colors.white,
                         padding: const EdgeInsets.all(4),
                         constraints: const BoxConstraints(
                           minWidth: 32,
                           minHeight: 32,
                         ),
-                        onPressed: onDelete,
+                        onPressed: onRemove,
                       ),
                     ),
                   ),
@@ -2465,436 +2411,192 @@ class _PhotoCard extends ConsumerWidget {
   }
 }
 
-/// Widget to display a pending photo card with upload indicator
-class _PendingPhotoCard extends StatelessWidget {
-  const _PendingPhotoCard({
-    required this.pendingPhoto,
-    required this.onRetry,
-    required this.onCancel,
-  });
-
-  final _PendingPhoto pendingPhoto;
-  final VoidCallback onRetry;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Local file thumbnail
-          Image.file(
-            pendingPhoto.localFile,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) {
-              return Center(
-                child: Icon(Icons.broken_image, color: Colors.grey.shade400),
-              );
-            },
-          ),
-          // Uploading overlay
-          if (!pendingPhoto.hasError)
-            Container(
-              color: Colors.black38,
-              child: const Center(
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
-                ),
-              ),
-            ),
-          // Error overlay with retry
-          if (pendingPhoto.hasError)
-            Container(
-              color: Colors.red.withValues(alpha: 0.8),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.white, size: 28),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Failed',
-                    style: TextStyle(color: Colors.white, fontSize: 11),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: onRetry,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'Retry',
-                            style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: onCancel,
-                        child: const Icon(Icons.close, color: Colors.white, size: 20),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Stateful widget that manages the photos section with optimistic uploads
 class _PhotosSection extends ConsumerStatefulWidget {
   const _PhotosSection({
     required this.schoolId,
     required this.yearLevelId,
     required this.classroomId,
+    this.deliveryId,
   });
 
   final String schoolId;
   final String yearLevelId;
   final String classroomId;
+  final String? deliveryId;
 
   @override
   ConsumerState<_PhotosSection> createState() => _PhotosSectionState();
 }
 
 class _PhotosSectionState extends ConsumerState<_PhotosSection> {
-  final List<_PendingPhoto> _pendingPhotos = [];
+  bool _saving = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadUnuploadedPhotos();
-  }
-
-  /// Load any photos that were saved locally but not yet uploaded
-  Future<void> _loadUnuploadedPhotos() async {
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-    final localPhotos = await offlineStorage.getPhotosForClassroom(
-      widget.schoolId,
-      widget.yearLevelId,
-      widget.classroomId,
-    );
-
-    final unuploaded = localPhotos.where((p) => !p.isUploaded).toList();
-    if (unuploaded.isNotEmpty && mounted) {
-      setState(() {
-        for (final localPhoto in unuploaded) {
-          final file = File(localPhoto.localPath);
-          if (file.existsSync()) {
-            _pendingPhotos.add(_PendingPhoto(
-              id: localPhoto.id,
-              localFile: file,
-            ));
-          }
-        }
-      });
-      // Retry uploading these photos
-      for (final localPhoto in unuploaded) {
-        final file = File(localPhoto.localPath);
-        if (file.existsSync()) {
-          _uploadPhotoInBackground(localPhoto.id, file);
-        }
-      }
-    }
-  }
-
-  /// Save photo to persistent local storage before upload
-  Future<File> _savePhotoLocally(File sourceFile, String photoId) async {
-    final directory = await getApplicationDocumentsDirectory();
-    final photosDir = Directory('${directory.path}/classroom_photos');
-    if (!await photosDir.exists()) {
-      await photosDir.create(recursive: true);
-    }
-    final localPath = '${photosDir.path}/$photoId.jpg';
-    return await sourceFile.copy(localPath);
-  }
+  ({String schoolId, String yearLevelId, String classroomId, String? deliveryId}) get _classroom =>
+      (
+        schoolId: widget.schoolId,
+        yearLevelId: widget.yearLevelId,
+        classroomId: widget.classroomId,
+        deliveryId: widget.deliveryId,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final photosAsync = ref.watch(classroomPhotosProvider((
-      schoolId: widget.schoolId,
-      yearLevelId: widget.yearLevelId,
-      classroomId: widget.classroomId,
-    )));
+    final photos = ref.watch(classroomPhotosProvider(_classroom));
+    final uploads = ref.watch(evidenceUploadsProvider);
+    final status = uploads.valueOrNull;
+    final worker = ref.watch(evidenceUploadWorkerProvider).valueOrNull;
+    final pending = status?.items
+            .where((item) =>
+                item.kind == EvidenceKind.photo &&
+                item.schoolId == widget.schoolId &&
+                item.yearLevelId == widget.yearLevelId &&
+                item.classroomId == widget.classroomId &&
+                item.deliveryId == widget.deliveryId)
+            .toList() ??
+        [];
+    final pendingIds = pending.map((item) => item.id).toSet();
+    final remote = photos.valueOrNull
+            ?.where((item) => !pendingIds.contains(item.id))
+            .toList() ??
+        [];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Photos Section Header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            children: [
-              const Icon(Icons.photo_library_outlined, size: 24),
-              const SizedBox(width: 8),
-              const Text(
-                'Photos',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => _handleAddPhoto(),
-                icon: const Icon(Icons.add_a_photo, size: 18),
-                label: const Text('Add'),
-              ),
-            ],
-          ),
+        Wrap(
+          spacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('Photos', style: Theme.of(context).textTheme.titleLarge),
+            FilledButton.icon(
+              onPressed: _saving || worker == null ? null : _handleAddPhoto,
+              icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+              label: Text(_saving ? 'Saving…' : 'Add photo'),
+            ),
+          ],
         ),
-
-        const SizedBox(height: 16),
-
-        // Photos Grid/List
-        photosAsync.when(
-          loading: () => const Card(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+        if (uploads.hasError || status?.localError == true)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Saved photos need attention'),
+            trailing: TextButton(
+              onPressed: () => SyncStatusDetailSheet.show(context),
+              child: const Text('Review'),
             ),
           ),
-          error: (error, _) => Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Error loading photos',
-                style: TextStyle(color: Colors.red.shade700),
-              ),
-            ),
-          ),
-          data: (photos) {
-            // Filter out pending photos that have already been uploaded
-            // This prevents brief duplicate when Firestore updates before setState
-            final uploadedIds = photos.map((p) => p.id).toSet();
-            final activePendingPhotos = _pendingPhotos
-                .where((p) => !uploadedIds.contains(p.id))
-                .toList();
-
-            final totalCount = activePendingPhotos.length + photos.length;
-
-            if (totalCount == 0) {
-              return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.photo_camera_outlined,
-                          size: 48,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No photos yet',
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Add photos to document classroom setup',
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 12,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
+        if (worker != null)
+          for (final item in pending)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.file(
+                  worker.localFile(item),
+                  cacheWidth: 144,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(
+                      width: 52, child: Icon(Icons.broken_image)),
                 ),
-              );
-            }
-
-            return GridView.builder(
+              ),
+              title: const Text('Classroom photo'),
+              subtitle: Text(
+                  item.id == status?.activeId ? 'Syncing' : item.statusText),
+              trailing: item.id == status?.activeId
+                  ? null
+                  : EvidenceUploadActions(item: item),
+            ),
+        if (photos.isLoading && remote.isEmpty && pending.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: LinearProgressIndicator(),
+          ),
+        if (photos.hasError)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Could not load synced photos'),
+            trailing: TextButton(
+              onPressed: () =>
+                  ref.invalidate(classroomPhotosProvider(_classroom)),
+              child: const Text('Retry'),
+            ),
+          ),
+        if (photos.hasValue && remote.isEmpty && pending.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('No photos yet'),
+          ),
+        if (remote.isNotEmpty && pending.isNotEmpty)
+          Text('Synced photos', style: Theme.of(context).textTheme.titleSmall),
+        if (remote.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 180,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
               ),
-              itemCount: totalCount,
+              itemCount: remote.length,
               itemBuilder: (context, index) {
-                // Show pending photos first
-                if (index < activePendingPhotos.length) {
-                  final pendingPhoto = activePendingPhotos[index];
-                  return _PendingPhotoCard(
-                    pendingPhoto: pendingPhoto,
-                    onRetry: () => _retryUpload(pendingPhoto),
-                    onCancel: () => _cancelUpload(pendingPhoto),
-                  );
-                }
-                // Then show uploaded photos
-                final photo = photos[index - activePendingPhotos.length];
+                final photo = remote[index];
                 return _PhotoCard(
+                  key: ValueKey(photo.id),
                   photo: photo,
-                  onDelete: () => _handleDeletePhoto(photo),
+                  onRemove: () => _handleRemovePhoto(photo),
                 );
               },
-            );
-          },
-        ),
+            ),
+          ),
       ],
     );
   }
 
-  /// Handle adding a new photo with optimistic UI
   Future<void> _handleAddPhoto() async {
+    final worker = ref.read(evidenceUploadWorkerProvider).valueOrNull;
+    final uid = ref.read(authRepositoryProvider).currentUser?.uid;
+    if (worker == null || uid == null) return;
+
     final photoService = ref.read(photoServiceProvider);
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-
-    // Pick image
-    final imageFile = await photoService.pickImage(context);
-    if (imageFile == null) return;
-
-    // Generate photo ID
-    final photoId = const Uuid().v4();
-
-    // Save photo locally FIRST to ensure it's not lost on poor connection
-    final localFile = await _savePhotoLocally(imageFile, photoId);
-
-    // Create LocalPhoto record and save to Hive
-    final localPhoto = LocalPhoto(
-      id: photoId,
-      localPath: localFile.path,
-      schoolId: widget.schoolId,
-      yearLevelId: widget.yearLevelId,
-      classroomId: widget.classroomId,
-      createdAt: DateTime.now(),
-      isUploaded: false,
-      fileSize: await localFile.length(),
-    );
-    await offlineStorage.addLocalPhoto(localPhoto);
-
-    // Add to pending photos immediately (optimistic update)
-    setState(() {
-      _pendingPhotos.add(_PendingPhoto(
-        id: photoId,
-        localFile: localFile,
-      ));
-    });
-
-    // Upload in background
-    await _uploadPhotoInBackground(photoId, localFile);
-  }
-
-  /// Upload photo to Firebase in the background
-  Future<void> _uploadPhotoInBackground(String photoId, File imageFile) async {
-    final photoService = ref.read(photoServiceProvider);
-    final schoolsNotifier = ref.read(schoolsNotifierProvider.notifier);
-    final currentUser = ref.read(currentUserProvider).value;
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-
-    final storagePath =
-        'schools/${widget.schoolId}/yearLevels/${widget.yearLevelId}/classrooms/${widget.classroomId}/photos/$photoId.jpg';
-
-    // Upload to Firebase Storage
-    final uploadResult = await photoService.uploadPhoto(storagePath, imageFile);
-
-    if (!mounted) return;
-
-    if (!uploadResult.isSuccess) {
-      // Mark as error in pending list
-      setState(() {
-        final index = _pendingPhotos.indexWhere((p) => p.id == photoId);
-        if (index != -1) {
-          _pendingPhotos[index] = _pendingPhotos[index].copyWith(
-            hasError: true,
-            errorMessage: uploadResult.errorOrNull,
-          );
-        }
-      });
-      return;
-    }
-
-    // Create Photo object and save to Firestore
-    final photo = Photo(
-      id: photoId,
-      storagePath: storagePath,
-      uploadedBy: currentUser?.uid,
-      uploadedAt: DateTime.now(),
-    );
-
-    final result = await schoolsNotifier.addClassroomPhoto(
-      widget.schoolId,
-      widget.yearLevelId,
-      widget.classroomId,
-      photo,
-    );
-
-    if (!mounted) return;
-
-    // Remove from pending (Firestore stream will show the uploaded photo)
-    setState(() {
-      _pendingPhotos.removeWhere((p) => p.id == photoId);
-    });
-
-    if (result) {
-      // Mark as uploaded in local storage and clean up local file
-      await offlineStorage.markPhotoAsUploaded(photoId, storagePath);
-      await offlineStorage.deleteLocalPhoto(photoId);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to save photo'),
-          backgroundColor: Colors.red,
-        ),
+    final classroom = _classroom;
+    setState(() => _saving = true);
+    try {
+      final file = await photoService.pickImage(context);
+      if (file == null) return;
+      await worker.enqueuePhoto(
+        ownerUid: uid,
+        schoolId: classroom.schoolId,
+        yearLevelId: classroom.yearLevelId,
+        classroomId: classroom.classroomId,
+        source: file,
+        deliveryId: classroom.deliveryId,
       );
-    }
-  }
-
-  /// Retry a failed upload
-  void _retryUpload(_PendingPhoto pendingPhoto) {
-    // Reset error state
-    setState(() {
-      final index = _pendingPhotos.indexWhere((p) => p.id == pendingPhoto.id);
-      if (index != -1) {
-        _pendingPhotos[index] = pendingPhoto.copyWith(
-          hasError: false,
-          errorMessage: null,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo saved on this device')),
         );
       }
-    });
-
-    // Try uploading again
-    _uploadPhotoInBackground(pendingPhoto.id, pendingPhoto.localFile);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the photo. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
-  /// Cancel/remove a pending photo
-  Future<void> _cancelUpload(_PendingPhoto pendingPhoto) async {
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-
-    setState(() {
-      _pendingPhotos.removeWhere((p) => p.id == pendingPhoto.id);
-    });
-
-    // Clean up local storage
-    await offlineStorage.deleteLocalPhoto(pendingPhoto.id);
-  }
-
-  /// Handle deleting a photo
-  Future<void> _handleDeletePhoto(Photo photo) async {
+  Future<void> _handleRemovePhoto(Photo photo) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Photo'),
+        title: const Text('Remove photo from classroom?'),
         content: const Text(
-          'Are you sure you want to delete this photo? This action cannot be undone.',
+          'The saved photo stays available to signed records that include it.',
         ),
         actions: [
           TextButton(
@@ -2906,32 +2608,31 @@ class _PhotosSectionState extends ConsumerState<_PhotosSection> {
             style: FilledButton.styleFrom(
               backgroundColor: Colors.red,
             ),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final success = await ref
         .read(schoolsNotifierProvider.notifier)
-        .deleteClassroomPhoto(widget.schoolId, widget.yearLevelId, widget.classroomId, photo.id);
+        .deleteClassroomPhoto(
+            widget.schoolId, widget.yearLevelId, widget.classroomId, photo.id,
+          deliveryId: widget.deliveryId);
 
-    if (success) {
-      // Invalidate the photos provider to refresh the UI
-      ref.invalidate(classroomPhotosProvider((
-        schoolId: widget.schoolId,
-        yearLevelId: widget.yearLevelId,
-        classroomId: widget.classroomId,
-      )));
+    if (success && mounted) {
+      ref.invalidate(classroomPhotosProvider(_classroom));
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            success ? 'Photo deleted successfully' : 'Failed to delete photo',
+            success
+                ? 'Photo removed from classroom'
+                : 'Could not remove the photo from the classroom',
           ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),

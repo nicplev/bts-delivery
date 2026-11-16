@@ -4,12 +4,23 @@ import '../models/season_export_models.dart';
 import '../models/school.dart';
 import '../models/school_timer.dart';
 import '../models/delivery.dart';
-import '../models/staff.dart';
+import '../models/delivery_visit.dart';
+import '../models/signoff_snapshot.dart';
 import '../services/result.dart';
+import 'staff_repository.dart';
+
+typedef SeasonReportData = ({
+  SeasonData data,
+  List<SignedEvidence> visitEvidence,
+  List<({String deliveryId, TimerDetail timer})> visitTimers,
+});
 
 /// Repository for fetching and aggregating season export data
 class SeasonExportRepository {
+  SeasonExportRepository(this._staffRepository);
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final StaffRepository _staffRepository;
 
   /// Get preview data counts for the export screen
   Future<Result<SeasonExportPreview>> getExportPreview({
@@ -17,37 +28,54 @@ class SeasonExportRepository {
     DateTime? endDate,
   }) async {
     try {
-      // Get counts in parallel
+      final staffRequest = _staffRepository.getAllStaff();
       final results = await Future.wait([
-        _firestore.collection('schools').get(),
-        _getDeliveriesQuery(startDate, endDate).get(),
-        _firestore.collection('staff').get(),
-        _firestore.collection('signed_school_summaries').get(),
+        _firestore
+            .collection('schools')
+            .get(const GetOptions(source: Source.server)),
+        _getDeliveriesQuery(startDate, endDate)
+            .get(const GetOptions(source: Source.server)),
+        _legacySummariesQuery(startDate, endDate)
+            .get(const GetOptions(source: Source.server)),
       ]);
 
       final schoolsSnapshot = results[0];
       final deliveriesSnapshot = results[1];
-      final staffSnapshot = results[2];
-      final summariesSnapshot = results[3];
+      final staff = (await staffRequest).dataOrNull;
+      if (staff == null) {
+        return const Result.failure('Could not load the staff directory.');
+      }
+      final summariesSnapshot = results[2];
+      final visits = deliveriesSnapshot.docs.map((doc) {
+        return Delivery.fromJson({...doc.data(), 'id': doc.id});
+      }).toList();
+      var visitEvidenceCount = 0;
+      for (final query in _visitEvidenceQueries(visits)) {
+        visitEvidenceCount += (await query.count().get()).count ?? 0;
+      }
 
-      // Count timer entries across all schools
       int timerCount = 0;
+      for (final visit in visits) {
+        final root = await _readyVisitRoot(visit);
+        if (root != null) {
+          timerCount += (await _timerHistory(root).count().get()).count ?? 0;
+        }
+      }
       for (final schoolDoc in schoolsSnapshot.docs) {
-        final historySnapshot = await _firestore
-            .collection('schools')
-            .doc(schoolDoc.id)
-            .collection('timers')
-            .doc('active')
-            .collection('history')
-            .get();
-        timerCount += historySnapshot.docs.length;
+        final query = _dated(
+          _timerHistory(_firestore.collection('schools').doc(schoolDoc.id)),
+          'startedAt',
+          startDate,
+          endDate,
+        );
+        timerCount += (await query.count().get()).count ?? 0;
       }
 
       // Get date range from deliveries
       DateTime? earliest;
       DateTime? latest;
       for (final doc in deliveriesSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final date = (data['date'] as Timestamp).toDate();
         if (earliest == null || date.isBefore(earliest)) {
           earliest = date;
@@ -60,8 +88,8 @@ class SeasonExportRepository {
       return Result.success(SeasonExportPreview(
         schoolCount: schoolsSnapshot.docs.length,
         deliveryCount: deliveriesSnapshot.docs.length,
-        staffCount: staffSnapshot.docs.length,
-        signedSummaryCount: summariesSnapshot.docs.length,
+        staffCount: staff.length,
+        signedSummaryCount: summariesSnapshot.docs.length + visitEvidenceCount,
         timerEntryCount: timerCount,
         earliestDate: earliest,
         latestDate: latest,
@@ -73,7 +101,7 @@ class SeasonExportRepository {
   }
 
   /// Aggregate all season data for export
-  Future<Result<SeasonData>> aggregateSeasonData({
+  Future<Result<SeasonReportData>> aggregateSeasonData({
     DateTime? startDate,
     DateTime? endDate,
     void Function(double progress, String message)? onProgress,
@@ -83,7 +111,10 @@ class SeasonExportRepository {
 
       // Phase 1: Fetch all schools (10%)
       onProgress?.call(0.05, 'Fetching schools...');
-      final schoolsSnapshot = await _firestore.collection('schools').orderBy('name').get();
+      final schoolsSnapshot = await _firestore
+          .collection('schools')
+          .orderBy('name')
+          .get(const GetOptions(source: Source.server));
       final schools = schoolsSnapshot.docs.map((doc) {
         final data = doc.data();
         data.remove('id');
@@ -93,9 +124,10 @@ class SeasonExportRepository {
 
       // Phase 2: Fetch all deliveries (20%)
       onProgress?.call(0.15, 'Fetching deliveries...');
-      final deliveriesSnapshot = await _getDeliveriesQuery(startDate, endDate).get();
+      final deliveriesSnapshot = await _getDeliveriesQuery(startDate, endDate)
+          .get(const GetOptions(source: Source.server));
       final deliveries = deliveriesSnapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         data.remove('id');
         return Delivery.fromJson({'id': doc.id, ...data});
       }).toList();
@@ -103,7 +135,10 @@ class SeasonExportRepository {
 
       // Phase 3: Fetch all signed summaries (30%)
       onProgress?.call(0.25, 'Fetching signed summaries...');
-      final summariesSnapshot = await _firestore.collection('signed_school_summaries').get();
+      final visitEvidence = await _visitEvidence(deliveries);
+      final summariesSnapshot = await _legacySummariesQuery(startDate, endDate)
+          .get(const GetOptions(source: Source.server));
+
       final signedSummaries = <SignedSchoolSummary>[];
       for (final doc in summariesSnapshot.docs) {
         try {
@@ -118,22 +153,23 @@ class SeasonExportRepository {
           data['notesByClassroom'] ??= <String, dynamic>{};
           data['photoUrls'] ??= <String>[];
           data['classroomDeliveryDetails'] ??= <dynamic>[];
-          signedSummaries.add(SignedSchoolSummary.fromJson({'id': doc.id, ...data}));
-        } catch (e) {
-          debugPrint('Error parsing signed summary ${doc.id}: $e');
-          // Skip malformed documents
+          signedSummaries
+              .add(SignedSchoolSummary.fromJson({'id': doc.id, ...data}));
+        } catch (_) {
+          return const Result.failure(
+              'An earlier signed summary could not be read.');
         }
       }
-      onProgress?.call(0.30, 'Fetched ${signedSummaries.length} signed summaries');
+      onProgress?.call(
+          0.30, 'Fetched ${signedSummaries.length} signed summaries');
 
       // Phase 4: Fetch all staff (35%)
       onProgress?.call(0.32, 'Fetching staff...');
-      final staffSnapshot = await _firestore.collection('staff').orderBy('name').get();
-      final staffList = staffSnapshot.docs.map((doc) {
-        final data = doc.data();
-        data.remove('id');
-        return Staff.fromJson({'id': doc.id, ...data});
-      }).toList();
+      final directory = await _staffRepository.getAllStaff();
+      final staffList = directory.dataOrNull;
+      if (staffList == null) {
+        return const Result.failure('Could not load the staff directory.');
+      }
       onProgress?.call(0.35, 'Fetched ${staffList.length} staff members');
 
       // Phase 5: Fetch timer history for all schools (35-60%)
@@ -143,25 +179,13 @@ class SeasonExportRepository {
 
       for (int i = 0; i < schools.length; i++) {
         final school = schools[i];
-        final historySnapshot = await _firestore
-            .collection('schools')
-            .doc(school.id)
-            .collection('timers')
-            .doc('active')
-            .collection('history')
-            .orderBy('stoppedAt', descending: true)
-            .get();
-
-        final timers = <SchoolTimer>[];
-        for (final doc in historySnapshot.docs) {
-          try {
-            final data = doc.data();
-            data.remove('id');
-            timers.add(SchoolTimer.fromJson({'id': doc.id, ...data}));
-          } catch (e) {
-            debugPrint('Error parsing timer ${doc.id}: $e');
-          }
-        }
+        final historySnapshot = await _dated(
+          _timerHistory(_firestore.collection('schools').doc(school.id)),
+          'startedAt',
+          startDate,
+          endDate,
+        ).get(const GetOptions(source: Source.server));
+        final timers = _parseTimers(historySnapshot);
 
         timersBySchool[school.id] = timers;
 
@@ -182,7 +206,35 @@ class SeasonExportRepository {
         }
 
         final progress = 0.36 + (0.24 * (i + 1) / schools.length);
-        onProgress?.call(progress, 'Processing timer data (${i + 1}/${schools.length})');
+        onProgress?.call(
+            progress, 'Processing timer data (${i + 1}/${schools.length})');
+      }
+      final schoolNames = {
+        for (final school in schools) school.id: school.name
+      };
+      final visitTimers = <({String deliveryId, TimerDetail timer})>[];
+      for (final visit in deliveries) {
+        final root = await _readyVisitRoot(visit);
+        if (root == null) continue;
+        final history = await _timerHistory(root)
+            .orderBy('stoppedAt', descending: true)
+            .get(const GetOptions(source: Source.server));
+        for (final timer in _parseTimers(history)) {
+          if (timer.stoppedAt == null) continue;
+          visitTimers.add((
+            deliveryId: visit.id,
+            timer: TimerDetail(
+              schoolName: schoolNames[visit.schoolId] ?? 'Unknown school',
+              visitDate: visit.date,
+              startTime: timer.startedAt,
+              endTime: timer.stoppedAt,
+              duration: timer.elapsed,
+              startedBy: timer.startedByName,
+              stoppedBy: timer.stoppedByName,
+              dayOfWeek: _getDayOfWeek(visit.date),
+            ),
+          ));
+        }
       }
       onProgress?.call(0.60, 'Timer data processed');
 
@@ -191,22 +243,14 @@ class SeasonExportRepository {
       final List<SchoolSeasonData> schoolSeasonData = [];
       final Map<String, int> schoolNotesCount = {};
 
-      // First, count notes for each school
       for (final school in schools) {
-        try {
-          int notesCount = 0;
-          // Count school-level notes
-          final notesSnapshot = await _firestore
-              .collection('schools')
-              .doc(school.id)
-              .collection('notes')
-              .get();
-          notesCount += notesSnapshot.docs.length;
-          schoolNotesCount[school.id] = notesCount;
-        } catch (e) {
-          debugPrint('Error counting notes for school ${school.id}: $e');
-          schoolNotesCount[school.id] = 0;
-        }
+        final notes = await _firestore
+            .collection('schools')
+            .doc(school.id)
+            .collection('notes')
+            .count()
+            .get();
+        schoolNotesCount[school.id] = notes.count ?? 0;
       }
 
       for (int i = 0; i < schools.length; i++) {
@@ -223,9 +267,7 @@ class SeasonExportRepository {
           (acc, t) => acc + t.elapsed,
         );
         final visitCount = timers.length;
-        final avgTime = visitCount > 0
-            ? totalTime.inMinutes / visitCount
-            : 0.0;
+        final avgTime = visitCount > 0 ? totalTime.inMinutes / visitCount : 0.0;
 
         // Get classroom counts from year levels
         int yearLevelCount = 0;
@@ -286,7 +328,8 @@ class SeasonExportRepository {
         ));
 
         final progress = 0.61 + (0.14 * (i + 1) / schools.length);
-        onProgress?.call(progress, 'Aggregating school data (${i + 1}/${schools.length})');
+        onProgress?.call(
+            progress, 'Aggregating school data (${i + 1}/${schools.length})');
       }
       onProgress?.call(0.75, 'School data aggregated');
 
@@ -295,9 +338,11 @@ class SeasonExportRepository {
       final List<StaffPerformance> staffPerformance = [];
 
       for (final staff in staffList) {
-        final staffDeliveries = deliveries.where(
-          (d) => d.staffIds.contains(staff.id),
-        ).toList();
+        final staffDeliveries = deliveries
+            .where(
+              (d) => d.staffIds.contains(staff.id),
+            )
+            .toList();
 
         // Calculate total time for this staff
         Duration totalTime = Duration.zero;
@@ -382,7 +427,9 @@ class SeasonExportRepository {
         final quantities = entry.value;
         final total = quantities.fold<int>(0, (acc, q) => acc + q);
         final average = quantities.isNotEmpty ? total / quantities.length : 0.0;
-        final max = quantities.isNotEmpty ? quantities.reduce((a, b) => a > b ? a : b) : 0;
+        final max = quantities.isNotEmpty
+            ? quantities.reduce((a, b) => a > b ? a : b)
+            : 0;
 
         // Find the unit for this item
         String unit = '';
@@ -414,7 +461,8 @@ class SeasonExportRepository {
         if (timers.isEmpty) continue;
 
         final durations = timers.map((t) => t.elapsed).toList();
-        final totalTime = durations.fold<Duration>(Duration.zero, (acc, d) => acc + d);
+        final totalTime =
+            durations.fold<Duration>(Duration.zero, (acc, d) => acc + d);
         final avgTime = Duration(
           milliseconds: totalTime.inMilliseconds ~/ durations.length,
         );
@@ -439,7 +487,8 @@ class SeasonExportRepository {
       onProgress?.call(0.96, 'Building overview...');
 
       // Calculate totals
-      final totalPacks = signedSummaries.fold<int>(0, (acc, s) => acc + s.totalPacks);
+      final totalPacks =
+          signedSummaries.fold<int>(0, (acc, s) => acc + s.totalPacks);
 
       // Aggregate consumables by type
       final Map<String, int> totalConsumablesByType = {};
@@ -503,7 +552,7 @@ class SeasonExportRepository {
 
       onProgress?.call(1.0, 'Data aggregation complete');
 
-      return Result.success(SeasonData(
+      final data = SeasonData(
         overview: overview,
         schools: schoolSeasonData,
         deliveries: deliveries,
@@ -513,6 +562,11 @@ class SeasonExportRepository {
         timerAggregates: timerAggregates,
         timerDetails: allTimerDetails,
         signedSummaries: signedSummaries,
+      );
+      return Result.success((
+        data: data,
+        visitEvidence: visitEvidence,
+        visitTimers: visitTimers,
       ));
     } catch (e) {
       debugPrint('Error aggregating season data: $e');
@@ -520,21 +574,99 @@ class SeasonExportRepository {
     }
   }
 
-  Query _getDeliveriesQuery(DateTime? startDate, DateTime? endDate) {
-    Query query = _firestore.collection('deliveries').orderBy('date');
+  Query<Map<String, dynamic>> _getDeliveriesQuery(
+          DateTime? startDate, DateTime? endDate) =>
+      _dated(_firestore.collection('deliveries'), 'date', startDate, endDate);
 
+  Query<Map<String, dynamic>> _legacySummariesQuery(
+          DateTime? startDate, DateTime? endDate) =>
+      _dated(_firestore.collection('signed_school_summaries'), 'signedDate',
+          startDate, endDate);
+
+  Query<Map<String, dynamic>> _dated(
+    CollectionReference<Map<String, dynamic>> collection,
+    String field,
+    DateTime? startDate,
+    DateTime? endDate,
+  ) {
+    Query<Map<String, dynamic>> query = collection.orderBy(field);
     if (startDate != null) {
-      query = query.where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
+      query = query.where(field,
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
     }
     if (endDate != null) {
-      query = query.where('date', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
+      final nextDay = DateTime(endDate.year, endDate.month, endDate.day + 1);
+      query = query.where(field, isLessThan: Timestamp.fromDate(nextDay));
     }
-
     return query;
   }
 
+  /// Use the selected deliveries' dates. A late signature or subsequent
+  /// correction still belongs to its original visit and is exported once.
+  Future<List<SignedEvidence>> _visitEvidence(List<Delivery> deliveries) async {
+    final evidence = <SignedEvidence>[];
+    for (final query in _visitEvidenceQueries(deliveries)) {
+      final result = await query.get(const GetOptions(source: Source.server));
+      evidence.addAll(
+          result.docs.map((doc) => SignedEvidence.fromDocument(doc.data())));
+    }
+    return evidence..sort((a, b) => a.capturedAt.compareTo(b.capturedAt));
+  }
+
+  Iterable<Query<Map<String, dynamic>>> _visitEvidenceQueries(
+    List<Delivery> deliveries,
+  ) sync* {
+    final bySchool = <String, List<String>>{};
+    for (final delivery in deliveries) {
+      bySchool.putIfAbsent(delivery.schoolId, () => []).add(delivery.id);
+    }
+    for (final entry in bySchool.entries) {
+      final history = _firestore
+          .collection('schools')
+          .doc(entry.key)
+          .collection('signoffs');
+      final ids = entry.value;
+      for (var index = 0; index < ids.length; index += 30) {
+        final last = index + 30 < ids.length ? index + 30 : ids.length;
+        yield history.where('deliveryId', whereIn: ids.sublist(index, last));
+      }
+    }
+  }
+
+  Future<DocumentReference<Map<String, dynamic>>?> _readyVisitRoot(
+    Delivery delivery,
+  ) async {
+    final visit =
+        DeliveryVisit(deliveryId: delivery.id, schoolId: delivery.schoolId);
+    final root = _firestore.doc(visit.workspacePath);
+    final manifest = await root.get(const GetOptions(source: Source.server));
+    if (manifest.data()?['status'] != 'ready') return null;
+    return root;
+  }
+
+  CollectionReference<Map<String, dynamic>> _timerHistory(
+    DocumentReference<Map<String, dynamic>> root,
+  ) =>
+      root.collection('timers').doc('active').collection('history');
+
+  List<SchoolTimer> _parseTimers(
+          QuerySnapshot<Map<String, dynamic>> snapshot) =>
+      snapshot.docs
+          .map(
+            (doc) => SchoolTimer.fromJson({...doc.data(), 'id': doc.id}),
+          )
+          .toList();
+
   String _getDayOfWeek(DateTime date) {
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const days = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday'
+    ];
     return days[date.weekday - 1];
   }
 

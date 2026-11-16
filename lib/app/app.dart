@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
+import '../providers/offline_delivery_providers.dart';
 import '../services/offline/offline_storage_service.dart';
 
 class BTSDeliveryApp extends ConsumerWidget {
@@ -13,6 +14,7 @@ class BTSDeliveryApp extends ConsumerWidget {
 
     return offlineStorageInit.when(
       data: (_) {
+        ref.watch(evidenceUploadWorkerProvider);
         final router = ref.watch(appRouterProvider);
 
         return MaterialApp.router(

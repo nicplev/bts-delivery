@@ -8,6 +8,7 @@ import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:async';
 import '../models/school.dart';
 import '../providers/schools_providers.dart';
+import '../providers/delivery_visit_provider.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
 import 'package:uuid/uuid.dart';
@@ -44,16 +45,13 @@ class _InfoTabState extends ConsumerState<InfoTab> {
 
   @override
   Widget build(BuildContext context) {
-    final schoolsAsync = ref.watch(schoolsProvider);
+    final schoolAsync = ref.watch(schoolByIdProvider(widget.schoolId));
     final contactsAsync = ref.watch(contactsProvider(widget.schoolId));
 
-    return schoolsAsync.when(
+    return schoolAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, _) => Center(child: Text('Error: $error')),
-      data: (schools) {
-        final school =
-            schools.where((s) => s.id == widget.schoolId).firstOrNull;
-
+      data: (school) {
         if (school == null) {
           return const Center(child: Text('School not found'));
         }
@@ -67,7 +65,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             const SizedBox(height: 16),
             _buildSchoolMapCard(school),
             const SizedBox(height: 16),
-            if (canEditSchoolData) ...[
+            if (canEditSchoolData &&
+                ref.watch(activeDeliveryVisitProvider) == null) ...[
               _buildBulkImportCard(school),
               const SizedBox(height: 16),
             ],
@@ -75,7 +74,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               _buildMapCard(school),
               const SizedBox(height: 16),
             ],
-            _buildContactsCard(contactsAsync),
+            _buildContactsCard(contactsAsync, canEdit: canEditSchoolData),
             const SizedBox(height: 16),
             _buildTimerHistoryCard(),
           ],
@@ -85,7 +84,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   }
 
   Widget _buildTimerHistoryCard() {
-    final isAdmin = ref.watch(isAdminProvider);
+    final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
+    final isAdmin = isVisit && ref.watch(isAdminProvider);
 
     return Card(
       child: Padding(
@@ -99,7 +99,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Timer History',
+                    isVisit ? 'Visit timer history' : 'Earlier timer history',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -114,7 +114,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               ],
             ),
             const SizedBox(height: 12),
-            SchoolTimerHistory(schoolId: widget.schoolId),
+            SchoolTimerHistory(schoolId: widget.schoolId, readOnly: !isVisit),
           ],
         ),
       ),
@@ -185,7 +185,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               const SizedBox(height: 12),
               _buildInfoRow(
                 icon: Icons.check_circle,
-                label: 'Last Sign-off',
+                label: 'Earlier school sign-off',
                 value: _formatDate(school.lastSignOffDate!),
                 valueColor: Colors.green,
               ),
@@ -791,7 +791,10 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     );
   }
 
-  Widget _buildContactsCard(AsyncValue<List<Contact>> contactsAsync) {
+  Widget _buildContactsCard(
+    AsyncValue<List<Contact>> contactsAsync, {
+    required bool canEdit,
+  }) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -810,11 +813,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                         ),
                   ),
                 ),
-                IconButton(
-                  onPressed: _showAddContactDialog,
-                  icon: const Icon(Icons.add),
-                  tooltip: 'Add Contact',
-                ),
+                if (canEdit)
+                  IconButton(
+                    onPressed: _showAddContactDialog,
+                    icon: const Icon(Icons.add),
+                    tooltip: 'Add Contact',
+                  ),
               ],
             ),
             const SizedBox(height: 16),
@@ -850,7 +854,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
 
                 return Column(
                   children: contacts.map((contact) {
-                    return _buildContactTile(contact);
+                    return _buildContactTile(contact, canEdit: canEdit);
                   }).toList(),
                 );
               },
@@ -861,12 +865,15 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     );
   }
 
-  Widget _buildContactTile(Contact contact) {
+  Widget _buildContactTile(Contact contact, {required bool canEdit}) {
+    final hasPhone = contact.phone?.isNotEmpty == true;
+    final hasEmail = contact.email?.isNotEmpty == true;
+    final initial = contact.name.trim().characters.firstOrNull?.toUpperCase();
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: CircleAvatar(
-          child: Text(contact.name[0].toUpperCase()),
+          child: Text(initial ?? '?'),
         ),
         title: Text(
           contact.name,
@@ -875,15 +882,15 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (contact.phone?.isNotEmpty == true)
+            if (hasPhone)
               Row(
                 children: [
                   const Icon(Icons.phone, size: 14),
                   const SizedBox(width: 4),
-                  Text(contact.phone!),
+                  Expanded(child: Text(contact.phone!)),
                 ],
               ),
-            if (contact.email?.isNotEmpty == true)
+            if (hasEmail)
               Row(
                 children: [
                   const Icon(Icons.email, size: 14),
@@ -898,68 +905,76 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               ),
           ],
         ),
-        trailing: PopupMenuButton(
-          itemBuilder: (context) => [
-            if (contact.phone?.isNotEmpty == true)
-              const PopupMenuItem(
-                value: 'call',
-                child: Row(
-                  children: [
-                    Icon(Icons.phone),
-                    SizedBox(width: 8),
-                    Text('Call'),
-                  ],
-                ),
-              ),
-            if (contact.email?.isNotEmpty == true)
-              const PopupMenuItem(
-                value: 'email',
-                child: Row(
-                  children: [
-                    Icon(Icons.email),
-                    SizedBox(width: 8),
-                    Text('Email'),
-                  ],
-                ),
-              ),
-            const PopupMenuItem(
-              value: 'edit',
-              child: Row(
-                children: [
-                  Icon(Icons.edit),
-                  SizedBox(width: 8),
-                  Text('Edit'),
+        trailing: canEdit || hasPhone || hasEmail
+            ? PopupMenuButton<String>(
+                itemBuilder: (context) => [
+                  if (hasPhone)
+                    const PopupMenuItem(
+                      value: 'call',
+                      child: Row(
+                        children: [
+                          Icon(Icons.phone),
+                          SizedBox(width: 8),
+                          Text('Call'),
+                        ],
+                      ),
+                    ),
+                  if (hasEmail)
+                    const PopupMenuItem(
+                      value: 'email',
+                      child: Row(
+                        children: [
+                          Icon(Icons.email),
+                          SizedBox(width: 8),
+                          Text('Email'),
+                        ],
+                      ),
+                    ),
+                  if (canEdit)
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit),
+                          SizedBox(width: 8),
+                          Text('Edit'),
+                        ],
+                      ),
+                    ),
+                  if (canEdit)
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('Delete', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
                 ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Delete', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
-          onSelected: (value) {
-            switch (value) {
-              case 'call':
-                _callContact(contact.phone!);
-                break;
-              case 'email':
-                _emailContact(contact.email!);
-                break;
-              case 'edit':
-                _showEditContactDialog(contact);
-                break;
-              case 'delete':
-                _showDeleteContactConfirmation(contact);
-                break;
-            }
-          },
-        ),
+                onSelected: (value) {
+                  switch (value) {
+                    case 'call':
+                      _callContact(contact.phone!);
+                      break;
+                    case 'email':
+                      _emailContact(contact.email!);
+                      break;
+                    case 'edit':
+                      if (ref.read(canEditSchoolDataProvider)) {
+                        _showEditContactDialog(contact);
+                      }
+                      break;
+                    case 'delete':
+                      if (ref.read(canEditSchoolDataProvider)) {
+                        _showDeleteContactConfirmation(contact);
+                      }
+                      break;
+                  }
+                },
+              )
+            : null,
       ),
     );
   }

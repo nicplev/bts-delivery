@@ -3,13 +3,34 @@ import '../services/result.dart';
 import '../services/date_utils.dart';
 import '../models/delivery.dart';
 import '../models/staff.dart';
+import 'scoped_query_stream.dart';
+import 'staff_repository.dart';
 
 abstract class DeliveriesRepository {
-  Stream<List<Delivery>> watchTodayDeliveries({String? staffId});
-  Stream<List<Delivery>> watchUpcomingDeliveries({String? staffId});
-  Stream<List<Delivery>> watchPastDeliveries({String? staffId});
-  Stream<List<Delivery>> watchAllDeliveries({String? staffId});
-  Future<Result<List<Delivery>>> getDeliveriesByDateRange(DateTime start, DateTime end, {String? staffId});
+  Stream<List<Delivery>> watchTodayDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  });
+  Stream<List<Delivery>> watchUpcomingDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  });
+  Stream<List<Delivery>> watchPastDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  });
+  Stream<List<Delivery>> watchAllDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  });
+  Stream<List<Delivery>> watchDeliveriesByDateRange(
+    DateTime start,
+    DateTime end, {
+    List<String>? schoolIds,
+  });
+  Future<Result<List<Delivery>>> getDeliveriesByDateRange(
+      DateTime start, DateTime end,
+      {String? staffId});
   Future<Result<Delivery>> getDeliveryById(String deliveryId);
   Future<Result<Delivery>> createDelivery(Delivery delivery);
   Future<Result<Delivery>> updateDelivery(Delivery delivery);
@@ -22,101 +43,103 @@ abstract class DeliveriesRepository {
 
 class FirebaseDeliveriesRepository implements DeliveriesRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  
+
   @override
-  Stream<List<Delivery>> watchTodayDeliveries({String? staffId}) {
+  Stream<List<Delivery>> watchTodayDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  }) {
     final start = DateTimeUtils.todayStart;
-    final end = DateTimeUtils.tomorrowStart;
-    
-    Query query = _firestore
-        .collection('deliveries')
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-        .where('date', isLessThan: Timestamp.fromDate(end));
-    
+    final end = DateTime(start.year, start.month, start.day + 1);
+    return _watchDeliveries(
+      start: start,
+      end: end,
+      staffId: staffId,
+      schoolIds: schoolIds,
+    ).map((deliveries) => [...deliveries]..sort(compareDeliveryTimes));
+  }
+
+  @override
+  Stream<List<Delivery>> watchUpcomingDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  }) {
+    return _watchDeliveries(
+      start: DateTimeUtils.tomorrowStart,
+      staffId: staffId,
+      schoolIds: schoolIds,
+    );
+  }
+
+  @override
+  Stream<List<Delivery>> watchPastDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  }) {
+    return _watchDeliveries(
+      end: DateTimeUtils.todayStart,
+      staffId: staffId,
+      schoolIds: schoolIds,
+    ).map((deliveries) => deliveries.reversed.toList());
+  }
+
+  @override
+  Stream<List<Delivery>> watchAllDeliveries({
+    String? staffId,
+    List<String>? schoolIds,
+  }) {
+    return _watchDeliveries(staffId: staffId, schoolIds: schoolIds);
+  }
+
+  @override
+  Stream<List<Delivery>> watchDeliveriesByDateRange(
+    DateTime start,
+    DateTime end, {
+    List<String>? schoolIds,
+  }) {
+    return _watchDeliveries(start: start, end: end, schoolIds: schoolIds);
+  }
+
+  Stream<List<Delivery>> _watchDeliveries({
+    DateTime? start,
+    DateTime? end,
+    String? staffId,
+    List<String>? schoolIds,
+  }) {
+    var query = _firestore.collection('deliveries').orderBy('date');
+    if (start != null) {
+      query = query.where('date',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(start));
+    }
+    if (end != null) {
+      query = query.where('date', isLessThan: Timestamp.fromDate(end));
+    }
     if (staffId != null) {
       query = query.where('staffIds', arrayContains: staffId);
     }
-    
-    return query.snapshots().map((snapshot) {
-      final deliveries = snapshot.docs.map((doc) => Delivery.fromJson({
-        'id': doc.id,
-        ...doc.data() as Map<String, dynamic>,
-      })).toList();
-      
-      // Sort by time, with null times at the end
-      deliveries.sort((a, b) {
-        if (a.time == null && b.time == null) return 0;
-        if (a.time == null) return 1;
-        if (b.time == null) return -1;
-        return a.time!.compareTo(b.time!);
+
+    Stream<List<Delivery>> watch(Query<Map<String, dynamic>> scopedQuery) {
+      return scopedQuery.snapshots().map((snapshot) {
+        return [
+          for (final doc in snapshot.docs)
+            Delivery.fromJson({...doc.data(), 'id': doc.id}),
+        ];
       });
-      
-      return deliveries;
-    });
-  }
-  
-  @override
-  Stream<List<Delivery>> watchUpcomingDeliveries({String? staffId}) {
-    final tomorrow = DateTimeUtils.tomorrowStart;
-    
-    Query query = _firestore
-        .collection('deliveries')
-        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(tomorrow))
-        .orderBy('date');
-    
-    if (staffId != null) {
-      query = query.where('staffIds', arrayContains: staffId);
-    }
-    
-    return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => Delivery.fromJson({
-        'id': doc.id,
-        ...doc.data() as Map<String, dynamic>,
-      })).toList();
-    });
-  }
-  
-  @override
-  Stream<List<Delivery>> watchPastDeliveries({String? staffId}) {
-    final today = DateTimeUtils.todayStart;
-
-    Query query = _firestore
-        .collection('deliveries')
-        .where('date', isLessThan: Timestamp.fromDate(today))
-        .orderBy('date', descending: true);
-
-    if (staffId != null) {
-      query = query.where('staffIds', arrayContains: staffId);
     }
 
-    return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => Delivery.fromJson({
-        'id': doc.id,
-        ...doc.data() as Map<String, dynamic>,
-      })).toList();
+    if (schoolIds == null) return watch(query);
+    return watchInChunks(
+      schoolIds,
+      (ids) => watch(query.where('schoolId', whereIn: ids)),
+    ).map((deliveries) {
+      return [...deliveries]..sort((a, b) => a.date.compareTo(b.date));
     });
   }
 
   @override
-  Stream<List<Delivery>> watchAllDeliveries({String? staffId}) {
-    Query query = _firestore
-        .collection('deliveries')
-        .orderBy('date', descending: false);
-
-    if (staffId != null) {
-      query = query.where('staffIds', arrayContains: staffId);
-    }
-
-    return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => Delivery.fromJson({
-        'id': doc.id,
-        ...doc.data() as Map<String, dynamic>,
-      })).toList();
-    });
-  }
-  
-  @override
-  Future<Result<List<Delivery>>> getDeliveriesByDateRange(DateTime start, DateTime end, {String? staffId}) async {
+  Future<Result<List<Delivery>>> getDeliveriesByDateRange(
+      DateTime start, DateTime end,
+      {String? staffId}) async {
     try {
       Query query = _firestore
           .collection('deliveries')
@@ -129,10 +152,12 @@ class FirebaseDeliveriesRepository implements DeliveriesRepository {
       }
 
       final snapshot = await query.get();
-      final deliveries = snapshot.docs.map((doc) => Delivery.fromJson({
-        'id': doc.id,
-        ...doc.data() as Map<String, dynamic>,
-      })).toList();
+      final deliveries = snapshot.docs
+          .map((doc) => Delivery.fromJson({
+                'id': doc.id,
+                ...doc.data() as Map<String, dynamic>,
+              }))
+          .toList();
 
       return Result.success(deliveries);
     } catch (e) {
@@ -143,7 +168,8 @@ class FirebaseDeliveriesRepository implements DeliveriesRepository {
   @override
   Future<Result<Delivery>> getDeliveryById(String deliveryId) async {
     try {
-      final doc = await _firestore.collection('deliveries').doc(deliveryId).get();
+      final doc =
+          await _firestore.collection('deliveries').doc(deliveryId).get();
 
       if (!doc.exists) {
         return const Result.failure('Delivery not found');
@@ -174,7 +200,7 @@ class FirebaseDeliveriesRepository implements DeliveriesRepository {
       return Result.failure('Failed to create delivery: $e');
     }
   }
-  
+
   @override
   Future<Result<Delivery>> updateDelivery(Delivery delivery) async {
     try {
@@ -192,7 +218,7 @@ class FirebaseDeliveriesRepository implements DeliveriesRepository {
       return Result.failure('Failed to update delivery: $e');
     }
   }
-  
+
   @override
   Future<Result<void>> deleteDelivery(String deliveryId) async {
     try {
@@ -202,80 +228,30 @@ class FirebaseDeliveriesRepository implements DeliveriesRepository {
       return Result.failure('Failed to delete delivery: $e');
     }
   }
-  
-  @override
-  Future<Result<List<Staff>>> getAllStaff() async {
-    try {
-      final snapshot = await _firestore.collection('staff').orderBy('name').get();
-      final staff = snapshot.docs
-          .where((doc) => doc.id.isNotEmpty) // Filter out any invalid docs
-          .map((doc) {
-            final data = doc.data();
-            // Remove 'id' from data if it exists to avoid conflict
-            data.remove('id');
-            return Staff.fromJson({
-              'id': doc.id, // Use Firestore document ID
-              ...data,
-            });
-          }).toList();
 
-      return Result.success(staff);
-    } catch (e) {
-      return Result.failure('Failed to get staff: $e');
-    }
-  }
-  
-  @override
-  Future<Result<Staff>> createStaff(Staff staff) async {
-    try {
-      // Don't store the ID in the document - Firestore provides it
-      final staffData = staff.toJson();
-      staffData.remove('id'); // Remove empty ID from being stored
-
-      final docRef = await _firestore.collection('staff').add(staffData);
-      final createdStaff = staff.copyWith(id: docRef.id);
-      return Result.success(createdStaff);
-    } catch (e) {
-      return Result.failure('Failed to create staff: $e');
-    }
-  }
-  
-  @override
-  Future<Result<Staff>> updateStaff(Staff staff) async {
-    try {
-      if (staff.id.isEmpty) {
-        return const Result.failure('Cannot update staff: ID is empty');
-      }
-
-      // Don't store the ID in the document - it's the document ID
-      final staffData = staff.toJson();
-      staffData.remove('id');
-
-      await _firestore.collection('staff').doc(staff.id).update(staffData);
-
-      // If staff is linked to a user account, sync the role to the user document
-      if (staff.uid != null && staff.uid!.isNotEmpty) {
-        await _firestore.collection('users').doc(staff.uid).update({
-          'role': staff.role,
-        });
-      }
-
-      return Result.success(staff);
-    } catch (e) {
-      return Result.failure('Failed to update staff: $e');
-    }
-  }
+  final _staffRepository = FirebaseStaffRepository();
 
   @override
-  Future<Result<void>> deleteStaff(String staffId) async {
-    try {
-      if (staffId.isEmpty) {
-        return const Result.failure('Cannot delete staff: ID is empty');
-      }
-      await _firestore.collection('staff').doc(staffId).delete();
-      return const Result.success(null);
-    } catch (e) {
-      return Result.failure('Failed to delete staff: $e');
-    }
+  Future<Result<List<Staff>>> getAllStaff() => _staffRepository.getAllStaff();
+
+  @override
+  Future<Result<Staff>> createStaff(Staff staff) =>
+      _staffRepository.createStaff(staff);
+
+  @override
+  Future<Result<Staff>> updateStaff(Staff staff) =>
+      _staffRepository.updateStaff(staff);
+
+  @override
+  Future<Result<void>> deleteStaff(String staffId) =>
+      _staffRepository.deleteStaff(staffId);
+}
+
+int compareDeliveryTimes(Delivery a, Delivery b) {
+  if (a.time == null && b.time == null) {
+    return a.schoolName.compareTo(b.schoolName);
   }
+  if (a.time == null) return 1;
+  if (b.time == null) return -1;
+  return a.time!.compareTo(b.time!);
 }

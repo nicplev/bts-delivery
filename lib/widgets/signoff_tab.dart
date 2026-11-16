@@ -2,20 +2,54 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signature/signature.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
+import '../models/checklist_item.dart';
+import '../models/offline/evidence_upload.dart';
+import '../models/signoff_snapshot.dart';
 import '../providers/schools_providers.dart';
 import '../providers/repository_providers.dart';
 import '../providers/checklist_providers.dart';
-import '../services/image_service.dart';
+import '../providers/offline_delivery_providers.dart';
+import '../services/offline/connectivity_service.dart';
+import 'sync_status_detail_sheet.dart';
 import '../services/date_utils.dart';
 import '../services/excel_export_service.dart';
 import '../models/school.dart';
 import '../app/theme/brand_colors.dart';
 
+final _signedEvidenceProvider = StreamProvider.autoDispose
+    .family<SignedEvidence?, ({String schoolId, String? deliveryId})>(
+        (ref, scope) {
+  return ref
+      .watch(baseSchoolsRepositoryProvider)
+      .watchSignedEvidence(scope.schoolId, scope.deliveryId);
+});
+
+final _signatureUrlProvider =
+    FutureProvider.autoDispose.family<String?, String>(
+  (ref, path) async {
+    final result =
+        await ref.watch(storageRepositoryProvider).getDownloadUrl(path);
+    return result.dataOrNull;
+  },
+);
+
+final _serverSigningDraftProvider = FutureProvider.autoDispose
+    .family<SignOffSnapshot?, ({String schoolId, String? deliveryId})>(
+        (ref, scope) {
+  if (!ref.watch(isOnlineProvider)) return null;
+  return ref
+      .watch(baseSchoolsRepositoryProvider)
+      .readSignOffDraft(scope.schoolId,
+          server: true, deliveryId: scope.deliveryId)
+      .timeout(const Duration(seconds: 20));
+});
+
 class SignOffTab extends ConsumerStatefulWidget {
-  const SignOffTab({super.key, required this.schoolId});
+  const SignOffTab({super.key, required this.schoolId, this.deliveryId});
 
   final String schoolId;
+  final String? deliveryId;
 
   @override
   ConsumerState<SignOffTab> createState() => _SignOffTabState();
@@ -32,6 +66,10 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
   final Map<String, GlobalKey> _noteKeys =
       {}; // Map of yearLevelId_classroomId -> GlobalKey
   bool _isUploading = false;
+  bool _isCorrecting = false;
+
+  ({String schoolId, String? deliveryId}) get _scope =>
+      (schoolId: widget.schoolId, deliveryId: widget.deliveryId);
 
   @override
   void dispose() {
@@ -57,7 +95,24 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
 
   @override
   Widget build(BuildContext context) {
-    final signOffAsync = ref.watch(signOffProvider(widget.schoolId));
+    final legacy = ref.watch(signOffProvider(widget.schoolId)).valueOrNull;
+    final signed = ref.watch(_signedEvidenceProvider((
+      schoolId: widget.schoolId,
+      deliveryId: widget.deliveryId,
+    )));
+    final uploads = ref.watch(evidenceUploadsProvider).valueOrNull;
+    final pending = uploads?.items
+        .where((item) =>
+            item.kind == EvidenceKind.signature &&
+            item.schoolId == widget.schoolId &&
+            item.deliveryId == widget.deliveryId)
+        .firstOrNull;
+    ref.watch(activeChecklistItemsProvider);
+    if (widget.deliveryId != null &&
+        pending == null &&
+        (signed.valueOrNull == null || _isCorrecting)) {
+      ref.watch(_serverSigningDraftProvider(_scope));
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -72,7 +127,15 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 const SizedBox(height: 16),
                 _buildNotesCard(),
                 const SizedBox(height: 16),
-                _buildSignOffCard(signOffAsync),
+                _buildSignOffCard(signed, pending, uploads?.activeId),
+                if (legacy != null) ...[
+                  const SizedBox(height: 16),
+                  ExpansionTile(
+                    title: const Text('Earlier school sign-off'),
+                    subtitle: const Text('No delivery visit was recorded'),
+                    children: [_buildCompletedSignOff(legacy)],
+                  ),
+                ],
               ],
             ),
           ),
@@ -92,7 +155,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -128,7 +191,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
+              color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -268,7 +331,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    border:
+                        Border.all(color: Colors.grey.withValues(alpha: 0.3)),
                   ),
                   child: const Center(
                     child: Text('No year levels found'),
@@ -285,7 +349,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
             decoration: BoxDecoration(
               color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.withOpacity(0.3)),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
             ),
             child: Text('Error loading year levels: $error'),
           ),
@@ -320,7 +384,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.withOpacity(0.3)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
       ),
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -623,7 +687,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                       String? distributionText;
                       if (isComposite) {
                         distributionText = breakdowns.map((b) {
-                          final label = b.yearLevelLabel.replaceAll('Year ', 'Y');
+                          final label =
+                              b.yearLevelLabel.replaceAll('Year ', 'Y');
                           return '$label: ${b.studentCount}';
                         }).join('  •  ');
                       }
@@ -643,7 +708,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                             if (hasNotes) ...[
                               if (isComposite) const SizedBox(width: 12),
                               InkWell(
-                                onTap: () => _scrollToNote(yearLevelId, classroom.id),
+                                onTap: () =>
+                                    _scrollToNote(yearLevelId, classroom.id),
                                 borderRadius: BorderRadius.circular(8),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
@@ -1030,37 +1096,159 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     );
   }
 
-  Widget _buildSignOffCard(AsyncValue<SignOff?> signOffAsync) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+  Widget _buildSignOffCard(
+    AsyncValue<SignedEvidence?> signed,
+    EvidenceUpload? pending,
+    String? activeId,
+  ) {
+    final latest = signed.valueOrNull;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (pending != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.cloud_upload_outlined),
+                title: const Text('Signature saved on this device'),
+                subtitle: Text(
+                    pending.id == activeId ? 'Syncing' : pending.statusText),
+                trailing: pending.id == activeId
+                    ? null
+                    : EvidenceUploadActions(item: pending),
+              ),
+            if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
+            if (widget.deliveryId != null &&
+                pending == null &&
+                (latest == null || _isCorrecting))
+              _buildSignOffForm(),
+            if (widget.deliveryId == null && latest == null && pending == null)
+              const Text('Open a scheduled delivery to create a sign-off.'),
+            if (signed.hasError)
+              const Text('Could not load earlier signed snapshots.'),
+            if (pending == null && _isCorrecting)
+              TextButton(
+                onPressed: _isUploading
+                    ? null
+                    : () => setState(() => _isCorrecting = false),
+                child: const Text('Cancel correction'),
+              ),
+            TextButton.icon(
+              onPressed: _showSignOffHistory,
+              icon: const Icon(Icons.history),
+              label: const Text('Recent signed snapshots'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSignedEvidence(SignedEvidence evidence) {
+    final reviewed = evidence.snapshot.serverReviewed;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          reviewed ? 'Signed snapshot' : 'Synced signature needs review',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        Text(
+          '${evidence.typedName} · ${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}',
+        ),
+        Text(reviewed
+            ? 'Covers the delivery details reviewed at signing.'
+            : 'Captured with incomplete or cached delivery details. Sign again after review.'),
+        ref.watch(_signatureUrlProvider(evidence.signaturePath)).when(
+              loading: () => const LinearProgressIndicator(),
+              error: (_, __) => const Text('Signature image unavailable'),
+              data: (url) => url == null
+                  ? const Text('Signature image unavailable')
+                  : Image.network(
+                      url,
+                      height: 90,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) =>
+                          const Text('Signature image unavailable'),
+                    ),
+            ),
+        Wrap(
+          spacing: 8,
+          children: [
+            if (reviewed)
+              OutlinedButton.icon(
+                onPressed: () => _exportSummary(evidence: evidence),
+                icon: const Icon(Icons.table_chart_outlined),
+                label: const Text('Export snapshot'),
+              ),
+            if (widget.deliveryId != null)
+              TextButton(
+                onPressed: () => setState(() => _isCorrecting = true),
+                child: const Text('Sign a correction'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showSignOffHistory() async {
+    final repository = ref.read(baseSchoolsRepositoryProvider);
+    final history = repository
+        .readSignOffHistory(widget.schoolId, widget.deliveryId)
+        .timeout(const Duration(seconds: 12));
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Recent signed snapshots'),
+        content: FutureBuilder<List<SignedEvidence>>(
+          future: history,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const Text('Could not load history. Try again.');
+            }
+            final records = snapshot.data;
+            if (records == null) return const LinearProgressIndicator();
+            if (records.isEmpty) {
+              return const Text('No signed snapshots found.');
+            }
+            return SizedBox(
+              width: 380,
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final evidence in records)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(evidence.typedName),
+                      subtitle: Text(
+                        '${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}'
+                        '${evidence.snapshot.serverReviewed ? '' : ' · Review required'}',
+                      ),
+                      trailing: evidence.snapshot.serverReviewed
+                          ? IconButton(
+                              tooltip: 'Export snapshot',
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                _exportSummary(evidence: evidence);
+                              },
+                              icon: const Icon(Icons.download_outlined),
+                            )
+                          : null,
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
           ),
         ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: signOffAsync.when(
-        loading: () => const Center(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: CircularProgressIndicator(),
-          ),
-        ),
-        error: (error, _) => Center(
-          child: Text('Error loading sign-off: $error'),
-        ),
-        data: (signOff) {
-          if (signOff != null) {
-            return _buildCompletedSignOff(signOff);
-          } else {
-            return _buildSignOffForm();
-          }
-        },
       ),
     );
   }
@@ -1084,9 +1272,12 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        const Text('This signature will be linked to the selected delivery.'),
         const SizedBox(height: 16),
         TextField(
           controller: _nameController,
+          maxLength: 200,
           decoration: const InputDecoration(
             labelText: 'Name',
             hintText: 'Enter your full name',
@@ -1117,7 +1308,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                   ),
                   if (_isUploading)
                     Container(
-                      color: Colors.white.withOpacity(0.7),
+                      color: Colors.white.withValues(alpha: 0.7),
                       child: const Center(
                         child: CircularProgressIndicator(),
                       ),
@@ -1149,7 +1340,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.check),
-                label: Text(_isUploading ? 'Uploading...' : 'Sign-off'),
+                label: Text(_isUploading ? 'Saving…' : 'Review and save'),
               ),
             ),
           ],
@@ -1169,18 +1360,12 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Signed Off',
+                'School-level record',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: Colors.green,
                     ),
               ),
-            ),
-            // Use IconButton instead of OutlinedButton
-            IconButton(
-              onPressed: () => _showEditDialog(signOff),
-              icon: const Icon(Icons.edit),
-              tooltip: 'Edit',
             ),
           ],
         ),
@@ -1235,27 +1420,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                   if (loadingProgress == null) return child;
                   return const Center(child: CircularProgressIndicator());
                 },
-                errorBuilder: (context, error, stackTrace) {
-                  debugPrint(
-                      'Failed to load signature from URL: ${signOff.signatureURL}');
-                  debugPrint('Error: $error');
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.error, color: Colors.red),
-                        const Text('Failed to load signature'),
-                        const SizedBox(height: 8),
-                        Text(
-                          error.toString(),
-                          style:
-                              const TextStyle(fontSize: 10, color: Colors.grey),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                errorBuilder: (_, __, ___) =>
+                    const Center(child: Text('Signature image unavailable')),
               ),
             ),
           ),
@@ -1315,213 +1481,167 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     ref.invalidate(classroomTotalsProvider(widget.schoolId));
     ref.invalidate(schoolTotalProvider(widget.schoolId));
     ref.invalidate(signOffProvider(widget.schoolId));
+    ref.invalidate(_serverSigningDraftProvider(_scope));
   }
 
   Future<void> _handleSignOff() async {
-    debugPrint('=== SIGN-OFF HANDLER STARTED ===');
-
-    if (_nameController.text.trim().isEmpty) {
-      debugPrint('ERROR: Name is empty');
+    final deliveryId = widget.deliveryId;
+    if (deliveryId == null) return;
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
       _showError('Please enter your name');
       return;
     }
-
     if (_signatureController.isEmpty) {
-      debugPrint('ERROR: Signature is empty');
       _showError('Please provide your signature');
       return;
     }
-
-    // Show pre-signoff dialog for optional notes
-    final shouldProceed = await _showPreSignoffDialog();
-    if (!shouldProceed) {
-      debugPrint('User cancelled sign-off');
+    final uid = ref.read(authRepositoryProvider).currentUser?.uid;
+    final worker = ref.read(evidenceUploadWorkerProvider).valueOrNull;
+    if (uid == null || worker == null) {
+      _showError('Saved signatures are unavailable. Try again.');
       return;
     }
-
-    setState(() {
-      _isUploading = true;
-    });
-
+    final repository = ref.read(baseSchoolsRepositoryProvider);
+    final checklist = ref.read(activeChecklistItemsProvider).valueOrNull;
+    setState(() => _isUploading = true);
     try {
-      debugPrint('Step 1: Capturing signature bytes...');
-      final signatureBytes = await _signatureController.toPngBytes();
-      if (signatureBytes == null) {
-        debugPrint('ERROR: Failed to capture signature bytes');
-        _showError('Failed to capture signature');
-        return;
-      }
-      debugPrint('Signature bytes captured: ${signatureBytes.length} bytes');
-
-      debugPrint('Step 2: Compressing image...');
-      final compressResult =
-          await ImageService.compressImageBytes(signatureBytes);
-      if (!compressResult.isSuccess) {
-        debugPrint(
-            'ERROR: Image compression failed: ${compressResult.errorOrNull}');
-        _showError(compressResult.errorOrNull!);
-        return;
-      }
-      debugPrint('Image compressed successfully');
-
-      debugPrint('Step 3: Uploading to storage...');
-      // Use simple 'current.png' path that was working before
-      final storagePath = 'schools/${widget.schoolId}/signoffs/current.png';
-      final storageRepository = ref.read(storageRepositoryProvider);
-      final uploadResult = await storageRepository.uploadImageBytes(
-          storagePath, compressResult.dataOrNull!);
-
-      if (!uploadResult.isSuccess) {
-        debugPrint('ERROR: Upload failed: ${uploadResult.errorOrNull}');
-        _showError(uploadResult.errorOrNull!);
-        return;
-      }
-      debugPrint('Upload successful: ${uploadResult.dataOrNull}');
-
-      debugPrint('Step 4: Creating SignOff object...');
-      final signOff = SignOff(
-        typedName: _nameController.text.trim(),
-        signatureURL: uploadResult.dataOrNull!,
-        createdAt: DateTime.now(),
-      );
-      debugPrint('SignOff object created');
-
-      debugPrint('Step 5: Saving sign-off to Firestore...');
-      final success = await ref
-          .read(schoolsNotifierProvider.notifier)
-          .createOrUpdateSignOff(widget.schoolId, signOff);
-      debugPrint('Sign-off save result: $success');
-
-      if (success) {
-        // Create the signed school summary document
-        debugPrint('Sign-off saved, now generating summary...');
-        final summarySuccess = await ref
-            .read(schoolsNotifierProvider.notifier)
-            .createSignedSchoolSummary(
-              widget.schoolId,
-              _nameController.text.trim(),
-              uploadResult.dataOrNull,
-            );
-
-        debugPrint('Summary generation result: $summarySuccess');
-
-        _nameController.clear();
-        _signatureController.clear();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(summarySuccess
-                  ? 'Sign-off completed and summary generated successfully'
-                  : 'Sign-off completed but summary generation failed'),
-              backgroundColor:
-                  summarySuccess ? BrandColors.kakaGreen : BrandColors.kakaBlue,
-              duration: const Duration(seconds: 4),
-            ),
+      var draft = ref.read(isOnlineProvider)
+          ? ref.read(_serverSigningDraftProvider(_scope)).asData?.value
+          : null;
+      if (draft == null) {
+        try {
+          draft = await repository.readSignOffDraft(
+            widget.schoolId,
+            server: false,
+            deliveryId: deliveryId,
           );
+        } catch (_) {
+          draft = SignOffSnapshot.incomplete(widget.schoolId);
         }
-      } else {
-        _showError('Failed to save sign-off');
       }
-    } catch (e) {
-      _showError('Unexpected error: $e');
+      final frozen = SignOffSnapshot(
+        sourceReadAt: draft.sourceReadAt,
+        serverReviewed: draft.serverReviewed && checklist != null,
+        summary: {
+          ...draft.summary,
+          'reviewChecklist': [
+            for (final item in checklist ?? <ChecklistItem>[])
+              {'id': item.id, 'title': item.title},
+          ],
+        },
+      );
+      if (!mounted || !await _reviewSnapshot(frozen, checklist ?? [])) return;
+      if (!mounted) return;
+      final signature = await _signatureController.toPngBytes();
+      if (signature == null) {
+        _showError('Could not capture the signature. Try again.');
+        return;
+      }
+      await worker.enqueueSignature(
+        id: const Uuid().v4(),
+        ownerUid: uid,
+        schoolId: widget.schoolId,
+        deliveryId: deliveryId,
+        bytes: signature,
+        payload: {'typedName': name, 'snapshot': frozen.toJson()},
+      );
+      if (!mounted) return;
+      _nameController.clear();
+      _signatureController.clear();
+      setState(() => _isCorrecting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Signature saved on this device')),
+      );
+    } catch (_) {
+      _showError('Could not save the signature. Your entry is still open.');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isUploading = false;
-        });
-      }
+      if (mounted) setState(() => _isUploading = false);
     }
   }
 
-  void _showEditDialog(SignOff signOff) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sign-off Actions'),
-        content: const Text('Choose an action for the current sign-off:'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+  Future<bool> _reviewSnapshot(
+      SignOffSnapshot draft, List<ChecklistItem> checklist) async {
+    final checked = <String>{};
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+            builder: (context, setState) => AlertDialog(
+              title: const Text('Review delivery details'),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (draft.serverReviewed)
+                      Text(
+                          'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
+                    else
+                      const Text(
+                        'Some delivery information is cached or unavailable. '
+                        'This signature will need another review after syncing.',
+                      ),
+                    if (draft.classrooms.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                          '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs recorded'),
+                      for (final row in draft.classrooms)
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          title: Text(
+                              '${row['yearLevel']} · ${row['classroomName']}'),
+                          subtitle: Text(row['expectedPacksUnavailable'] == true
+                              ? 'Expected pack count unavailable'
+                              : '${row['actualPacksDelivered'] ?? 'Unrecorded'} delivered of ${row['expectedPacks']} packs'),
+                          children: [
+                            for (final item
+                                in (row['consumables'] as Map).values)
+                              ListTile(
+                                dense: true,
+                                title: Text(item['itemName'] as String),
+                                subtitle: Text(
+                                  '${item['actualQuantityDelivered'] ?? 'Unrecorded'} '
+                                  'of ${item['expectedQuantity']} ${item['unit']}',
+                                ),
+                              ),
+                          ],
+                        ),
+                    ],
+                    for (final item in checklist)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: checked.contains(item.id),
+                        title: Text(item.title),
+                        subtitle:
+                            item.subtitle == null ? null : Text(item.subtitle!),
+                        onChanged: (value) => setState(() {
+                          if (value == true) {
+                            checked.add(item.id);
+                          } else {
+                            checked.remove(item.id);
+                          }
+                        }),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: checked.length == checklist.length
+                      ? () => Navigator.of(context).pop(true)
+                      : null,
+                  child: Text(draft.serverReviewed
+                      ? 'Save signature'
+                      : 'Save for review'),
+                ),
+              ],
+            ),
           ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _clearSignOff();
-            },
-            child: const Text('Clear Sign-off',
-                style: TextStyle(color: Colors.red)),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _nameController.text = signOff.typedName;
-              _signatureController.clear();
-            },
-            child: const Text('Create New'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _clearSignOff() async {
-    try {
-      debugPrint('=== CLEAR SIGN-OFF STARTED ===');
-
-      // Delete the sign-off document
-      debugPrint(
-          'Step 1: Deleting sign-off document from schools/${widget.schoolId}/meta/signoff');
-      await FirebaseFirestore.instance
-          .collection('schools')
-          .doc(widget.schoolId)
-          .collection('meta')
-          .doc('signoff')
-          .delete();
-      debugPrint('✓ Sign-off document deleted');
-
-      // Delete the signed school summary
-      debugPrint(
-          'Step 2: Deleting signed school summary from signed_school_summaries/${widget.schoolId}');
-      await FirebaseFirestore.instance
-          .collection('signed_school_summaries')
-          .doc(widget.schoolId)
-          .delete();
-      debugPrint('✓ Signed school summary deleted');
-
-      // Update the school document to remove sign-off status
-      debugPrint('Step 3: Updating school document to clear sign-off flags');
-      try {
-        await FirebaseFirestore.instance
-            .collection('schools')
-            .doc(widget.schoolId)
-            .update({
-          'isSignedOff': false,
-          'lastSignOffDate': FieldValue.delete(),
-          'signedBy': FieldValue.delete(),
-        });
-        debugPrint('✓ School document updated');
-      } catch (updateError) {
-        debugPrint(
-            'Warning: Could not update school document (this is optional): $updateError');
-        // Continue anyway - the important deletions are done
-      }
-
-      debugPrint('=== CLEAR SIGN-OFF COMPLETED SUCCESSFULLY ===');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sign-off cleared successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('✗ ERROR in _clearSignOff: $e');
-      debugPrint('Error type: ${e.runtimeType}');
-      _showError('Failed to clear sign-off: $e');
-    }
+        ) ??
+        false;
   }
 
   void _showError(String message) {
@@ -1535,7 +1655,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     }
   }
 
-  Future<void> _exportSummary() async {
+  Future<void> _exportSummary({SignedEvidence? evidence}) async {
     try {
       // Show loading indicator
       if (mounted) {
@@ -1560,17 +1680,31 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         );
       }
 
-      // Fetch the signed summary from Firestore
-      final schoolsRepository = ref.read(schoolsRepositoryProvider);
-      final result =
-          await schoolsRepository.getSignedSchoolSummary(widget.schoolId);
-
-      if (!result.isSuccess) {
-        _showError('Failed to fetch summary: ${result.errorOrNull}');
-        return;
+      final SignedSchoolSummary? summary;
+      if (evidence != null) {
+        if (!evidence.snapshot.serverReviewed) return;
+        final signatureUrl = await ref
+            .read(_signatureUrlProvider(evidence.signaturePath).future);
+        if (signatureUrl == null) {
+          _showError('Could not load the signature for export.');
+          return;
+        }
+        summary = evidence.snapshot.export(
+          evidenceId: evidence.id,
+          schoolId: evidence.schoolId,
+          typedName: evidence.typedName,
+          capturedAt: evidence.capturedAt,
+          signatureUrl: signatureUrl,
+        );
+      } else {
+        final repository = ref.read(baseSchoolsRepositoryProvider);
+        final result = await repository.getSignedSchoolSummary(widget.schoolId);
+        if (result.isFailure) {
+          _showError('Could not load the earlier signed summary.');
+          return;
+        }
+        summary = result.dataOrNull;
       }
-
-      final summary = result.dataOrNull;
       if (summary == null) {
         _showError('No signed summary found for this school');
         return;
@@ -1578,7 +1712,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
 
       // Export to Excel
       debugPrint('Exporting summary to Excel...');
-      final filePath = await ExcelExportService.exportSummaryToExcel(summary);
+      final filePath = await ExcelExportService.exportSummaryToExcel(
+        summary,
+        snapshotReadAt: evidence?.snapshot.sourceReadAt.toLocal(),
+        deliveryId: evidence?.deliveryId,
+      );
 
       if (filePath == null) {
         _showError('Failed to create Excel file');
@@ -1592,8 +1730,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         _showExportOptionsDialog(filePath, summary.schoolName);
       }
     } catch (e) {
-      debugPrint('Error exporting summary: $e');
-      _showError('Failed to export summary: $e');
+      _showError('Could not export the signed snapshot.');
     }
   }
 
@@ -1636,128 +1773,5 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         ],
       ),
     );
-  }
-
-  Future<bool> _showPreSignoffDialog() async {
-    // Get active checklist items from Firestore
-    final checklistItemsAsync =
-        await ref.read(activeChecklistItemsProvider.future);
-
-    // If no checklist items, proceed directly
-    if (checklistItemsAsync.isEmpty) {
-      return true;
-    }
-
-    // Track checked state for each item
-    final Map<String, bool> checkedItems = {};
-    for (var item in checklistItemsAsync) {
-      checkedItems[item.id] = false;
-    }
-
-    if (!mounted) return false;
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) {
-          // Check if all items are checked
-          final allChecked = checkedItems.values.every((checked) => checked);
-          final checkedCount =
-              checkedItems.values.where((checked) => checked).length;
-          final totalItems = checkedItems.length;
-
-          // Auto-close dialog when all items are checked
-          if (allChecked) {
-            // Use Future.delayed to avoid calling Navigator during build
-            Future.delayed(Duration.zero, () {
-              if (dialogContext.mounted) {
-                Navigator.of(dialogContext).pop(true);
-              }
-            });
-          }
-
-          return AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.checklist, color: BrandColors.kakaGreen),
-                SizedBox(width: 8),
-                Text('Pre-Signoff Checklist'),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Please confirm the following items before signing off:',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 16),
-                  // Dynamic checklist items
-                  ...checklistItemsAsync.map((item) {
-                    return CheckboxListTile(
-                      value: checkedItems[item.id] ?? false,
-                      onChanged: (value) {
-                        setState(() {
-                          checkedItems[item.id] = value ?? false;
-                        });
-                      },
-                      title: Text(
-                        item.title,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      subtitle: item.subtitle != null
-                          ? Text(
-                              item.subtitle!,
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.grey),
-                            )
-                          : null,
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                    );
-                  }),
-                  if (!allChecked) ...[
-                    const SizedBox(height: 12),
-                    LinearProgressIndicator(
-                      value: checkedCount / totalItems,
-                      backgroundColor: Colors.grey.shade300,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          BrandColors.kakaGreen),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$checkedCount of $totalItems items completed',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Cancel'),
-              ),
-              if (!allChecked)
-                TextButton(
-                  onPressed: null,
-                  child: Text(
-                    'Complete all items to continue',
-                    style: TextStyle(color: Colors.grey.shade400),
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
-    );
-
-    return result ?? false;
   }
 }

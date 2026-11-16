@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../models/staff.dart';
 import '../../models/calendar_metadata.dart';
+import '../../repositories/staff_repository.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../providers/staff_providers.dart';
 
@@ -34,20 +35,14 @@ class _CalendarManagementDialogState
   }
 
   Future<void> _loadSubscriptionUrl() async {
-    if (!widget.staff.hasCalendarToken) return;
-
-    try {
-      final repository = ref.read(staffRepositoryProvider);
-      final result = await repository.getCalendarHttpsUrl(widget.staff.id);
-
-      if (result.isSuccess && mounted) {
-        setState(() {
-          _subscriptionUrl = result.dataOrNull;
-        });
-      }
-    } catch (e) {
-      // Ignore errors, URL will be generated when needed
-    }
+    if (!widget.staff.isLinked) return;
+    final repository = ref.read(staffRepositoryProvider);
+    final result = await repository.getExistingCalendarHttpsUrl(widget.staff.id);
+    if (!mounted || _isLoading) return;
+    setState(() {
+      _subscriptionUrl = result.dataOrNull;
+      _errorMessage = result.errorOrNull;
+    });
   }
 
   Future<void> _generateToken() async {
@@ -68,8 +63,8 @@ class _CalendarManagementDialogState
         return;
       }
 
-      // Reload URL
-      await _loadSubscriptionUrl();
+      if (!mounted) return;
+      final url = calendarUrl(result.dataOrNull!);
 
       // Invalidate providers to refresh
       ref.invalidate(calendarMetadataProvider);
@@ -77,6 +72,7 @@ class _CalendarManagementDialogState
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _subscriptionUrl = url;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -177,8 +173,8 @@ class _CalendarManagementDialogState
         return;
       }
 
-      // Reload URL
-      await _loadSubscriptionUrl();
+      if (!mounted) return;
+      final url = calendarUrl(result.dataOrNull!);
 
       // Invalidate providers to refresh
       ref.invalidate(calendarMetadataProvider);
@@ -186,6 +182,7 @@ class _CalendarManagementDialogState
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _subscriptionUrl = url;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -310,13 +307,13 @@ class _CalendarManagementDialogState
                 const SizedBox(height: 24),
 
                 // Subscription URL
-                if (widget.staff.hasCalendarToken && _subscriptionUrl != null) ...[
+                if (_subscriptionUrl != null) ...[
                   _buildUrlSection(),
                   const SizedBox(height: 24),
                 ],
 
                 // Statistics
-                if (widget.staff.hasCalendarToken) _buildStatisticsSection(metadataAsync),
+                if (_subscriptionUrl != null) _buildStatisticsSection(metadataAsync),
               ],
             ],
           ),
@@ -329,9 +326,9 @@ class _CalendarManagementDialogState
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Close'),
               ),
-              if (!widget.staff.hasCalendarToken)
+              if (_subscriptionUrl == null)
                 FilledButton.icon(
-                  onPressed: _generateToken,
+                  onPressed: widget.staff.isLinked ? _generateToken : null,
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('Generate Link'),
                   style: FilledButton.styleFrom(
@@ -352,7 +349,7 @@ class _CalendarManagementDialogState
   }
 
   Widget _buildStatusSection(AsyncValue<CalendarMetadata?> metadataAsync) {
-    if (!widget.staff.hasCalendarToken) {
+    if (_subscriptionUrl == null) {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

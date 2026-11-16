@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/staff.dart';
 import '../providers/calendar_sync_providers.dart';
-import '../providers/staff_providers.dart';
 
 /// Dialog for subscribing to calendar via webcal:// URL
 class CalendarSubscriptionDialog extends ConsumerStatefulWidget {
@@ -42,54 +41,17 @@ class _CalendarSubscriptionDialogState
     try {
       final service = ref.read(calendarSubscriptionServiceProvider);
 
-      // Check if service is configured
-      if (!service.isConfigured()) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage =
-              'Calendar subscription is not yet configured. Please contact your administrator.';
-        });
-        return;
-      }
-
-      // DEBUG: Log initial staff state
-      debugPrint('[CalendarDialog] Initial staff ID: ${widget.staff.id}');
-      debugPrint('[CalendarDialog] Initial staff hasToken: ${widget.staff.hasCalendarToken}');
-      debugPrint('[CalendarDialog] Initial staff token: ${widget.staff.calendarToken ?? "null"}');
-
-      // Get subscription URL (this may generate a new token)
-      final urlResult = await service.getSubscriptionUrl(widget.staff);
-      if (urlResult.isFailure) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = urlResult.errorOrNull ?? 'Failed to generate URL';
-        });
-        return;
-      }
-
-      debugPrint('[CalendarDialog] URL result: ${urlResult.dataOrNull}');
-
-      // IMPORTANT: After token generation, refetch the staff from Firestore
-      // to get the latest token that was just saved
-      final repository = ref.read(staffRepositoryProvider);
-      final freshStaffResult = await repository.getStaffById(widget.staff.id);
-      final freshStaff = freshStaffResult.isSuccess
-          ? freshStaffResult.dataOrNull ?? widget.staff
-          : widget.staff;
-
-      debugPrint('[CalendarDialog] Fresh staff hasToken: ${freshStaff.hasCalendarToken}');
-      debugPrint('[CalendarDialog] Fresh staff token: ${freshStaff.calendarToken ?? "null"}');
-
-      // Get HTTPS URL using the fresh staff object with updated token
-      final httpsResult = await service.getHttpsUrl(freshStaff);
-      final httpsUrl = httpsResult.dataOrNull;
-
+      final result = await service.getSubscriptionUrl(widget.staff);
+      if (!mounted) return;
+      final url = result.dataOrNull;
       setState(() {
         _isLoading = false;
-        _subscriptionUrl = urlResult.dataOrNull;
-        _httpsUrl = httpsUrl;
+        _errorMessage = result.errorOrNull;
+        _subscriptionUrl = url;
+        _httpsUrl = url?.replaceFirst('webcals://', 'https://');
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'An error occurred: $e';
@@ -106,15 +68,8 @@ class _CalendarSubscriptionDialogState
     });
 
     try {
-      // Refetch staff to ensure we have the latest token
-      final repository = ref.read(staffRepositoryProvider);
-      final freshStaffResult = await repository.getStaffById(widget.staff.id);
-      final freshStaff = freshStaffResult.isSuccess
-          ? freshStaffResult.dataOrNull ?? widget.staff
-          : widget.staff;
-
       final service = ref.read(calendarSubscriptionServiceProvider);
-      final result = await service.openSubscriptionInCalendar(freshStaff);
+      final result = await service.openSubscriptionInCalendar(widget.staff);
 
       if (result.isFailure && mounted) {
         setState(() {
@@ -148,6 +103,7 @@ class _CalendarSubscriptionDialogState
         Navigator.of(context).pop();
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to open calendar: $e';
@@ -226,6 +182,7 @@ class _CalendarSubscriptionDialogState
         );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to regenerate token: $e';

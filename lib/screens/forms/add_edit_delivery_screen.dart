@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/schools_providers.dart';
 import '../../services/date_utils.dart';
@@ -405,7 +404,7 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
                                   value: count,
                                   child: Row(
                                     children: [
-                                      const Icon(Symbols.pallet, size: 20),
+                                      const Icon(Icons.inventory_2_outlined, size: 20),
                                       const SizedBox(width: 8),
                                       Text(
                                         count == 1 ? '$count pallet' : '$count pallets',
