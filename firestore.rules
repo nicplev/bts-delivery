@@ -1,0 +1,249 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getCurrentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isManager() {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+    }
+
+    function canManageDeliveries() {
+      return isAuthenticated() && (isAdmin() || isManager());
+    }
+    
+    function isAssignedToDelivery(deliveryData) {
+      return request.auth.uid in deliveryData.staffIds;
+    }
+
+    function getUserStaff() {
+      // Find staff document by querying for uid field
+      // Since we can't query in rules, we need to check if any staff doc matches
+      // For now, we'll allow access if user is authenticated and linked
+      // The app-level filtering handles the actual school assignments
+      return exists(/databases/$(database)/documents/staff/$(request.auth.uid));
+    }
+
+    function isAssignedToSchool(schoolId) {
+      // For staff, we can't easily query by uid in security rules
+      // So we rely on app-level filtering and allow read if authenticated
+      // Admins and managers bypass this anyway
+      return isAuthenticated();
+    }
+
+    function canAccessSchool(schoolId) {
+      // Admins and managers can access all schools
+      // Regular staff can only access assigned schools
+      return isAdmin() || isManager() || isAssignedToSchool(schoolId);
+    }
+
+    // Users collection - users can read and write their own document
+    // Admins can update any user document (for role sync)
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if false; // Only allow deletes through admin console
+    }
+
+    // Staff collection - only authenticated users can read
+    // Admins can create, update, and delete staff
+    // Users can link to their own staff document (update uid field only)
+    // Staff can update their own calendarToken (for regeneration)
+    match /staff/{staffId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update: if isAdmin() ||
+        (isAuthenticated() &&
+         (resource == null || resource.data.uid == null || resource.data.uid == request.auth.uid) &&
+         request.resource.data.uid == request.auth.uid) ||
+        (isAuthenticated() &&
+         resource.data.uid == request.auth.uid &&
+         request.resource.data.keys().hasOnly(['calendarToken']));
+      allow delete: if isAdmin();
+    }
+
+    // Schools collection - read access for all authenticated users
+    // App-level filtering handles school assignments
+    match /schools/{schoolId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin() || isManager();
+
+      // Year levels subcollection
+      match /yearLevels/{yearLevelId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin() || isManager();
+
+        // Classrooms subcollection
+        match /classrooms/{classroomId} {
+          allow read: if isAuthenticated();
+          allow write: if isAuthenticated();
+
+          // Photos subcollection
+          match /photos/{photoId} {
+            allow read: if isAuthenticated();
+            allow create: if isAuthenticated();
+            allow update: if isAuthenticated();
+            allow delete: if isAuthenticated() && (
+              isAdmin() ||
+              isManager() ||
+              // Staff can delete their own photos (if uploadedBy field exists and matches)
+              (('uploadedBy' in resource.data) && resource.data.uploadedBy == request.auth.uid)
+            );
+          }
+
+          // Pack totals subcollection
+          match /packTotals/{packTotalId} {
+            allow read: if isAuthenticated();
+            allow write: if isAuthenticated();
+          }
+
+          // Classroom consumables subcollection
+          match /consumables/{consumableId} {
+            allow read: if isAuthenticated();
+            allow write: if isAuthenticated();
+          }
+
+          // Classroom notes subcollection
+          match /notes/{noteId} {
+            allow read: if isAuthenticated();
+            allow write: if isAuthenticated();
+          }
+
+          // Year level breakdowns subcollection (for composite classes)
+          match /yearLevelBreakdowns/{breakdownId} {
+            allow read: if isAuthenticated();
+            allow write: if isAuthenticated();
+          }
+        }
+      }
+
+      // Consumables subcollection
+      match /consumables/{consumableId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin() || isManager();
+      }
+
+      // Meta collection for school-level data
+      match /meta/{document} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
+      }
+
+      // Contacts subcollection
+      match /contacts/{contactId} {
+        allow read: if isAuthenticated();
+        allow write: if isAdmin() || isManager();
+      }
+
+      // Maps subcollection
+      match /maps/{mapId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
+      }
+
+      // Notes subcollection
+      match /notes/{noteId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
+      }
+
+      // Signoffs subcollection
+      match /signoffs/{signoffId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
+      }
+
+      // Timers subcollection - for school delivery timing
+      // All authenticated users can read (to see the timer)
+      // Only managers/admins can write (to start/stop timers)
+      match /timers/{timerId} {
+        allow read: if isAuthenticated();
+        allow write: if canManageDeliveries();
+
+        // Timer history subcollection
+        // Only admins can create/update/delete history entries
+        match /history/{historyId} {
+          allow read: if isAuthenticated();
+          allow write: if isAdmin();
+        }
+      }
+    }
+
+    // Deliveries collection - read access for all authenticated users
+    // App-level filtering handles delivery visibility based on assignments
+    match /deliveries/{deliveryId} {
+      allow read: if isAuthenticated();
+      allow create: if canManageDeliveries();
+      allow update: if canManageDeliveries() || (
+        isAuthenticated() &&
+        request.auth.uid in resource.data.staffIds
+      );
+      allow delete: if canManageDeliveries();
+
+      // Pre-delivery checklist completions subcollection
+      // All authenticated users can read and write (to complete checklist items)
+      match /preDeliveryChecklist/{completionId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // Signed School Summaries collection
+    match /signed_school_summaries/{summaryId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    // Checklist items collection - for pre-signoff checklist
+    // All authenticated users can read (to see the checklist during signoff)
+    // Only admins can create, update, or delete checklist items
+    match /checklist_items/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Pre-delivery checklist items collection - for van loading checklist
+    // All authenticated users can read (to see the checklist when preparing deliveries)
+    // Only admins can create, update, or delete checklist items
+    match /pre_delivery_checklist_items/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Calendar metadata collection - tracks calendar subscription access
+    // Staff can read their own metadata
+    // Admins can delete any metadata, staff can delete their own (for token regeneration)
+    // Cloud Functions can create/update metadata (authenticated via service account)
+    match /calendar_metadata/{staffId} {
+      allow read: if isAuthenticated();
+      allow create, update: if false; // Only Cloud Functions can create/update
+      allow delete: if isAdmin() ||
+        (isAuthenticated() &&
+         exists(/databases/$(database)/documents/staff/$(staffId)) &&
+         get(/databases/$(database)/documents/staff/$(staffId)).data.uid == request.auth.uid);
+    }
+
+    // System metadata collection - tracks global system state like last calendar update
+    // All authenticated users can read
+    // Cloud Functions can write (authenticated via service account)
+    match /system_metadata/{documentId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Only Cloud Functions can write (service account)
+    }
+  }
+}

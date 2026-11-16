@@ -1,0 +1,34 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // School-related storage paths - simplified to allow all authenticated users
+    match /schools/{schoolId}/{allPaths=**} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Classroom photos
+    match /schools/{schoolId}/classrooms/{classroomId}/{fileName} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // School sign-offs
+    match /schools/{schoolId}/signoffs/{fileName} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // Maps and documents
+    match /schools/{schoolId}/maps/{fileName} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

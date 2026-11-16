@@ -1,0 +1,14 @@
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          explicit_to_json: true
+          field_rename: none
+          include_if_null: false
+      freezed:
+        options:
+          line_length: 120
+      hive_generator:
+        options:
+          auto_dispose: true
