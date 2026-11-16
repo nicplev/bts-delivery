@@ -30,13 +30,14 @@ const visits = [
   ["refresh-visit-1", "First visit — offline recovery checks"],
   ["refresh-visit-2", "Second visit — isolation checks"],
 ];
+const restoreMissingMedia = process.argv[2] === "--restore-missing-media";
 const createdAt = new Date();
 const today = new Date(createdAt);
 today.setHours(0, 0, 0, 0);
 
 function requireDemoEnvironment() {
-  if (process.argv.length !== 2) {
-    throw new Error("This seed accepts no arguments and only uses demo-bts-delivery.");
+  if (process.argv.length !== 2 && !(process.argv.length === 3 && restoreMissingMedia)) {
+    throw new Error("This seed only uses demo-bts-delivery. The only option is --restore-missing-media.");
   }
   for (const [name, port] of Object.entries(hosts)) {
     if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(process.env[name])) {
@@ -190,7 +191,7 @@ function classroomRows(root) {
 async function ensureStorageObject(path, contentType, bytes) {
   const encoded = encodeURIComponent(path);
   const existing = await request(`${storage}/${encoded}`);
-  if (existing.ok) return;
+  if (existing.ok) return false;
   if (existing.status !== 404) requireOk(existing, "Checking demo media");
 
   const boundary = "offline-demo-fixture-multipart";
@@ -215,6 +216,7 @@ async function ensureStorageObject(path, contentType, bytes) {
     ]),
   });
   requireOk(response, "Creating demo media");
+  return true;
 }
 
 function makeMapPdf() {
@@ -363,6 +365,27 @@ async function ensureVisit(deliveryId, notes, includePhoto) {
   ], includePhoto ? () => ensureStorageObject(`${photo}.jpg`, "image/jpeg", demoPhoto) : undefined);
 }
 
+async function restoreReferencedMedia() {
+  const schoolDoc = await getDocument(`schools/${schoolId}`);
+  const mapRef = schoolDoc?.fields?.schoolMapStoragePath?.stringValue ??
+    schoolDoc?.fields?.schoolMapUrl?.stringValue;
+  const photoDocPath =
+    `deliveries/${visits[0][0]}/workspace/${schoolId}/yearLevels/year-1/classrooms/room-a/photos/demo-photo`;
+  const photoDoc = await getDocument(photoDocPath);
+  const photoPath = `${photoDocPath}.jpg`;
+  let restored = 0;
+  if (mapRef === school.schoolMapUrl &&
+      await ensureStorageObject(mapRef, "application/pdf", makeMapPdf())) {
+    restored++;
+  }
+  if (photoDoc?.fields?.storagePath?.stringValue === photoPath &&
+      photoDoc?.fields?.uploadedBy?.stringValue === field.uid &&
+      await ensureStorageObject(photoPath, "image/jpeg", demoPhoto)) {
+    restored++;
+  }
+  console.log(`Restored ${restored} missing demo media files.`);
+}
+
 async function main() {
   requireDemoEnvironment();
   for (const account of fixtureAccounts) await ensureAccount(account);
@@ -374,6 +397,7 @@ async function main() {
     const created = await ensureVisit(deliveryId, notes, index === 0);
     console.log(`${deliveryId} ${created ? "prepared" : "preserved"}`);
   }
+  if (restoreMissingMedia) await restoreReferencedMedia();
 
   console.log("Synthetic demo credentials for newly seeded or unchanged accounts:");
   console.log(`  Staff  ${field.email}`);
