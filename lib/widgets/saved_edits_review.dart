@@ -10,6 +10,9 @@ import '../providers/saved_edit_providers.dart';
 import '../services/offline/saved_edit_recovery.dart';
 import 'design/design.dart';
 
+/// Compact notice above the tab bar for edits retained on this device: amber
+/// with "Review" when an edit needs a decision, neutral glass when work is
+/// only waiting.
 class SavedEditsBanner extends ConsumerWidget {
   const SavedEditsBanner({super.key});
 
@@ -18,58 +21,139 @@ class SavedEditsBanner extends ConsumerWidget {
     final uid = ref.watch(authStateProvider).valueOrNull?.uid;
     if (uid == null) return const SizedBox.shrink();
     final state = ref.watch(savedEditsProvider);
-    final count = state.valueOrNull
+    final edits = state.valueOrNull
             ?.where((entry) => entry.intent.ownerUid == uid)
-            .length ??
-        0;
+            .toList() ??
+        const <SavedEdit>[];
+    final count = edits.length;
     if (count == 0 && !state.hasError) return const SizedBox.shrink();
-    return MaterialBanner(
-      forceActionsBelow: MediaQuery.sizeOf(context).width < 375 ||
-          MediaQuery.textScalerOf(context).scale(17) > 21,
-      backgroundColor: state.hasError
-          ? AppTone.pink.tintFor(context)
-          : AppTone.blue.tintFor(context),
-      dividerColor: AppPalette.of(context).outline,
-      padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 6, 8),
-      leadingPadding: const EdgeInsetsDirectional.only(end: 8),
-      leading: AppIconTile(
-        icon: state.hasError ? Icons.info_outline : Icons.edit_note_outlined,
-        size: 32,
-        tone: state.hasError ? AppTone.pink : AppTone.blue,
-      ),
-      content: Text(state.hasError
-          ? 'Could not read saved edits on this device.'
-          : count == 1
-              ? '1 saved edit on this device'
-              : '$count saved edits on this device'),
-      actions: [
-        if (state.hasError)
-          TextButton(
-            onPressed: () => ref.invalidate(savedEditsProvider),
-            child: const Text('Try again'),
-          )
-        else
-          TextButton(
-            onPressed: () => _showSavedEdits(context, uid),
-            child: const Text('Review'),
-          ),
-      ],
+    final toReview = edits.where((edit) => _needsReview(edit.state)).length;
+    final warning = !state.hasError && toReview > 0;
+    final message = state.hasError
+        ? 'Could not read saved edits on this device.'
+        : toReview > 0
+            ? toReview == 1
+                ? '1 edit to review'
+                : '$toReview edits to review'
+            : count == 1
+                ? '1 saved edit on this device'
+                : '$count saved edits on this device';
+    return _CompactNotice(
+      warning: warning,
+      icon: state.hasError
+          ? AppIcons.error
+          : warning
+              ? AppIcons.warning
+              : AppIcons.savedOnDevice,
+      message: message,
+      action: state.hasError
+          ? AppSecondaryButton(
+              label: 'Try again',
+              expand: false,
+              large: false,
+              onPressed: () => ref.invalidate(savedEditsProvider),
+            )
+          : AppSecondaryButton(
+              label: 'Review',
+              expand: false,
+              large: false,
+              onPressed: () => _showSavedEdits(context, uid),
+            ),
     );
   }
 }
 
+/// The notice body: the action drops below the message on narrow screens or
+/// with large text.
+class _CompactNotice extends StatelessWidget {
+  const _CompactNotice({
+    required this.warning,
+    required this.icon,
+    required this.message,
+    required this.action,
+  });
+
+  final bool warning;
+  final IconData icon;
+  final String message;
+  final Widget action;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final ink = warning ? colors.warningInk : colors.ink;
+    final stacked = MediaQuery.sizeOf(context).width < 375 ||
+        MediaQuery.textScalerOf(context).scale(17) > 21;
+    final text = Text(
+      message,
+      style: AppTypography.subheadline
+          .copyWith(color: ink, fontWeight: FontWeight.w600),
+    );
+    final glyph = Icon(icon, size: 20, color: warning ? ink : colors.muted);
+    final Widget content = stacked
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 6, right: 8),
+                child: Row(
+                  children: [
+                    glyph,
+                    const SizedBox(width: 10),
+                    Expanded(child: text),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(alignment: AlignmentDirectional.centerEnd, child: action),
+            ],
+          )
+        : Row(
+            children: [
+              glyph,
+              const SizedBox(width: 10),
+              Expanded(child: text),
+              const SizedBox(width: 8),
+              action,
+            ],
+          );
+    const radius = BorderRadius.all(Radius.circular(26));
+    const padding = EdgeInsets.fromLTRB(14, 4, 4, 4);
+    final Widget shell = warning
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.warningTint,
+              borderRadius: radius,
+              boxShadow: colors.highContrast ? null : AppTokens.glassShadow,
+              border: colors.highContrast
+                  ? Border.all(color: colors.outline, width: 1.5)
+                  : null,
+            ),
+            child: Padding(padding: padding, child: content),
+          )
+        : AppGlass(borderRadius: radius, padding: padding, child: content);
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: AppTokens.minTouchTarget),
+        child: shell,
+      ),
+    );
+  }
+}
+
+bool _needsReview(SavedEditState state) =>
+    state == SavedEditState.review || state == SavedEditState.rejected;
+
 Future<void> _showSavedEdits(BuildContext context, String uid) async {
   final router = GoRouter.of(context);
-  final location = await showModalBottomSheet<String>(
+  final location = await showAppGlassSheet<String>(
     context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: true,
-    builder: (_) => FractionallySizedBox(
-      heightFactor: 0.8,
-      child: _SavedEditsList(ownerUid: uid),
-    ),
+    title: 'Saved edits',
+    contentPadding: EdgeInsets.zero,
+    builder: (_) => _SavedEditsList(ownerUid: uid),
   );
   if (location != null && context.mounted) router.push(location);
 }
@@ -79,103 +163,191 @@ class _SavedEditsList extends ConsumerWidget {
 
   final String ownerUid;
 
+  static const _padding = EdgeInsets.fromLTRB(
+      AppTokens.gutter, 0, AppTokens.gutter, AppTokens.sectionGap);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (ref.watch(authStateProvider).valueOrNull?.uid != ownerUid) {
-      return const Center(child: Text('The signed-in account changed.'));
+      return const Padding(
+        padding: _padding,
+        child: AppNotice(
+          message: 'The signed-in account changed.',
+          icon: AppIcons.person,
+        ),
+      );
     }
     final state = ref.watch(savedEditsProvider);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Padding(
-          padding:
-              EdgeInsets.symmetric(horizontal: AppTokens.gutter, vertical: 8),
-          child: AppSectionHeading(title: 'Saved edits'),
+    final colors = AppPalette.of(context);
+    return state.when(
+      loading: () => const Padding(
+        padding: _padding,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) => Padding(
+        padding: _padding,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const AppNotice(
+              message: 'Could not read saved edits on this device.',
+              icon: AppIcons.error,
+            ),
+            const SizedBox(height: 12),
+            AppSecondaryButton(
+              label: 'Try loading saved edits again',
+              icon: AppIcons.retry,
+              onPressed: () => ref.invalidate(savedEditsProvider),
+            ),
+          ],
         ),
-        Expanded(
-          child: state.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (_, __) => Center(
-              child: TextButton(
-                onPressed: () => ref.invalidate(savedEditsProvider),
-                child: const Text('Try loading saved edits again'),
+      ),
+      data: (entries) {
+        final edits = entries
+            .where((entry) => entry.intent.ownerUid == ownerUid)
+            .toList();
+        if (edits.isEmpty) {
+          return const Padding(
+            padding: _padding,
+            child: AppNotice(
+              message: 'No saved edits to review',
+              icon: AppIcons.completeOutline,
+            ),
+          );
+        }
+        return ListView(
+          shrinkWrap: true,
+          padding: _padding,
+          children: [
+            for (final edit in edits) ...[
+              _SavedEditCard(
+                key: ValueKey(edit.intent.id),
+                edit: edit,
+                onOpen: () => _openEdit(context, edit),
+              ),
+              const SizedBox(height: 12),
+            ],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                'Saved work stays on this device until the server confirms it.',
+                style: AppTypography.footnote.copyWith(color: colors.muted),
               ),
             ),
-            data: (entries) {
-              final edits = entries
-                  .where((entry) => entry.intent.ownerUid == ownerUid)
-                  .toList();
-              if (edits.isEmpty) {
-                return const Center(child: Text('No saved edits to review'));
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(AppTokens.gutter, 8,
-                    AppTokens.gutter, AppTokens.sectionGap),
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemCount: edits.length,
-                itemBuilder: (context, index) {
-                  final edit = edits[index];
-                  final date = DateFormat.MMMd()
-                      .add_jm()
-                      .format(edit.intent.capturedAt.toLocal());
-                  return AppPanel(
-                    key: ValueKey(edit.intent.id),
-                    padding: EdgeInsets.zero,
-                    child: ListTile(
-                      title: Text(edit.intent.itemLabel ?? edit.intent.title),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 6),
-                          AppStatusPill(
-                            label: _status(edit.state),
-                            tone: _tone(edit.state),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(date),
-                        ],
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () async {
-                        final location = await showDialog<String>(
-                          context: context,
-                          builder: (_) => _EditReviewDialog(edit: edit),
-                        );
-                        if (location != null &&
-                            context.mounted &&
-                            ModalRoute.of(context)?.isCurrent == true) {
-                          Navigator.of(context).pop(location);
-                        }
-                      },
-                    ),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
-  AppTone _tone(SavedEditState state) => switch (state) {
-        SavedEditState.rejected => AppTone.pink,
-        SavedEditState.review => AppTone.yellow,
-        SavedEditState.matched => AppTone.green,
-        SavedEditState.waiting || SavedEditState.queued => AppTone.blue,
-        _ => AppTone.neutral,
-      };
-
-  String _status(SavedEditState state) => switch (state) {
-        SavedEditState.waiting => 'Saved on this device',
-        SavedEditState.queued => 'Last seen in the Firestore queue',
-        SavedEditState.review => 'Check current values',
-        SavedEditState.rejected => 'Server rejected the save',
-        SavedEditState.matched => 'Server values matched at last check',
-        SavedEditState.acknowledged || SavedEditState.dismissed => 'Reviewed',
-      };
+  Future<void> _openEdit(BuildContext context, SavedEdit edit) async {
+    final location = await showDialog<String>(
+      context: context,
+      builder: (_) => _EditReviewDialog(edit: edit),
+    );
+    if (location != null &&
+        context.mounted &&
+        ModalRoute.of(context)?.isCurrent == true) {
+      Navigator.of(context).pop(location);
+    }
+  }
 }
+
+/// One saved edit: amber icon tile and heading when it needs a decision,
+/// neutral when it is only waiting.
+class _SavedEditCard extends StatelessWidget {
+  const _SavedEditCard({super.key, required this.edit, required this.onOpen});
+
+  final SavedEdit edit;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final intent = edit.intent;
+    final review = _needsReview(edit.state);
+    final icon = _kindIcon(intent.kind);
+    final date = DateFormat.MMMd().add_jm().format(intent.capturedAt.toLocal());
+    final status = _status(edit.state);
+    return AppPanel(
+      padding: const EdgeInsets.all(20),
+      onTap: onOpen,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              review
+                  ? AppIconTile.warning(icon: icon)
+                  : AppIconTile(icon: icon),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      review ? 'Edit to review' : status,
+                      style: AppTypography.footnote.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: review ? colors.warningInk : colors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      intent.itemLabel ?? intent.title,
+                      style: AppTypography.headline.copyWith(color: colors.ink),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      review ? '$status · $date' : date,
+                      style: AppTypography.subheadline
+                          .copyWith(color: colors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              if (!review) ...[
+                const SizedBox(width: 8),
+                ExcludeSemantics(
+                  child:
+                      Icon(AppIcons.chevron, size: 16, color: colors.chevron),
+                ),
+              ],
+            ],
+          ),
+          if (review) ...[
+            const SizedBox(height: 16),
+            AppSecondaryButton(label: 'Review change', onPressed: onOpen),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+IconData _kindIcon(SavedEditKind kind) => switch (kind) {
+      SavedEditKind.classroomName ||
+      SavedEditKind.classroomStatus =>
+        AppIcons.classroom,
+      SavedEditKind.noteCreate ||
+      SavedEditKind.noteContent ||
+      SavedEditKind.noteDelete =>
+        AppIcons.notes,
+      SavedEditKind.packTotal => AppIcons.packs,
+      SavedEditKind.consumableCount => AppIcons.consumables,
+      SavedEditKind.checklist => AppIcons.checklist,
+    };
+
+String _status(SavedEditState state) => switch (state) {
+      SavedEditState.waiting => 'Saved on this device',
+      SavedEditState.queued => 'Last seen in the Firestore queue',
+      SavedEditState.review => 'Check current values',
+      SavedEditState.rejected => 'Server rejected the save',
+      SavedEditState.matched => 'Server values matched at last check',
+      SavedEditState.acknowledged || SavedEditState.dismissed => 'Reviewed',
+    };
 
 class _EditReviewDialog extends ConsumerStatefulWidget {
   const _EditReviewDialog({required this.edit});
@@ -265,18 +437,35 @@ class _EditReviewDialogState extends ConsumerState<_EditReviewDialog> {
     }).join('\n');
   }
 
-  Widget _valuesPanel(String title, String values, AppTone tone) => AppPanel(
-        tone: tone,
+  /// Opaque grey value box; the heading carries the meaning, not colour.
+  Widget _valuesPanel(String title, String values) {
+    final colors = AppPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceQuiet,
+        borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+        border: colors.highContrast ? Border.all(color: colors.outline) : null,
+      ),
+      child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              title,
+              style: AppTypography.footnote
+                  .copyWith(fontWeight: FontWeight.w600, color: colors.muted),
+            ),
             const SizedBox(height: 4),
-            SelectableText(values),
+            SelectableText(
+              values,
+              style: AppTypography.body.copyWith(color: colors.ink),
+            ),
           ],
         ),
-      );
+      ),
+    );
+  }
 
   void _openLocation() {
     final classroom =
@@ -303,41 +492,65 @@ class _EditReviewDialogState extends ConsumerState<_EditReviewDialog> {
         ],
       );
     }
+    final colors = AppPalette.of(context);
     final comparison = _comparison;
     final current = comparison?.current;
+    final review = _needsReview(widget.edit.state);
+    final body = AppTypography.subheadline.copyWith(color: colors.ink);
     return AlertDialog(
-      title: Text(_intent.itemLabel ?? _intent.title),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            review ? 'Edit to review' : _status(widget.edit.state),
+            style: AppTypography.footnote.copyWith(
+              fontWeight: FontWeight.w600,
+              color: review ? colors.warningInk : colors.muted,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(_intent.itemLabel ?? _intent.title),
+        ],
+      ),
       scrollable: true,
       content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _valuesPanel(
             _intent.deletesDocument
                 ? 'Note selected for deletion'
                 : 'Your saved values',
             _display(_intent, _intent.values),
-            AppTone.blue,
           ),
           const SizedBox(height: 12),
           if (_busy) const LinearProgressIndicator(),
-          if (comparison != null) Text(comparison.message),
+          if (comparison != null) Text(comparison.message, style: body),
           if (current?.exists == true) ...[
             const SizedBox(height: 12),
-            _valuesPanel('Current server values',
-                _display(_intent, current!.fields), AppTone.neutral),
+            _valuesPanel(
+                'Current server values', _display(_intent, current!.fields)),
           ],
           if (comparison?.canRetry == true &&
               _intent.kind == SavedEditKind.packTotal) ...[
             const SizedBox(height: 12),
-            const Text(
-                'Retry saves this count at its original time. Any later count stays current.'),
+            Text(
+              'Retry saves this count at its original time. Any later count stays current.',
+              style: body,
+            ),
           ],
-          if (_error != null) ...[const SizedBox(height: 12), Text(_error!)],
-          const SizedBox(height: 8),
-          TextButton(
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            AppNotice(message: _error!, icon: AppIcons.error),
+          ],
+          const SizedBox(height: 12),
+          AppSecondaryButton(
+            label:
+                _intent.classroomId == null ? 'Open visit' : 'Open classroom',
+            icon: _intent.classroomId == null
+                ? AppIcons.school
+                : AppIcons.classroom,
+            large: false,
             onPressed: _busy ? null : _openLocation,
-            child: Text(
-                _intent.classroomId == null ? 'Open visit' : 'Open classroom'),
           ),
         ],
       ),

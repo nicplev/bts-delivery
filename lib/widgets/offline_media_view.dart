@@ -8,6 +8,7 @@ import '../models/offline/offline_media.dart';
 import '../models/delivery_visit.dart';
 import '../providers/offline_media_providers.dart';
 import '../services/offline/connectivity_service.dart';
+import 'design/design.dart';
 
 class OfflineMediaPreview extends ConsumerWidget {
   const OfflineMediaPreview({
@@ -29,14 +30,15 @@ class OfflineMediaPreview extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final uid = ref.watch(offlineMediaOwnerProvider(asset.schoolId));
     if (uid == null || (expectedUid != null && uid != expectedUid)) {
-      return const _MediaMessage('Media unavailable to this account');
+      return const _MediaMessage('Media unavailable to this account',
+          icon: AppIcons.lock);
     }
 
     final saved = asset.visit == null
         ? null
         : ref.watch(offlineMediaAssetStateProvider(asset));
     if (saved?.isLoading == true && saved?.hasValue == false) {
-      return const Center(child: CircularProgressIndicator());
+      return const _MediaLoading();
     }
     final path = saved?.valueOrNull?.localPath;
     if (path != null && File(path).existsSync()) {
@@ -49,28 +51,33 @@ class OfflineMediaPreview extends ConsumerWidget {
               fit: fit,
               errorBuilder: (_, __, ___) => const _MediaMessage(
                 'Saved file unavailable. Download it again.',
+                icon: AppIcons.error,
               ),
             ));
     }
 
     if (localOnly) {
-      return const _MediaMessage('Previously saved file is unavailable');
+      return const _MediaMessage('Previously saved file is unavailable',
+          icon: AppIcons.error);
     }
     if (!ref.watch(isOnlineProvider)) {
-      return const _MediaMessage('Download this file before going offline');
+      return const _MediaMessage('Download this file before going offline',
+          icon: AppIcons.offline);
     }
     final remote = ref.watch(onlineMediaUrlProvider((asset: asset, uid: uid)));
     return remote.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => const _MediaMessage('Could not open this file'),
+      loading: () => const _MediaLoading(),
+      error: (_, __) =>
+          const _MediaMessage('Could not open this file', icon: AppIcons.error),
       data: (url) => asset.isPdf
           ? SfPdfViewer.network(url, key: ValueKey((uid, url)))
           : _image(Image.network(
               url,
               key: ValueKey((uid, url)),
               fit: fit,
-              errorBuilder: (_, __, ___) =>
-                  const _MediaMessage('Could not open this image'),
+              errorBuilder: (_, __, ___) => const _MediaMessage(
+                  'Could not open this image',
+                  icon: AppIcons.error),
             )),
     );
   }
@@ -80,6 +87,9 @@ class OfflineMediaPreview extends ConsumerWidget {
       : image;
 }
 
+/// Full-screen viewer: media fills the screen beneath a glass back button and
+/// (for visit media) a glass download action; the title and download state
+/// sit in a glass caption at the bottom.
 class OfflineMediaScreen extends ConsumerWidget {
   const OfflineMediaScreen({
     super.key,
@@ -98,26 +108,54 @@ class OfflineMediaScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final canView =
         ref.watch(offlineMediaOwnerProvider(asset.schoolId)) == ownerUid;
+    final colors = AppPalette.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
+      extendBodyBehindAppBar: true,
+      backgroundColor: colors.canvas,
+      appBar: AppNavBar(
         actions: [
           if (canView && asset.visit != null && !localOnly)
             OfflineMediaDownloadButton(asset: asset),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Semantics(
+        label: title,
+        explicitChildNodes: true,
+        child: Stack(
           children: [
-            if (canView && asset.visit != null)
-              OfflineMediaDownloadStatus(asset: asset),
-            Expanded(
-              child: OfflineMediaPreview(
-                asset: asset,
-                expectedUid: ownerUid,
-                zoom: true,
-                localOnly: localOnly,
+            Positioned.fill(
+              child: Padding(
+                padding:
+                    EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+                child: OfflineMediaPreview(
+                  asset: asset,
+                  expectedUid: ownerUid,
+                  zoom: true,
+                  localOnly: localOnly,
+                ),
+              ),
+            ),
+            Positioned(
+              left: AppTokens.gutter,
+              right: AppTokens.gutter,
+              bottom: AppInsets.bottom(context, extra: 12),
+              child: AppGlass(
+                borderRadius: BorderRadius.circular(AppTokens.cardRadius),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Semantics(
+                      header: true,
+                      child: Text(title,
+                          style: AppTypography.headline
+                              .copyWith(color: colors.ink)),
+                    ),
+                    if (canView && asset.visit != null)
+                      OfflineMediaDownloadStatus(asset: asset),
+                  ],
+                ),
               ),
             ),
           ],
@@ -146,9 +184,11 @@ class OfflineEarlierMapButton extends ConsumerWidget {
     if (earlier == null || earlier.asset == currentMap) {
       return const SizedBox.shrink();
     }
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: AppSecondaryButton(
+        large: false,
+        icon: HeroiconsOutline.clock,
         onPressed: () => Navigator.of(context).push<void>(
           MaterialPageRoute(
             builder: (_) => OfflineMediaScreen(
@@ -159,10 +199,8 @@ class OfflineEarlierMapButton extends ConsumerWidget {
             ),
           ),
         ),
-        icon: const Icon(Icons.history),
-        label: Text(
-          'Open previously saved map\nChecked ${_checkedAt(context, earlier.checkedAt)}',
-        ),
+        label:
+            'Open previously saved map\nChecked ${_checkedAt(context, earlier.checkedAt)}',
       ),
     );
   }
@@ -176,6 +214,9 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
   });
 
   final OfflineMediaAsset asset;
+
+  /// A 44 pt round glass icon button (over media / in the nav area); `false`
+  /// gives a labelled grey capsule.
   final bool compact;
 
   @override
@@ -189,11 +230,20 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
         phase == OfflineMediaPhase.downloading;
     final ready = phase == OfflineMediaPhase.ready;
     if (ready && asset.kind == OfflineMediaKind.photo) {
-      return const Tooltip(
+      final colors = AppPalette.of(context);
+      return Tooltip(
         message: 'Saved for offline',
-        child: Padding(
-          padding: EdgeInsets.all(8),
-          child: Icon(Icons.offline_pin_outlined),
+        child: Semantics(
+          label: 'Saved for offline',
+          image: true,
+          child: SizedBox.square(
+            dimension: AppTokens.minTouchTarget,
+            child: AppGlass(
+              child: Center(
+                child: Icon(AppIcons.complete, size: 20, color: colors.ink),
+              ),
+            ),
+          ),
         ),
       );
     }
@@ -208,7 +258,11 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
                     phase == OfflineMediaPhase.stale
                 ? 'Retry download'
                 : 'Download for offline';
-    final icon = pending ? Icons.close : Icons.download_outlined;
+    final icon = pending
+        ? AppIcons.close
+        : ready
+            ? AppIcons.retry
+            : AppIcons.download;
     Future<void> perform() async {
       try {
         if (pending) {
@@ -225,15 +279,19 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
     }
 
     return compact
-        ? IconButton(
-            tooltip: action,
-            onPressed: cache == null ? null : perform,
-            icon: Icon(icon),
+        ? Tooltip(
+            message: action,
+            child: AppGlassIconButton(
+              icon: icon,
+              semanticLabel: action,
+              onPressed: cache == null ? null : perform,
+            ),
           )
-        : OutlinedButton.icon(
+        : AppSecondaryButton(
             onPressed: cache == null ? null : perform,
-            icon: Icon(icon),
-            label: Text(action),
+            icon: icon,
+            label: action,
+            large: false,
           );
   }
 }
@@ -253,8 +311,11 @@ class OfflineMediaDownloadStatus extends ConsumerWidget {
     if (state == null) {
       return value.hasError
           ? const Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('Offline downloads unavailable'),
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: AppStatusLine(
+                text: 'Offline downloads unavailable',
+                icon: AppIcons.error,
+              ),
             )
           : const SizedBox.shrink();
     }
@@ -286,33 +347,96 @@ class OfflineMediaDownloadStatus extends ConsumerWidget {
         },
     };
     if (label == null && savedMap == null) return const SizedBox.shrink();
+    final needsDownload = switch (state.phase) {
+      OfflineMediaPhase.missing ||
+      OfflineMediaPhase.stale ||
+      OfflineMediaPhase.interrupted ||
+      OfflineMediaPhase.failed =>
+        true,
+      _ => false,
+    };
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (savedMap != null) Text(savedMap),
-          if (label != null) Text(label),
-          if (state.phase == OfflineMediaPhase.downloading)
-            LinearProgressIndicator(value: state.progress),
+          if (savedMap != null)
+            AppStatusLine(text: savedMap, icon: AppIcons.savedOnDevice),
+          if (label != null) ...[
+            if (savedMap != null) const SizedBox(height: 4),
+            if (needsDownload)
+              AppNotice.warning(message: label)
+            else
+              AppStatusLine(
+                text: label,
+                icon: state.phase == OfflineMediaPhase.ready
+                    ? AppIcons.complete
+                    : AppIcons.download,
+              ),
+          ],
+          if (state.phase == OfflineMediaPhase.downloading) ...[
+            const SizedBox(height: 8),
+            AppProgressBar(
+              value: state.progress ?? 0,
+              semanticLabel: 'Download progress',
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _MediaMessage extends StatelessWidget {
-  const _MediaMessage(this.text);
-
-  final String text;
+class _MediaLoading extends StatelessWidget {
+  const _MediaLoading();
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text(text, textAlign: TextAlign.center),
+        child: Semantics(
+          label: 'Loading media',
+          child: const CircularProgressIndicator(),
         ),
       );
+}
+
+/// Neutral placeholder for media that cannot be shown: grey tile, ink glyph,
+/// muted message.
+class _MediaMessage extends StatelessWidget {
+  const _MediaMessage(this.text, {this.icon = AppIcons.gallery});
+
+  final String text;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return LayoutBuilder(builder: (context, constraints) {
+      final roomy = constraints.maxHeight >= 120 && constraints.maxWidth >= 140;
+      return ColoredBox(
+        color: colors.surfaceQuiet,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (roomy) ...[
+                  ExcludeSemantics(child: AppIconTile(icon: icon, size: 48)),
+                  const SizedBox(height: 8),
+                ],
+                Text(
+                  text,
+                  textAlign: TextAlign.center,
+                  style: AppTypography.footnote.copyWith(color: colors.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    });
+  }
 }
 
 String _checkedAt(BuildContext context, DateTime date) {

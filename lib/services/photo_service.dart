@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../repositories/storage_repository.dart';
 import '../services/result.dart';
+import '../widgets/design/design.dart';
 
 class PhotoService {
   final ImagePicker _picker = ImagePicker();
@@ -13,32 +14,53 @@ class PhotoService {
 
   PhotoService(this._storageRepository);
 
-  /// Shows a dialog to choose between camera and gallery
-  Future<File?> pickImage(BuildContext context) async {
-    final source = await showModalBottomSheet<ImageSource>(
+  /// Glass source picker over the tab bar (root navigator): one card of
+  /// icon rows and a Cancel capsule. Returns null when dismissed.
+  Future<T?> _choose<T>(
+    BuildContext context, {
+    required String title,
+    required List<(T, IconData, String)> options,
+  }) {
+    return showAppGlassSheet<T>(
       context: context,
-      builder: (context) => SafeArea(
+      title: title,
+      builder: (sheetContext) => SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(context, ImageSource.camera),
+            AppGroupedList(
+              separatorIndent: 57,
+              children: [
+                for (final (value, icon, label) in options)
+                  AppListRow(
+                    icon: icon,
+                    title: label,
+                    showChevron: false,
+                    onTap: () => Navigator.pop(sheetContext, value),
+                  ),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Choose from Gallery'),
-              onTap: () => Navigator.pop(context, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.cancel),
-              title: const Text('Cancel'),
-              onTap: () => Navigator.pop(context),
+            const SizedBox(height: 12),
+            AppSecondaryButton(
+              label: 'Cancel',
+              onPressed: () => Navigator.pop(sheetContext),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Shows a dialog to choose between camera and gallery
+  Future<File?> pickImage(BuildContext context) async {
+    final source = await _choose<ImageSource>(
+      context,
+      title: 'Add photo',
+      options: const [
+        (ImageSource.camera, AppIcons.photos, 'Take photo'),
+        (ImageSource.gallery, AppIcons.gallery, 'Choose from gallery'),
+      ],
     );
 
     if (source == null) return null;
@@ -192,35 +214,14 @@ class PhotoService {
   /// Pick a file (image or PDF) for school map
   /// Shows options: Take Photo, Choose from Gallery, Choose File
   Future<File?> pickSchoolMapFile(BuildContext context) async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(context, 'camera'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Choose from Gallery'),
-              onTap: () => Navigator.pop(context, 'gallery'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.file_present),
-              title: const Text('Choose File (PDF/Image)'),
-              onTap: () => Navigator.pop(context, 'file'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.cancel),
-              title: const Text('Cancel'),
-              onTap: () => Navigator.pop(context),
-            ),
-          ],
-        ),
-      ),
+    final choice = await _choose<String>(
+      context,
+      title: 'Add school map',
+      options: const [
+        ('camera', AppIcons.photos, 'Take photo'),
+        ('gallery', AppIcons.gallery, 'Choose from gallery'),
+        ('file', AppIcons.document, 'Choose file (PDF or image)'),
+      ],
     );
 
     if (choice == null) return null;
@@ -228,7 +229,8 @@ class PhotoService {
     try {
       if (choice == 'camera' || choice == 'gallery') {
         // Use image picker for camera/gallery
-        final source = choice == 'camera' ? ImageSource.camera : ImageSource.gallery;
+        final source =
+            choice == 'camera' ? ImageSource.camera : ImageSource.gallery;
 
         // Request permission
         final hasPermission = await _requestPermission(source);
