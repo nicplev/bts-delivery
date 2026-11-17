@@ -6,6 +6,9 @@ import '../services/offline/connectivity_service.dart';
 import 'sync_status_detail_sheet.dart';
 import 'design/design.dart';
 
+/// Neutral glass status capsule for the nav area: "Offline", evidence waiting
+/// on this device, uploads in progress or needing review. Tapping it opens the
+/// evidence upload sheet. Hidden when there is nothing to report.
 class ConnectivityIndicator extends ConsumerWidget {
   const ConnectivityIndicator({super.key});
 
@@ -35,27 +38,44 @@ class ConnectivityIndicator extends ConsumerWidget {
       if (needsReview + legacy > 0) '${needsReview + legacy} need review',
     ].join(' · ');
 
-    final tone = hasError || needsReview + legacy > 0 || isOffline
-        ? AppTone.yellow
-        : AppTone.blue;
+    final icon = hasError || needsReview + legacy > 0
+        ? AppIcons.warningOutline
+        : isOffline
+            ? AppIcons.offline
+            : active
+                ? AppIcons.upload
+                : AppIcons.savedOnDevice;
+    final colors = AppPalette.of(context);
     return Center(
-      child: TextButton.icon(
-        style: TextButton.styleFrom(
-          foregroundColor: tone.inkFor(context),
-          backgroundColor: tone.tintFor(context),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          shape: const StadiumBorder(),
+      child: Semantics(
+        liveRegion: true,
+        child: AppPressable(
+          onTap: () => SyncStatusDetailSheet.show(context),
+          semanticLabel: '$label. Show evidence uploads',
+          excludeChildSemantics: true,
+          child: ConstrainedBox(
+            constraints:
+                const BoxConstraints(minHeight: AppTokens.minTouchTarget),
+            child: AppGlass(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: colors.ink),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: AppTypography.subheadline.copyWith(
+                          fontWeight: FontWeight.w600, color: colors.ink),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        onPressed: () => SyncStatusDetailSheet.show(context),
-        icon: Icon(
-          hasError || needsReview + legacy > 0
-              ? Icons.warning_amber_rounded
-              : isOffline
-                  ? Icons.cloud_off
-                  : Icons.cloud_upload_outlined,
-          size: 18,
-        ),
-        label: Text(label, textAlign: TextAlign.center),
       ),
     );
   }

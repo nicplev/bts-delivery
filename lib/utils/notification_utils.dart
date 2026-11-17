@@ -2,27 +2,46 @@ import 'package:flutter/material.dart';
 
 import '../app/theme/app_tokens.dart';
 
+/// Floating snackbars: neutral ink surface for information and success, the
+/// pale amber tint for warnings, the error container for errors.
 class NotificationUtils {
   /// Show a toast-style notification (SnackBar)
   static void showToast(
     BuildContext context,
     String message, {
     bool isError = false,
+    bool isWarning = false,
     Duration duration = const Duration(seconds: 3),
   }) {
     final messenger = ScaffoldMessenger.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final foreground =
-        isError ? scheme.onErrorContainer : AppTone.yellow.inkFor(context);
+    final colors = AppPalette.of(context);
+    // Null keeps the theme's neutral ink snackbar.
+    final Color? foreground = isError
+        ? colors.error
+        : isWarning
+            ? colors.warningInk
+            : null;
+    final Color? background = isError
+        ? colors.errorContainer
+        : isWarning
+            ? colors.warningTint
+            : null;
 
     // Clear any existing snackbars
     messenger.clearSnackBars();
 
     messenger.showSnackBar(
       SnackBar(
-        content: Text(message, style: TextStyle(color: foreground)),
-        backgroundColor:
-            isError ? scheme.errorContainer : AppTone.yellow.tintFor(context),
+        content: Text(
+          message,
+          style: foreground == null
+              ? null
+              : TextStyle(
+                  color: foreground,
+                  fontWeight: isWarning ? FontWeight.w600 : null,
+                ),
+        ),
+        backgroundColor: background,
         duration: duration,
         behavior: SnackBarBehavior.floating,
         action: SnackBarAction(
@@ -41,7 +60,7 @@ class NotificationUtils {
     showToast(
       context,
       'Sign-off cleared due to data changes',
-      isError: false,
+      isWarning: true,
       duration: const Duration(seconds: 4),
     );
   }
@@ -53,9 +72,7 @@ class NotificationUtils {
 
     messenger.showSnackBar(
       SnackBar(
-        content: Text(message,
-            style: TextStyle(color: AppTone.green.inkFor(context))),
-        backgroundColor: AppTone.green.tintFor(context),
+        content: Text(message),
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
       ),
