@@ -3,7 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/pre_delivery_checklist_item.dart';
 import '../../providers/pre_delivery_checklist_providers.dart';
 import '../../providers/auth_providers.dart';
+import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
+import 'admin_page.dart';
+import 'checklist_admin_list.dart';
 
 class PreDeliveryChecklistManagementScreen extends ConsumerStatefulWidget {
   const PreDeliveryChecklistManagementScreen({super.key});
@@ -24,178 +27,75 @@ class _PreDeliveryChecklistManagementScreenState
     final isAdmin = ref.watch(isAdminProvider);
 
     if (!isAdmin) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Access Denied')),
-        body: const Center(
-          child: Text('Admin access required'),
-        ),
+      return const AdminPage(
+        title: 'Access denied',
+        children: [
+          DeliveryMessage(
+            icon: AppIcons.lock,
+            title: 'Admin access required',
+          ),
+        ],
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pre-Delivery Checklist'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showAddItemDialog(),
-            tooltip: 'Add Item',
+    const title = 'Pre-delivery checklist';
+    final action = AppGlassPrimaryButton(
+      label: 'Add item',
+      icon: AppIcons.add,
+      onPressed: _showAddItemDialog,
+    );
+
+    return checklistAsync.when(
+      loading: () => AdminPage(
+        title: title,
+        action: action,
+        children: const [AdminLoading()],
+      ),
+      error: (error, _) => AdminPage(
+        title: title,
+        action: action,
+        children: [
+          DeliveryMessage(
+            icon: AppIcons.error,
+            title: 'Error: $error',
+            action: AppSecondaryButton(
+              label: 'Retry',
+              icon: AppIcons.retry,
+              onPressed: () => ref.refresh(preDeliveryChecklistItemsProvider),
+            ),
           ),
         ],
       ),
-      body: checklistAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Error: $error'),
-              ElevatedButton(
-                onPressed: () => ref.refresh(preDeliveryChecklistItemsProvider),
-                child: const Text('Retry'),
+      data: (items) => AdminPage(
+        title: title,
+        action: action,
+        slivers: [
+          if (items.isEmpty)
+            const SliverToBoxAdapter(
+              child: DeliveryMessage(
+                icon: AppIcons.records,
+                title: 'No checklist items',
+                description: 'Add items for staff to check before deliveries',
               ),
-            ],
-          ),
-        ),
-        data: (items) {
-          if (items.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const AppIconTile(
-                      icon: Icons.checklist_rtl,
-                      tone: AppTone.neutral,
-                      size: 52),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No checklist items',
-                    textAlign: TextAlign.center,
+            )
+          else
+            ChecklistAdminList(
+              entries: [
+                for (final item in items)
+                  (
+                    id: item.id,
+                    title: item.title,
+                    subtitle: item.subtitle,
+                    isActive: item.isActive,
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Add items for staff to check before deliveries',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () => _showAddItemDialog(),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add First Item'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          return ReorderableListView.builder(
-            padding: EdgeInsets.fromLTRB(AppTokens.gutter, 10, AppTokens.gutter,
-                MediaQuery.paddingOf(context).bottom + AppTokens.sectionGap),
-            itemCount: items.length,
-            onReorder: (oldIndex, newIndex) =>
-                _reorderItems(items, oldIndex, newIndex),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return AppPanel(
-                key: ValueKey(item.id),
-                padding: EdgeInsets.zero,
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: ReorderableDragStartListener(
-                    index: index,
-                    child: Semantics(
-                      label: 'Reorder item',
-                      child: const SizedBox.square(
-                        dimension: 44,
-                        child: Center(
-                          child: AppIconTile(
-                            icon: Icons.drag_handle,
-                            tone: AppTone.neutral,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  title: Text(item.title),
-                  subtitle: item.subtitle != null || !item.isActive
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (item.subtitle != null) Text(item.subtitle!),
-                            if (!item.isActive)
-                              const Padding(
-                                padding: EdgeInsets.only(top: 6),
-                                child: AppStatusPill(
-                                  label: 'Disabled',
-                                  icon: Icons.pause_circle_outline,
-                                ),
-                              ),
-                          ],
-                        )
-                      : null,
-                  trailing: PopupMenuButton<String>(
-                    tooltip: 'Checklist item actions',
-                    onSelected: (value) {
-                      switch (value) {
-                        case 'edit':
-                          _showEditItemDialog(item);
-                          break;
-                        case 'toggle':
-                          _toggleItemStatus(item);
-                          break;
-                        case 'delete':
-                          _showDeleteConfirmation(item);
-                          break;
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit, size: 20),
-                            SizedBox(width: 12),
-                            Text('Edit'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'toggle',
-                        child: Row(
-                          children: [
-                            Icon(
-                              item.isActive
-                                  ? Icons.toggle_off
-                                  : Icons.toggle_on,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(item.isActive ? 'Disable' : 'Enable'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete,
-                                size: 20,
-                                color: Theme.of(context).colorScheme.error),
-                            const SizedBox(width: 12),
-                            Text('Delete',
-                                style: TextStyle(
-                                    color:
-                                        Theme.of(context).colorScheme.error)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
+              ],
+              onReorder: (oldIndex, newIndex) =>
+                  _reorderItems(items, oldIndex, newIndex),
+              onEdit: (index) => _showEditItemDialog(items[index]),
+              onToggle: (index) => _toggleItemStatus(items[index]),
+              onDelete: (index) => _showDeleteConfirmation(items[index]),
+            ),
+        ],
       ),
     );
   }
@@ -209,7 +109,7 @@ class _PreDeliveryChecklistManagementScreenState
       context: context,
       builder: (dialogContext) => AlertDialog(
         scrollable: true,
-        title: const Text('Add Checklist Item'),
+        title: const Text('Add checklist item'),
         content: Form(
           key: formKey,
           child: Column(
@@ -287,7 +187,7 @@ class _PreDeliveryChecklistManagementScreenState
       context: context,
       builder: (dialogContext) => AlertDialog(
         scrollable: true,
-        title: const Text('Edit Checklist Item'),
+        title: const Text('Edit checklist item'),
         content: Form(
           key: formKey,
           child: Column(
@@ -371,7 +271,7 @@ class _PreDeliveryChecklistManagementScreenState
       context: context,
       builder: (dialogContext) => AlertDialog(
         scrollable: true,
-        title: const Text('Delete Item'),
+        title: const Text('Delete item'),
         content: Text('Are you sure you want to delete "${item.title}"?'),
         actions: [
           TextButton(
@@ -379,9 +279,7 @@ class _PreDeliveryChecklistManagementScreenState
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-                foregroundColor: Theme.of(context).colorScheme.onError),
+            style: adminDestructiveStyle(context),
             onPressed: () async {
               Navigator.of(dialogContext).pop();
 

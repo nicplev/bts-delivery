@@ -33,80 +33,102 @@ class _StaffLinkScreenState extends ConsumerState<StaffLinkScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(authNotifierProvider);
     final staff = ref.watch(currentStaffProvider);
-    final text = Theme.of(context).textTheme;
+    final colors = AppPalette.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Staff account'),
-        actions: [
-          TextButton(
-            onPressed: state.isLoading
-                ? null
-                : ref.read(authNotifierProvider.notifier).signOut,
-            child: const Text('Sign out'),
-          ),
-        ],
-      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppTokens.gutter),
+            padding: const EdgeInsets.fromLTRB(
+                AppTokens.gutter, 24, AppTokens.gutter, 24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 440),
-              child: AppPanel(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: AppIconTile(
-                          icon: Icons.badge_outlined,
-                          tone: AppTone.green,
-                          size: 54),
-                    ),
-                    const SizedBox(height: 16),
-                    Text('Link your staff account', style: text.headlineSmall),
-                    const SizedBox(height: 8),
-                    const Text(
-                        'Enter the invitation code from your administrator.'),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _code,
-                      decoration: const InputDecoration(
-                        labelText: 'Invitation code',
-                        prefixIcon: Icon(Icons.key_outlined),
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'[a-zA-Z0-9_.-]')),
-                      ],
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      onSubmitted: (_) => _submit(),
-                    ),
-                    if (state.hasError || staff.hasError) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        state.hasError
-                            ? state.error.toString()
-                            : 'Unable to check your account link.',
-                        style: text.bodySmall
-                            ?.copyWith(color: AppTone.pink.inkFor(context)),
-                      ),
-                      if (staff.hasError)
-                        TextButton(
-                          onPressed: () => ref.invalidate(currentStaffProvider),
-                          child: const Text('Check link again'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const AppLargeTitle(
+                    title: 'Staff account',
+                    subtitle:
+                        'Enter the invitation code from your administrator.',
+                  ),
+                  const SizedBox(height: AppTokens.sectionGap),
+                  AppPanel(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const AppIconTile(icon: HeroiconsOutline.key),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Semantics(
+                                header: true,
+                                child: Text(
+                                  'Link your staff account',
+                                  style: AppTypography.headline
+                                      .copyWith(color: colors.ink),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                    ],
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: state.isLoading ? null : _submit,
-                      child:
-                          Text(state.isLoading ? 'Linking…' : 'Link account'),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _code,
+                          decoration: const InputDecoration(
+                            labelText: 'Invitation code',
+                            prefixIcon: Icon(HeroiconsOutline.key, size: 20),
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'[a-zA-Z0-9_.-]')),
+                          ],
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          autofillHints: const [AutofillHints.oneTimeCode],
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) => _submit(),
+                        ),
+                        if (state.hasError || staff.hasError) ...[
+                          const SizedBox(height: 12),
+                          Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              state.hasError
+                                  ? state.error.toString()
+                                  : 'Unable to check your account link.',
+                              style: AppTypography.subheadline
+                                  .copyWith(color: colors.error),
+                            ),
+                          ),
+                          if (staff.hasError) ...[
+                            const SizedBox(height: 8),
+                            AppSecondaryButton(
+                              label: 'Check link again',
+                              icon: AppIcons.retry,
+                              large: false,
+                              onPressed: () =>
+                                  ref.invalidate(currentStaffProvider),
+                            ),
+                          ],
+                        ],
+                        const SizedBox(height: 16),
+                        AppPrimaryButton(
+                          label: state.isLoading ? 'Linking…' : 'Link account',
+                          onPressed: state.isLoading ? null : _submit,
+                        ),
+                        const SizedBox(height: 12),
+                        AppSecondaryButton(
+                          label: 'Sign out',
+                          icon: AppIcons.logout,
+                          onPressed: state.isLoading
+                              ? null
+                              : ref.read(authNotifierProvider.notifier).signOut,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

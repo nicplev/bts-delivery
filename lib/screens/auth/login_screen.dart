@@ -63,168 +63,191 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final authState = ref.watch(authNotifierProvider);
     final isLoading = authState.isLoading;
+    final colors = AppPalette.of(context);
 
-    final text = Theme.of(context).textTheme;
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppTokens.gutter),
+            padding: const EdgeInsets.fromLTRB(
+                AppTokens.gutter, 24, AppTokens.gutter, 24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 440),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const AppIconTile(
-                    icon: Icons.local_shipping_outlined,
-                    size: 62,
-                  ),
-                  const SizedBox(height: 14),
-                  Text('BTS Delivery', style: text.displaySmall),
-                  const SizedBox(height: 6),
-                  Text(
-                    _isSignUp
+                  AppLargeTitle(
+                    title: 'BTS Delivery',
+                    subtitle: _isSignUp
                         ? 'Create your delivery account'
                         : 'Sign in to manage school deliveries',
-                    style: text.bodySmall,
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: AppTokens.sectionGap),
                   AppPanel(
                     padding: const EdgeInsets.all(20),
                     child: Form(
                       key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          TextFormField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                              prefixIcon: Icon(Icons.mail_outline_rounded),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your email';
-                              }
-                              if (!RegExp(r'^[^@]+@[^@]+\.[^@]+')
-                                  .hasMatch(value)) {
-                                return 'Please enter a valid email address';
-                              }
-                              return null;
-                            },
-                            enabled: !isLoading,
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _passwordController,
-                            obscureText: _obscurePassword,
-                            textInputAction: _isSignUp
-                                ? TextInputAction.next
-                                : TextInputAction.done,
-                            decoration: InputDecoration(
-                              labelText: 'Password',
-                              prefixIcon:
-                                  const Icon(Icons.lock_outline_rounded),
-                              suffixIcon: IconButton(
-                                icon: Icon(_obscurePassword
-                                    ? Icons.visibility
-                                    : Icons.visibility_off),
-                                tooltip: _obscurePassword
-                                    ? 'Show password'
-                                    : 'Hide password',
-                                onPressed: () {
-                                  setState(() {
-                                    _obscurePassword = !_obscurePassword;
-                                  });
-                                },
-                              ),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your password';
-                              }
-                              if (_isSignUp && value.length < 6) {
-                                return 'Password must be at least 6 characters';
-                              }
-                              return null;
-                            },
-                            onFieldSubmitted: (_) =>
-                                _isSignUp ? null : _handleAuth(),
-                            enabled: !isLoading,
-                          ),
-
-                          // Verification Code (only for sign up)
-                          if (_isSignUp) ...[
-                            const SizedBox(height: 16),
+                      child: AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
                             TextFormField(
-                              controller: _verificationCodeController,
-                              textInputAction: TextInputAction.done,
-                              textCapitalization: TextCapitalization.characters,
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [
+                                AutofillHints.email,
+                                AutofillHints.username,
+                              ],
+                              autocorrect: false,
                               decoration: const InputDecoration(
-                                labelText: 'Verification Code',
-                                hintText:
-                                    'Enter code provided by administrator',
-                                prefixIcon: Icon(Icons.verified_user_outlined),
-                                helperText:
-                                    'Contact your administrator for the verification code',
-                                helperMaxLines: 2,
+                                labelText: 'Email',
+                                prefixIcon: Icon(AppIcons.email, size: 20),
                               ),
                               validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return 'Please enter the verification code';
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your email';
+                                }
+                                if (!RegExp(r'^[^@]+@[^@]+\.[^@]+')
+                                    .hasMatch(value)) {
+                                  return 'Please enter a valid email address';
                                 }
                                 return null;
                               },
-                              onFieldSubmitted: (_) => _handleAuth(),
                               enabled: !isLoading,
                             ),
-                          ],
-                          const SizedBox(height: 24),
-                          FilledButton(
-                            onPressed: isLoading ? null : _handleAuth,
-                            child: isLoading
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2),
-                                  )
-                                : Text(_isSignUp ? 'Sign Up' : 'Sign In'),
-                          ),
-                          if (authState.hasError) ...[
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppTone.pink.tintFor(context),
-                                borderRadius: BorderRadius.circular(
-                                    AppTokens.controlRadius),
-                              ),
-                              child: Text(
-                                authState.error.toString(),
-                                style: text.bodySmall?.copyWith(
-                                    color: AppTone.pink.inkFor(context)),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          TextButton(
-                            onPressed: isLoading
-                                ? null
-                                : () {
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              textInputAction: _isSignUp
+                                  ? TextInputAction.next
+                                  : TextInputAction.done,
+                              autofillHints: [
+                                _isSignUp
+                                    ? AutofillHints.newPassword
+                                    : AutofillHints.password,
+                              ],
+                              decoration: InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: const Icon(AppIcons.lock, size: 20),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? HeroiconsOutline.eye
+                                        : HeroiconsOutline.eyeSlash,
+                                    size: 20,
+                                  ),
+                                  tooltip: _obscurePassword
+                                      ? 'Show password'
+                                      : 'Hide password',
+                                  onPressed: () {
                                     setState(() {
-                                      _isSignUp = !_isSignUp;
-                                      // Clear verification code when switching modes
-                                      _verificationCodeController.clear();
+                                      _obscurePassword = !_obscurePassword;
                                     });
                                   },
-                            child: Text(_isSignUp
-                                ? 'Already have an account? Sign In'
-                                : 'Don\'t have an account? Sign Up'),
-                          ),
-                        ],
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your password';
+                                }
+                                if (_isSignUp && value.length < 6) {
+                                  return 'Password must be at least 6 characters';
+                                }
+                                return null;
+                              },
+                              onFieldSubmitted: (_) =>
+                                  _isSignUp ? null : _handleAuth(),
+                              enabled: !isLoading,
+                            ),
+
+                            // Verification Code (only for sign up)
+                            if (_isSignUp) ...[
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _verificationCodeController,
+                                textInputAction: TextInputAction.done,
+                                textCapitalization:
+                                    TextCapitalization.characters,
+                                autocorrect: false,
+                                decoration: const InputDecoration(
+                                  labelText: 'Verification code',
+                                  hintText:
+                                      'Enter code provided by administrator',
+                                  prefixIcon: Icon(HeroiconsOutline.shieldCheck,
+                                      size: 20),
+                                  helperText:
+                                      'Contact your administrator for the verification code',
+                                  helperMaxLines: 3,
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.trim().isEmpty) {
+                                    return 'Please enter the verification code';
+                                  }
+                                  return null;
+                                },
+                                onFieldSubmitted: (_) => _handleAuth(),
+                                enabled: !isLoading,
+                              ),
+                            ],
+                            const SizedBox(height: 24),
+                            AppPrimaryButton(
+                              label: _isSignUp ? 'Sign Up' : 'Sign In',
+                              loading: isLoading,
+                              onPressed: _handleAuth,
+                            ),
+                            if (authState.hasError) ...[
+                              const SizedBox(height: 12),
+                              Semantics(
+                                liveRegion: true,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: colors.errorContainer,
+                                    borderRadius: BorderRadius.circular(
+                                        AppTokens.controlRadius),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        ExcludeSemantics(
+                                          child: Icon(AppIcons.error,
+                                              size: 20, color: colors.error),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            authState.error.toString(),
+                                            style: AppTypography.subheadline
+                                                .copyWith(color: colors.error),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            AppSecondaryButton(
+                              onPressed: isLoading
+                                  ? null
+                                  : () {
+                                      setState(() {
+                                        _isSignUp = !_isSignUp;
+                                        // Clear verification code when switching modes
+                                        _verificationCodeController.clear();
+                                      });
+                                    },
+                              label: _isSignUp
+                                  ? 'Already have an account? Sign In'
+                                  : 'Don\'t have an account? Sign Up',
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

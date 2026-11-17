@@ -6,7 +6,9 @@ import '../../models/staff.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../providers/staff_providers.dart';
+import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
+import 'admin_page.dart';
 
 class SchoolStaffAllocationScreen extends ConsumerStatefulWidget {
   final School school;
@@ -31,150 +33,122 @@ class _SchoolStaffAllocationScreenState
   Widget build(BuildContext context) {
     final staffListAsync = ref.watch(staffListProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Manage Staff'),
-        actions: [
-          if (_hasChanges)
-            TextButton(
-              onPressed: _isLoading ? null : _saveStaffAllocations,
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text(
-                      'Save',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-            ),
-        ],
-      ),
-      body: SafeArea(
-        top: false,
-        child: staffListAsync.when(
-          loading: () => _statusList(
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
-            ),
+    final List<Widget> content = staffListAsync.when(
+      loading: () => const [AdminLoading()],
+      error: (error, _) => [
+        DeliveryMessage(
+          icon: AppIcons.error,
+          title: 'Error loading staff: $error',
+          action: AppSecondaryButton(
+            label: 'Retry',
+            icon: AppIcons.retry,
+            onPressed: () => ref.invalidate(staffListProvider),
           ),
-          error: (error, _) => _statusList(
-            AppPanel(
-              tone: AppTone.pink,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Error loading staff: $error'),
-                  const SizedBox(height: 8),
-                  FilledButton(
-                    onPressed: () => ref.invalidate(staffListProvider),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          data: (staffList) {
-            if (staffList.isEmpty) {
-              return _statusList(
-                const AppPanel(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AppSectionHeading(title: 'No staff members found'),
-                      SizedBox(height: 8),
-                      Text('Add staff members first to assign them to schools'),
-                    ],
-                  ),
-                ),
-              );
-            }
-            if (_selectedStaffIds.isEmpty && !_hasChanges) {
-              for (final staff in staffList) {
-                if (staff.assignedSchoolIds.contains(widget.school.id)) {
-                  _selectedStaffIds.add(staff.id);
-                }
-              }
-            }
-            final sortedStaff = List<Staff>.from(staffList)
-              ..sort((a, b) {
-                final aSelected = _selectedStaffIds.contains(a.id);
-                final bSelected = _selectedStaffIds.contains(b.id);
-                if (aSelected && !bSelected) return -1;
-                if (!aSelected && bSelected) return 1;
-                return a.name.compareTo(b.name);
-              });
-
-            return ListView.separated(
-              padding: _pagePadding,
-              itemCount: sortedStaff.length + 1,
-              separatorBuilder: (context, index) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                if (index == 0) return _schoolHeader(context);
-                final staff = sortedStaff[index - 1];
-                return _StaffSelectionCard(
-                  staff: staff,
-                  isSelected: _selectedStaffIds.contains(staff.id),
-                  onChanged: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _selectedStaffIds.add(staff.id);
-                      } else {
-                        _selectedStaffIds.remove(staff.id);
-                      }
-                      _hasChanges = true;
-                    });
-                  },
-                );
-              },
-            );
-          },
         ),
-      ),
+      ],
+      data: (staffList) {
+        if (staffList.isEmpty) {
+          return const [
+            DeliveryMessage(
+              icon: AppIcons.people,
+              title: 'No staff members found',
+              description: 'Add staff members first to assign them to schools',
+            ),
+          ];
+        }
+        if (_selectedStaffIds.isEmpty && !_hasChanges) {
+          for (final staff in staffList) {
+            if (staff.assignedSchoolIds.contains(widget.school.id)) {
+              _selectedStaffIds.add(staff.id);
+            }
+          }
+        }
+        final sortedStaff = List<Staff>.from(staffList)
+          ..sort((a, b) {
+            final aSelected = _selectedStaffIds.contains(a.id);
+            final bSelected = _selectedStaffIds.contains(b.id);
+            if (aSelected && !bSelected) return -1;
+            if (!aSelected && bSelected) return 1;
+            return a.name.compareTo(b.name);
+          });
+
+        return [
+          AdminSection(
+            label: 'Staff · ${_selectedStaffIds.length} selected',
+            child: AppGroupedList(
+              separatorIndent: 57,
+              children: [
+                for (final staff in sortedStaff)
+                  _StaffSelectionRow(
+                    key: ValueKey(staff.id),
+                    staff: staff,
+                    isSelected: _selectedStaffIds.contains(staff.id),
+                    onChanged: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _selectedStaffIds.add(staff.id);
+                        } else {
+                          _selectedStaffIds.remove(staff.id);
+                        }
+                        _hasChanges = true;
+                      });
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ];
+      },
+    );
+
+    return AdminPage(
+      title: 'Manage staff',
+      subtitle: 'Select staff members who can access this school',
+      action: _hasChanges
+          ? AppGlassPrimaryButton(
+              label: 'Save',
+              icon: AppIcons.check,
+              loading: _isLoading,
+              onPressed: _saveStaffAllocations,
+            )
+          : null,
+      children: [
+        AdminSection(
+          first: true,
+          label: 'School',
+          child: _schoolHeader(context),
+        ),
+        const SizedBox(height: AppTokens.sectionGap),
+        ...content,
+      ],
     );
   }
 
-  static const _pagePadding = EdgeInsets.fromLTRB(
-      AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap);
-
-  Widget _statusList(Widget state) => ListView(
-        padding: _pagePadding,
+  Widget _schoolHeader(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return AppPanel(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _schoolHeader(context),
-          const SizedBox(height: 12),
-          state,
-        ],
-      );
-
-  Widget _schoolHeader(BuildContext context) => AppPanel(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const AppIconTile(icon: Icons.school_outlined, tone: AppTone.green),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.school.name,
-                      style: Theme.of(context).textTheme.titleLarge),
-                  if (widget.school.address?.isNotEmpty == true)
-                    Text(widget.school.address!),
-                  const SizedBox(height: 6),
-                  const Text('Select staff members who can access this school'),
-                ],
-              ),
+          const AppIconTile(icon: AppIcons.school),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.school.name,
+                    style: AppTypography.headline.copyWith(color: colors.ink)),
+                if (widget.school.address?.isNotEmpty == true)
+                  Text(widget.school.address!,
+                      style: AppTypography.subheadline
+                          .copyWith(color: colors.muted)),
+              ],
             ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _saveStaffAllocations() async {
     setState(() => _isLoading = true);
@@ -243,12 +217,15 @@ class _SchoolStaffAllocationScreenState
   }
 }
 
-class _StaffSelectionCard extends StatelessWidget {
+/// A staff member with a checkbox: role icon tile, name and neutral pills for
+/// the role and how many schools they already cover.
+class _StaffSelectionRow extends StatelessWidget {
   final Staff staff;
   final bool isSelected;
   final ValueChanged<bool> onChanged;
 
-  const _StaffSelectionCard({
+  const _StaffSelectionRow({
+    super.key,
     required this.staff,
     required this.isSelected,
     required this.onChanged,
@@ -256,47 +233,41 @@ class _StaffSelectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
     final role = staff.isAdmin
         ? 'Admin'
         : staff.isManager
             ? 'Manager'
             : 'Staff';
-    final tone = staff.isAdmin
-        ? AppTone.pink
-        : staff.isManager
-            ? AppTone.blue
-            : AppTone.neutral;
     final assignments = staff.assignedSchoolIds.length;
-    return AppPanel(
-      padding: EdgeInsets.zero,
-      tone: isSelected ? AppTone.green : null,
-      child: CheckboxListTile(
-        value: isSelected,
-        onChanged: (value) => onChanged(value ?? false),
-        title: Text(staff.name, style: Theme.of(context).textTheme.titleMedium),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              AppStatusPill(label: role, tone: tone),
-              if (assignments > 0)
-                AppStatusPill(
-                  label:
-                      '$assignments ${assignments == 1 ? 'school' : 'schools'}',
-                ),
-            ],
-          ),
+    return CheckboxListTile(
+      value: isSelected,
+      onChanged: (value) => onChanged(value ?? false),
+      contentPadding: const EdgeInsets.fromLTRB(16, 4, 12, 4),
+      title: Text(staff.name,
+          style: AppTypography.headline.copyWith(color: colors.ink)),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            AppStatusPill(label: role),
+            if (assignments > 0)
+              AppStatusPill(
+                label:
+                    '$assignments ${assignments == 1 ? 'school' : 'schools'}',
+              ),
+          ],
         ),
-        secondary: AppIconTile(
-          icon: staff.isAdmin
-              ? Icons.admin_panel_settings_outlined
-              : staff.isManager
-                  ? Icons.supervisor_account_outlined
-                  : Icons.person_outline,
-          tone: tone,
-        ),
+      ),
+      secondary: AppIconTile(
+        size: 29,
+        icon: staff.isAdmin
+            ? HeroiconsOutline.shieldCheck
+            : staff.isManager
+                ? HeroiconsOutline.shieldExclamation
+                : AppIcons.person,
       ),
     );
   }
