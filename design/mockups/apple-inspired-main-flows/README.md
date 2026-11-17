@@ -16,7 +16,7 @@ Green identifies primary actions, blue navigation, pink evidence and yellow atte
 
 ## Sources
 
-- Supplied Apple Design System PDF: /tmp/codex-remote-attachments/01a1e26d-c2b6-7022-9636-994f38618886/F2C63966-208E-4FE1-81ED-FC911CD7F894/1-Apple-Design-System.pdf
+- User-supplied Apple Design System PDF (reference document; not bundled in this repository).
 - [Apple HIG: Designing for iOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-ios)
 - [Apple HIG: Layout](https://developer.apple.com/design/human-interface-guidelines/layout)
 - [Apple HIG: Color](https://developer.apple.com/design/human-interface-guidelines/color)
@@ -33,4 +33,3 @@ The supplied PDF is an independently compiled reference, not an Apple publicatio
 - Use precise file-download wording in place of the abbreviated “Files saved” label.
 - Match controls and icons consistently across all screens. Support dark appearance separately from connectivity.
 - Original drafts are retained under drafts/. Prompts are in PROMPTS.md and REFINEMENT_PROMPTS.md.
-
