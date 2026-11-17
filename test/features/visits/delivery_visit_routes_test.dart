@@ -381,7 +381,13 @@ void main() {
 
     await tester.tap(find.text('Sign-Off'));
     await tester.pumpAndSettle();
-    expect(find.text('Expected pack total'), findsOneWidget);
+    expect(find.text('of 10 packs recorded'), findsOneWidget);
+    expect(find.text('10 packs outstanding in 1 classroom'), findsOneWidget);
+    expect(find.text('Room A'), findsOneWidget);
+    final allClassrooms = find.text('No classrooms complete yet');
+    await scrollVisitTo(allClassrooms);
+    await tester.tap(allClassrooms);
+    await tester.pumpAndSettle();
     expect(find.text('10 expected packs'), findsOneWidget);
     final viewNotes = find.text('View notes');
     await scrollVisitTo(viewNotes);
@@ -389,10 +395,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(noteText).hitTestable(), findsOneWidget);
 
-    final capture = find.text('Capture signature');
-    final back = find.text('Back to review');
+    final capture = find.text('Continue to signature');
+    final back = find.byTooltip('Back to review');
     Future<void> openCapture() async {
-      await scrollVisitTo(capture, delta: 160);
+      await scrollVisitTo(capture, delta: 320);
       await tester.tap(capture.hitTestable());
       await tester.pumpAndSettle();
       expect(back, findsOneWidget);
@@ -400,7 +406,7 @@ void main() {
     }
 
     await openCapture();
-    expect(find.text('Visit first'), findsOneWidget);
+    expect(find.textContaining('Visit first'), findsOneWidget);
     Future<void> scrollCaptureTo(Finder target) async {
       final scroll = find.byType(SingleChildScrollView);
       for (var attempt = 0;
