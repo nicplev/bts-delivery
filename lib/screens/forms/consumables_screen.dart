@@ -6,6 +6,8 @@ import '../../widgets/design/design.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../utils/notification_utils.dart';
 
+/// School-wide consumables: large title, grouped rows with edit/delete, and
+/// one floating "Add consumable" action.
 class ConsumablesScreen extends ConsumerWidget {
   const ConsumablesScreen({super.key, required this.schoolId});
 
@@ -14,105 +16,113 @@ class ConsumablesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final consumablesAsync = ref.watch(consumablesProvider(schoolId));
+    final count = consumablesAsync.valueOrNull?.length;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Consumables'),
-      ),
-      body: consumablesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => Center(
-          child: DeliveryMessage(
-            icon: Icons.error_outline,
-            title: 'Couldn’t load consumables',
-            action: TextButton(
-              onPressed: () => ref.invalidate(consumablesProvider(schoolId)),
-              child: const Text('Retry'),
-            ),
-          ),
+      extendBodyBehindAppBar: true,
+      appBar: const AppNavBar(),
+      body: AppFloatingActionArea(
+        action: AppGlassPrimaryButton(
+          key: const ValueKey('add-consumable'),
+          label: 'Add consumable',
+          icon: AppIcons.add,
+          onPressed: () => _showConsumableDialog(context, ref, null),
         ),
-        data: (consumables) {
-          if (consumables.isEmpty) {
-            return const Center(
-              child: DeliveryMessage(
-                icon: Icons.inventory_2_outlined,
-                title: 'No consumables recorded',
-                description: 'Tap + to add school-wide supplies and materials.',
+        child: Builder(
+          builder: (context) => ListView(
+            padding: AppInsets.scroll(context),
+            children: [
+              AppLargeTitle(
+                title: 'Consumables',
+                subtitle: count == null || count == 0
+                    ? 'School-wide supplies and materials'
+                    : count == 1
+                        ? '1 item'
+                        : '$count items',
               ),
-            );
-          }
-
-          return ListView.builder(
-            padding: EdgeInsets.fromLTRB(
-              AppTokens.gutter,
-              12,
-              AppTokens.gutter,
-              MediaQuery.paddingOf(context).bottom + 80,
-            ),
-            itemCount: consumables.length,
-            itemBuilder: (context, index) {
-              final consumable = consumables[index];
-              return AppPanel(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: ListTile(
-                  leading: const AppIconTile(icon: Icons.inventory_2_outlined),
-                  title: Text(consumable.itemName),
-                  subtitle: Text('${consumable.quantity} ${consumable.unit}'),
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) {
-                      switch (value) {
-                        case 'edit':
-                          _showEditConsumableDialog(context, ref, consumable);
-                          break;
-                        case 'delete':
-                          _showDeleteDialog(context, ref, consumable);
-                          break;
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: ListTile(
-                          leading: Icon(Icons.edit),
-                          title: Text('Edit'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: ListTile(
-                          leading: Icon(Icons.delete,
-                              color: Theme.of(context).colorScheme.error),
-                          title: Text('Delete',
-                              style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error)),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ],
+              const SizedBox(height: 20),
+              consumablesAsync.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 48),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (_, __) => DeliveryMessage(
+                  icon: AppIcons.error,
+                  title: 'Couldn’t load consumables',
+                  action: AppSecondaryButton(
+                    label: 'Retry',
+                    icon: AppIcons.retry,
+                    expand: false,
+                    onPressed: () =>
+                        ref.invalidate(consumablesProvider(schoolId)),
                   ),
                 ),
-              );
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddConsumableDialog(context, ref),
-        tooltip: 'Add Consumable',
-        child: const Icon(Icons.add),
+                data: (consumables) {
+                  if (consumables.isEmpty) {
+                    return const DeliveryMessage(
+                      icon: AppIcons.consumables,
+                      title: 'No consumables recorded',
+                      description:
+                          'Use Add consumable to add school-wide supplies and materials.',
+                    );
+                  }
+                  return AppGroupedList(
+                    separatorIndent: 57,
+                    children: [
+                      for (final consumable in consumables)
+                        AppListRow(
+                          key: ValueKey(consumable.id),
+                          icon: AppIcons.consumables,
+                          title: consumable.itemName,
+                          subtitle: '${consumable.quantity} ${consumable.unit}',
+                          onTap: () =>
+                              _showConsumableDialog(context, ref, consumable),
+                          showChevron: false,
+                          trailing: PopupMenuButton<String>(
+                            tooltip: '${consumable.itemName} options',
+                            icon: Icon(AppIcons.more,
+                                size: 22, color: AppPalette.of(context).ink),
+                            onSelected: (value) {
+                              switch (value) {
+                                case 'edit':
+                                  _showConsumableDialog(
+                                      context, ref, consumable);
+                                  break;
+                                case 'delete':
+                                  _showDeleteDialog(context, ref, consumable);
+                                  break;
+                              }
+                            },
+                            itemBuilder: (context) {
+                              final colors = AppPalette.of(context);
+                              return [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: _MenuLabel(
+                                      icon: AppIcons.edit,
+                                      label: 'Edit',
+                                      color: colors.ink),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: _MenuLabel(
+                                      icon: AppIcons.delete,
+                                      label: 'Delete',
+                                      color: colors.error),
+                                ),
+                              ];
+                            },
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
-  }
-
-  void _showAddConsumableDialog(BuildContext context, WidgetRef ref) {
-    _showConsumableDialog(context, ref, null);
-  }
-
-  void _showEditConsumableDialog(
-      BuildContext context, WidgetRef ref, Consumable consumable) {
-    _showConsumableDialog(context, ref, consumable);
   }
 
   void _showConsumableDialog(
@@ -128,7 +138,8 @@ class ConsumablesScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(isEditing ? 'Edit Consumable' : 'Add Consumable'),
+        scrollable: true,
+        title: Text(isEditing ? 'Edit consumable' : 'Add consumable'),
         content: Form(
           key: formKey,
           child: Column(
@@ -137,7 +148,7 @@ class ConsumablesScreen extends ConsumerWidget {
               TextFormField(
                 controller: nameController,
                 decoration: const InputDecoration(
-                  labelText: 'Item Name',
+                  labelText: 'Item name',
                   hintText: 'e.g., Copy Paper A4',
                 ),
                 validator: (value) {
@@ -259,35 +270,63 @@ class ConsumablesScreen extends ConsumerWidget {
       BuildContext context, WidgetRef ref, Consumable consumable) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Consumable'),
-        content:
-            Text('Are you sure you want to delete "${consumable.itemName}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
+      builder: (context) {
+        final colors = AppPalette.of(context);
+        return AlertDialog(
+          title: const Text('Delete consumable?'),
+          content:
+              Text('Are you sure you want to delete "${consumable.itemName}"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
-            onPressed: () async {
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .deleteConsumable(schoolId, consumable.id);
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.error,
+                foregroundColor: colors.onError,
+              ),
+              onPressed: () async {
+                final success = await ref
+                    .read(schoolsNotifierProvider.notifier)
+                    .deleteConsumable(schoolId, consumable.id);
 
-              if (success && context.mounted) {
-                Navigator.pop(context);
-                // Show notification that sign-off was cleared
-                NotificationUtils.showSignOffClearedNotification(context);
-              }
-            },
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+                if (success && context.mounted) {
+                  Navigator.pop(context);
+                  // Show notification that sign-off was cleared
+                  NotificationUtils.showSignOffClearedNotification(context);
+                }
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _MenuLabel extends StatelessWidget {
+  const _MenuLabel({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: color),
+        const SizedBox(width: 12),
+        Flexible(
+          child: Text(label, style: AppTypography.body.copyWith(color: color)),
+        ),
+      ],
     );
   }
 }

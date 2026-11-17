@@ -37,6 +37,28 @@ String fieldEditFeedback(String label, ClassroomEditStatus status) {
   };
 }
 
+typedef FieldDraftSave = Future<Result<ClassroomEditStatus>> Function(
+    FieldDraft draft);
+
+/// What a custom field-draft form body (see [showFieldDraftSheet]) can use.
+///
+/// The text in [controller] is the draft: after changing it in code (a
+/// stepper, a "fill in" button) call [changed] so it is saved on the device.
+abstract interface class FieldDraftFields {
+  TextEditingController controller(String inputId);
+
+  /// Whether the inputs accept changes (false while saving or signed out).
+  bool get enabled;
+
+  /// Records the current text as a new draft revision.
+  void changed();
+
+  /// Validates and submits, exactly like the Save button.
+  void save();
+}
+
+/// Shows the shared field-draft form as a neutral dialog. Unsaved input is
+/// kept in the device draft store and restored next time.
 Future<void> showFieldDraftDialog({
   required BuildContext context,
   required WidgetRef ref,
@@ -45,8 +67,72 @@ Future<void> showFieldDraftDialog({
   required String savedLabel,
   required List<FieldDraftInput> inputs,
   String? description,
-  required Future<Result<ClassroomEditStatus>> Function(FieldDraft draft)
-      onSave,
+  required FieldDraftSave onSave,
+}) {
+  return _present(
+    context: context,
+    ref: ref,
+    target: target,
+    show: (uid, draftKey) => showDialog<String>(
+      context: context,
+      useRootNavigator: false,
+      barrierDismissible: false,
+      builder: (_) => _FieldDraftDialog(
+        uid: uid,
+        draftKey: draftKey,
+        title: title,
+        savedLabel: savedLabel,
+        inputs: inputs,
+        description: description,
+        onSave: onSave,
+      ),
+    ),
+  );
+}
+
+/// Shows the shared field-draft form as a glass sheet whose body is drawn by
+/// [builder] (e.g. a stepper). Drafts, validation, the save path and its
+/// messages behave exactly like [showFieldDraftDialog]; the sheet adds the
+/// draft status, the [saveLabel] primary button and "Discard draft".
+Future<void> showFieldDraftSheet({
+  required BuildContext context,
+  required WidgetRef ref,
+  required FieldDraftTarget target,
+  required String title,
+  required String savedLabel,
+  required String saveLabel,
+  required List<FieldDraftInput> inputs,
+  required Widget Function(BuildContext context, FieldDraftFields fields)
+      builder,
+  required FieldDraftSave onSave,
+}) {
+  return _present(
+    context: context,
+    ref: ref,
+    target: target,
+    show: (uid, draftKey) => showAppGlassSheet<String>(
+      context: context,
+      title: title,
+      // Dragging would bypass the draft flush that runs before closing.
+      enableDrag: false,
+      builder: (_) => _FieldDraftSheet(
+        uid: uid,
+        draftKey: draftKey,
+        savedLabel: savedLabel,
+        saveLabel: saveLabel,
+        inputs: inputs,
+        builder: builder,
+        onSave: onSave,
+      ),
+    ),
+  );
+}
+
+Future<void> _present({
+  required BuildContext context,
+  required WidgetRef ref,
+  required FieldDraftTarget target,
+  required Future<String?> Function(String uid, String draftKey) show,
 }) async {
   final uid = ref.read(authStateProvider).valueOrNull?.uid;
   if (uid == null) {
@@ -56,50 +142,32 @@ Future<void> showFieldDraftDialog({
     return;
   }
 
-  final notification = await showDialog<String>(
-    context: context,
-    useRootNavigator: false,
-    barrierDismissible: false,
-    builder: (_) => _FieldDraftDialog(
-      uid: uid,
-      draftKey: target.keyFor(uid),
-      title: title,
-      savedLabel: savedLabel,
-      inputs: inputs,
-      description: description,
-      onSave: onSave,
-    ),
-  );
+  final notification = await show(uid, target.keyFor(uid));
   if (!context.mounted || notification == null) return;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text(notification)),
   );
 }
 
-class _FieldDraftDialog extends ConsumerStatefulWidget {
-  const _FieldDraftDialog({
+abstract class _FieldDraftForm extends ConsumerStatefulWidget {
+  const _FieldDraftForm({
     required this.uid,
     required this.draftKey,
-    required this.title,
     required this.savedLabel,
     required this.inputs,
-    required this.description,
     required this.onSave,
   });
 
   final String uid;
   final String draftKey;
-  final String title;
   final String savedLabel;
   final List<FieldDraftInput> inputs;
-  final String? description;
-  final Future<Result<ClassroomEditStatus>> Function(FieldDraft draft) onSave;
-
-  @override
-  ConsumerState<_FieldDraftDialog> createState() => _FieldDraftDialogState();
+  final FieldDraftSave onSave;
 }
 
-class _FieldDraftDialogState extends ConsumerState<_FieldDraftDialog> {
+/// Draft persistence and submission shared by the dialog and the sheet.
+abstract class _FieldDraftFormState<W extends _FieldDraftForm>
+    extends ConsumerState<W> implements FieldDraftFields {
   final _form = GlobalKey<FormState>();
   final _controllers = <String, TextEditingController>{};
   Future<void> _writes = Future.value();
@@ -134,6 +202,48 @@ class _FieldDraftDialogState extends ConsumerState<_FieldDraftDialog> {
     super.dispose();
   }
 
+  bool get _signedIn =>
+      ref.watch(authStateProvider).valueOrNull?.uid == widget.uid;
+
+  bool _canEdit(bool signedIn) =>
+      !_busy && !_loading && _store != null && signedIn;
+
+  bool get _statusIsError => _draftError != null || _submitError != null;
+
+  String? get _status =>
+      _draftError ??
+      _submitError ??
+      (_draft == null
+          ? null
+          : _draft?.revision == _persistedRevision
+              ? 'Draft saved on this device'
+              : 'Saving draft…');
+
+  @override
+  TextEditingController controller(String inputId) => _controllers[inputId]!;
+
+  @override
+  bool get enabled => _canEdit(_signedIn);
+
+  @override
+  void changed() => _changed();
+
+  @override
+  void save() => unawaited(_save());
+
+  void _retryStore() {
+    ref.invalidate(fieldDraftStoreProvider);
+    unawaited(_restore());
+  }
+
+  Widget _guard(Widget child) => PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_close());
+        },
+        child: child,
+      );
+
   Future<void> _restore() async {
     setState(() {
       _loading = true;
@@ -156,105 +266,6 @@ class _FieldDraftDialogState extends ConsumerState<_FieldDraftDialog> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final signedIn =
-        ref.watch(authStateProvider).valueOrNull?.uid == widget.uid;
-    final canEdit = !_busy && !_loading && _store != null && signedIn;
-    final status = _draftError ??
-        _submitError ??
-        (_draft == null
-            ? null
-            : _draft?.revision == _persistedRevision
-                ? 'Draft saved on this device'
-                : 'Saving draft…');
-
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_close());
-      },
-      child: AlertDialog(
-        scrollable: true,
-        title: Text(widget.title),
-        content: Form(
-          key: _form,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (!signedIn)
-                const Text('This draft belongs to the previous account.')
-              else if (_loading)
-                const Center(child: CircularProgressIndicator())
-              else if (_store != null) ...[
-                if (widget.description != null) ...[
-                  Text(widget.description!),
-                  const SizedBox(height: 12),
-                ],
-                for (final input in widget.inputs)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: TextFormField(
-                      key: ValueKey(input.id),
-                      controller: _controllers[input.id],
-                      enabled: canEdit,
-                      autofocus: widget.inputs.length == 1,
-                      maxLines: input.maxLines,
-                      keyboardType: input.keyboardType,
-                      decoration: InputDecoration(labelText: input.label),
-                      validator: (value) => input.validator(value ?? ''),
-                      onChanged: (_) => _changed(),
-                    ),
-                  ),
-              ],
-              if (signedIn && _submitNotice != null) Text(_submitNotice!),
-              if (signedIn && status != null)
-                Semantics(
-                  liveRegion: true,
-                  child: AppStatusPill(
-                    label: status,
-                    icon: _draftError != null || _submitError != null
-                        ? Icons.info_outline
-                        : Icons.edit_note_outlined,
-                    tone: _draftError != null || _submitError != null
-                        ? AppTone.pink
-                        : AppTone.blue,
-                  ),
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          if (canEdit && _draft != null)
-            TextButton(
-              onPressed: _discard,
-              child: const Text('Discard draft'),
-            ),
-          TextButton(
-            onPressed: _busy ? null : _close,
-            child: const Text('Close'),
-          ),
-          if (!signedIn || _loading)
-            const SizedBox.shrink()
-          else if (_store == null)
-            FilledButton(
-              onPressed: () {
-                ref.invalidate(fieldDraftStoreProvider);
-                unawaited(_restore());
-              },
-              child: const Text('Retry'),
-            )
-          else
-            FilledButton(
-              onPressed: canEdit ? _save : null,
-              child: Text(_busy ? 'Saving…' : 'Save'),
-            ),
-        ],
-      ),
-    );
   }
 
   FieldDraft _capture() => FieldDraft(
@@ -412,5 +423,230 @@ class _FieldDraftDialogState extends ConsumerState<_FieldDraftDialog> {
         });
       }
     }
+  }
+}
+
+class _FieldDraftDialog extends _FieldDraftForm {
+  const _FieldDraftDialog({
+    required super.uid,
+    required super.draftKey,
+    required this.title,
+    required super.savedLabel,
+    required super.inputs,
+    required this.description,
+    required super.onSave,
+  });
+
+  final String title;
+  final String? description;
+
+  @override
+  ConsumerState<_FieldDraftDialog> createState() => _FieldDraftDialogState();
+}
+
+class _FieldDraftDialogState extends _FieldDraftFormState<_FieldDraftDialog> {
+  @override
+  Widget build(BuildContext context) {
+    final signedIn = _signedIn;
+    final canEdit = _canEdit(signedIn);
+    final status = _status;
+    final colors = AppPalette.of(context);
+
+    return _guard(
+      AlertDialog(
+        scrollable: true,
+        title: Text(widget.title),
+        content: Form(
+          key: _form,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!signedIn)
+                const Text('This draft belongs to the previous account.')
+              else if (_loading)
+                const Center(child: CircularProgressIndicator())
+              else if (_store != null) ...[
+                if (widget.description != null) ...[
+                  Text(widget.description!,
+                      style: AppTypography.subheadline
+                          .copyWith(color: colors.muted)),
+                  const SizedBox(height: 12),
+                ],
+                for (final input in widget.inputs)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: TextFormField(
+                      key: ValueKey(input.id),
+                      controller: _controllers[input.id],
+                      enabled: canEdit,
+                      autofocus: widget.inputs.length == 1,
+                      maxLines: input.maxLines,
+                      keyboardType: input.keyboardType,
+                      decoration: InputDecoration(labelText: input.label),
+                      validator: (value) => input.validator(value ?? ''),
+                      onChanged: (_) => _changed(),
+                    ),
+                  ),
+              ],
+              if (signedIn && _submitNotice != null) Text(_submitNotice!),
+              if (signedIn && status != null)
+                _FieldDraftStatus(label: status, isError: _statusIsError),
+            ],
+          ),
+        ),
+        actions: [
+          if (canEdit && _draft != null)
+            TextButton(
+              onPressed: _discard,
+              child: const Text('Discard draft'),
+            ),
+          TextButton(
+            onPressed: _busy ? null : _close,
+            child: const Text('Close'),
+          ),
+          if (!signedIn || _loading)
+            const SizedBox.shrink()
+          else if (_store == null)
+            FilledButton(
+              onPressed: _retryStore,
+              child: const Text('Retry'),
+            )
+          else
+            FilledButton(
+              onPressed: canEdit ? _save : null,
+              child: Text(_busy ? 'Saving…' : 'Save'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FieldDraftSheet extends _FieldDraftForm {
+  const _FieldDraftSheet({
+    required super.uid,
+    required super.draftKey,
+    required super.savedLabel,
+    required this.saveLabel,
+    required super.inputs,
+    required this.builder,
+    required super.onSave,
+  });
+
+  final String saveLabel;
+  final Widget Function(BuildContext context, FieldDraftFields fields) builder;
+
+  @override
+  ConsumerState<_FieldDraftSheet> createState() => _FieldDraftSheetState();
+}
+
+class _FieldDraftSheetState extends _FieldDraftFormState<_FieldDraftSheet> {
+  @override
+  Widget build(BuildContext context) {
+    final signedIn = _signedIn;
+    final canEdit = _canEdit(signedIn);
+    final status = _status;
+    final colors = AppPalette.of(context);
+
+    return _guard(
+      SingleChildScrollView(
+        child: Form(
+          key: _form,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!signedIn)
+                Text('This draft belongs to the previous account.',
+                    style: AppTypography.body.copyWith(color: colors.ink))
+              else if (_loading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_store != null)
+                widget.builder(context, this),
+              if (signedIn && _submitNotice != null) ...[
+                const SizedBox(height: 12),
+                Text(_submitNotice!,
+                    style:
+                        AppTypography.subheadline.copyWith(color: colors.ink)),
+              ],
+              if (signedIn && status != null) ...[
+                const SizedBox(height: 12),
+                Center(
+                  child:
+                      _FieldDraftStatus(label: status, isError: _statusIsError),
+                ),
+              ],
+              if (signedIn && !_loading) ...[
+                const SizedBox(height: 10),
+                if (_store == null)
+                  AppPrimaryButton(label: 'Retry', onPressed: _retryStore)
+                else
+                  AppPrimaryButton(
+                    label: _busy ? 'Saving…' : widget.saveLabel,
+                    onPressed: canEdit ? _save : null,
+                  ),
+              ],
+              if (canEdit && _draft != null) ...[
+                const SizedBox(height: 4),
+                Center(
+                  child: AppSecondaryButton(
+                    label: 'Discard draft',
+                    expand: false,
+                    large: false,
+                    onPressed: _discard,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Draft state line ("Draft saved on this device", "Saving draft…" or a
+/// draft/submit error in the error colour). Announced as a live region.
+class _FieldDraftStatus extends StatelessWidget {
+  const _FieldDraftStatus({
+    required this.label,
+    this.isError = false,
+  });
+
+  final String label;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final ink = isError ? colors.error : colors.muted;
+    return Semantics(
+      liveRegion: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(isError ? AppIcons.error : AppIcons.savedOnDevice,
+                size: 16, color: isError ? colors.error : colors.ink),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              style: AppTypography.footnote.copyWith(
+                color: ink,
+                fontWeight: isError ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

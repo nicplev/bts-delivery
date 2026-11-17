@@ -203,8 +203,7 @@ void main() {
         find.byType(ClassroomDetailScreen),
       );
       expect(room.deliveryId, visit.deliveryId);
-      expect(find.text('Expected packs'), findsOneWidget);
-      expect(find.text('Recorded packs'), findsOneWidget);
+      expect(find.text('10 packs expected'), findsOneWidget);
       expect(find.text('Unrecorded'), findsOneWidget);
     }
 
@@ -213,7 +212,7 @@ void main() {
     await tester.tap(find.text('Incomplete'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField), '7');
-    await tester.tap(find.text('Close'));
+    await tester.tap(find.bySemanticsLabel('Close'));
     await tester.pumpAndSettle();
     final savedDraft = drafts.entries.values.single;
     expect(savedDraft.values['quantity'], '7');
@@ -221,7 +220,7 @@ void main() {
     await tester.tap(find.text('Incomplete'));
     await tester.pumpAndSettle();
     expect(find.text('7'), findsOneWidget);
-    await tester.tap(find.text('Save'));
+    await tester.tap(find.text('Save packs'));
     await tester.pumpAndSettle();
     expect(first.room.completionStatus, ClassroomCompletionStatus.incomplete);
     expect(first.room.actualPacksDelivered, 7);
