@@ -197,10 +197,15 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
             isVisit ? 'Sign-off' : 'History',
             'Info',
           ];
+          final colors = AppPalette.of(context);
           return NestedScrollView(
             headerSliverBuilder: (context, _) => [
-              SliverToBoxAdapter(
-                child: Padding(
+              // The large title and subtitle scroll away; the section switch
+              // stays pinned under the nav buttons while each tab's content
+              // scrolls beneath it.
+              AppPinnedControlSliver(
+                key: const ValueKey('hub-header'),
+                header: Padding(
                   padding: EdgeInsets.fromLTRB(
                     AppTokens.gutter,
                     MediaQuery.paddingOf(context).top + 8,
@@ -221,17 +226,25 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                       ),
                       const SizedBox(height: 8),
                       const ConnectivityIndicator(),
-                      const SizedBox(height: 12),
-                      _HubSegmentedControl(
-                        controller: _tabController,
-                        labels: tabs,
-                      ),
                     ],
+                  ),
+                ),
+                pinned: ColoredBox(
+                  key: const ValueKey('hub-section-switch'),
+                  color: colors.canvas,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppTokens.gutter, 4, AppTokens.gutter, 8),
+                    child: _HubSegmentedControl(
+                      controller: _tabController,
+                      labels: tabs,
+                    ),
                   ),
                 ),
               ),
             ],
-            // The header already clears the status bar and nav buttons.
+            // The header already clears the status bar, nav buttons and the
+            // pinned switch.
             body: Builder(
               builder: (context) => MediaQuery.removePadding(
                 context: context,
@@ -331,7 +344,12 @@ class _HubSegmentedControl extends StatelessWidget {
       builder: (context, _) => AppSegmentedControl<int>(
         semanticLabel: 'Visit section',
         selected: controller.index,
-        onChanged: controller.animateTo,
+        onChanged: (index) => controller.animateTo(
+          index,
+          duration: (MediaQuery.maybeDisableAnimationsOf(context) ?? false)
+              ? Duration.zero
+              : kTabScrollDuration,
+        ),
         segments: [
           for (var i = 0; i < labels.length; i++)
             AppSegment(value: i, label: labels[i], key: ValueKey('hub-tab-$i')),

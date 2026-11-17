@@ -754,6 +754,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                           padding: const EdgeInsets.only(bottom: 4),
                           child: Wrap(
                             spacing: 8,
+                            runSpacing: 4,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               Icon(AppIcons.consumables,
@@ -769,6 +770,9 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                                     color: colors.ink,
                                     fontWeight: FontWeight.w600),
                               ),
+                              if (item.actualQuantityDelivered != null &&
+                                  item.actualQuantityDelivered != item.quantity)
+                                const AppQuantityDiffersPill(),
                             ],
                           ),
                         ),

@@ -215,6 +215,71 @@ void main() {
     }
   });
 
+  testWidgets(
+      'a differing consumable quantity is an amber warning; delivered stays '
+      'neutral', (tester) async {
+    for (final theme in [AppTheme.lightTheme, AppTheme.darkTheme]) {
+      final schools = _Schools(actual: 13, consumables: [
+        Consumable(
+          id: 'tissues',
+          itemName: 'Tissues',
+          quantity: 12,
+          unit: 'boxes',
+          actualQuantityDelivered: 12,
+          createdAt: DateTime(2025),
+        ),
+        Consumable(
+          id: 'paper',
+          itemName: 'Copy paper',
+          quantity: 6,
+          unit: 'reams',
+          actualQuantityDelivered: 3,
+          createdAt: DateTime(2025),
+        ),
+      ]);
+      await _pumpRoom(tester, schools, theme: theme);
+      final pill = find.byKey(const ValueKey('consumable-quantity-differs'));
+      await tester.dragUntilVisible(
+          pill, find.byType(ListView), const Offset(0, -200));
+      await tester.pumpAndSettle();
+
+      expect(pill, findsOneWidget);
+      expect(find.text('3 / 6 reams'), findsOneWidget);
+      final palette = AppPalette.of(tester.element(pill));
+      final status = tester.widget<AppStatusPill>(
+          find.descendant(of: pill, matching: find.byType(AppStatusPill)));
+      expect(status.tone, AppTone.warning);
+      expect(status.icon, AppIcons.warning);
+      expect(
+        find.descendant(
+          of: pill,
+          matching: find.byWidgetPredicate((widget) =>
+              widget is DecoratedBox &&
+              (widget.decoration as BoxDecoration).color ==
+                  palette.warningTint),
+        ),
+        findsOneWidget,
+      );
+      expect(
+          tester
+              .widget<Text>(find.descendant(
+                  of: pill, matching: find.text('Quantity differs')))
+              .style
+              ?.color,
+          palette.warningInk);
+      expect(find.bySemanticsLabel(RegExp('Quantity differs')), findsOneWidget);
+
+      // Delivered as expected keeps the neutral solid check.
+      expect(find.text('12 / 12 boxes'), findsOneWidget);
+      expect(find.text('Delivered'), findsOneWidget);
+      final delivered = tester.widget<AppStatusRing>(find.byWidgetPredicate(
+          (widget) =>
+              widget is AppStatusRing && widget.semanticLabel == 'Delivered'));
+      expect(delivered.status, AppCompletion.complete);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('consumables screen floats one add action and lists items',
       (tester) async {
     await tester.pumpWidget(

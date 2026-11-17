@@ -3,19 +3,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../models/delivery_visit.dart';
+import '../models/offline/offline_media.dart';
 import '../models/school.dart';
 import '../providers/auth_providers.dart';
 import '../providers/delivery_visit_provider.dart';
+import '../providers/offline_media_providers.dart';
 import '../providers/schools_providers.dart';
 import '../screens/forms/year_levels_screen.dart';
 import 'classroom_record_row.dart';
 import 'delivery_day_list.dart';
 import 'design/design.dart';
+import 'offline_media_view.dart';
 import 'offline_visit_media_panel.dart';
 import 'school_timer_widget.dart';
 
 /// Visit hub › Records: pack summary (with the visit timer and offline files),
-/// the year filter and one list of classrooms across year levels.
+/// the school map in place (when the school has one), the year filter and one
+/// list of classrooms across year levels.
 class RecordsTab extends ConsumerStatefulWidget {
   const RecordsTab({super.key, required this.schoolId});
 
@@ -57,6 +61,7 @@ class _RecordsTabState extends ConsumerState<RecordsTab> {
     final school = visit == null
         ? null
         : ref.watch(schoolByIdProvider(schoolId)).valueOrNull;
+    final mapReference = school?.schoolMapStoragePath ?? school?.schoolMapUrl;
 
     final children = <Widget>[
       _RecordsSummary(
@@ -66,6 +71,14 @@ class _RecordsTabState extends ConsumerState<RecordsTab> {
             ? null
             : _VisitTools(schoolId: schoolId, visit: visit, school: school),
       ),
+      if (visit != null && school != null && mapReference != null) ...[
+        const SizedBox(height: 16),
+        _SchoolMapCard(
+          school: school,
+          visit: visit,
+          reference: mapReference,
+        ),
+      ],
       const SizedBox(height: 16),
       ...yearLevelsAsync.when(
         loading: () => const [
@@ -570,6 +583,178 @@ class _VisitTools extends StatelessWidget {
         if (school != null)
           OfflineVisitMediaPanel(visit: visit, school: school!),
       ],
+    );
+  }
+}
+
+/// Records › "School map": the map in place under the summary, expanded by
+/// default. The header row collapses it to a single 44 pt row; the glass
+/// control on the map enlarges it in place. Both choices last for the life
+/// of the screen (page storage), so they survive switching tabs.
+class _SchoolMapCard extends ConsumerStatefulWidget {
+  const _SchoolMapCard({
+    required this.school,
+    required this.visit,
+    required this.reference,
+  });
+
+  final School school;
+  final DeliveryVisit visit;
+  final String reference;
+
+  @override
+  ConsumerState<_SchoolMapCard> createState() => _SchoolMapCardState();
+}
+
+class _SchoolMapCardState extends ConsumerState<_SchoolMapCard> {
+  bool _expanded = true;
+  bool _enlarged = false;
+  final _mapKey = GlobalKey();
+
+  String get _expandedId => 'records-school-map-expanded-${widget.school.id}';
+  String get _enlargedId => 'records-school-map-enlarged-${widget.school.id}';
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final storage = PageStorage.maybeOf(context);
+    final expanded = storage?.readState(context, identifier: _expandedId);
+    if (expanded is bool) _expanded = expanded;
+    final enlarged = storage?.readState(context, identifier: _enlargedId);
+    if (enlarged is bool) _enlarged = enlarged;
+  }
+
+  void _setExpanded(bool value) {
+    setState(() => _expanded = value);
+    PageStorage.maybeOf(context)
+        ?.writeState(context, value, identifier: _expandedId);
+  }
+
+  void _setEnlarged(bool value) {
+    setState(() => _enlarged = value);
+    PageStorage.maybeOf(context)
+        ?.writeState(context, value, identifier: _enlargedId);
+    if (!value) return;
+    // Bring the enlarged map to the top of the list once it has grown.
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    Future<void>.delayed(
+      reduceMotion ? Duration.zero : const Duration(milliseconds: 240),
+      () {
+        final target = _mapKey.currentContext;
+        if (!mounted || !_enlarged || target == null || !target.mounted) {
+          return;
+        }
+        final scrollable = Scrollable.maybeOf(target);
+        final box = target.findRenderObject();
+        final viewport = scrollable?.context.findRenderObject();
+        if (scrollable == null || box is! RenderBox || viewport is! RenderBox) {
+          return;
+        }
+        // Measured by hand: ensureVisible inside a NestedScrollView only
+        // moves the outer (header) scroll.
+        final position = scrollable.position;
+        final offset = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
+        final to = (position.pixels + offset)
+            .clamp(position.minScrollExtent, position.maxScrollExtent);
+        if (reduceMotion) {
+          position.jumpTo(to);
+        } else {
+          position.animateTo(to,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut);
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final visit = widget.visit;
+    final asset = OfflineMediaAsset.schoolMap(
+      bucket: ref.watch(offlineMediaBucketProvider),
+      schoolId: widget.school.id,
+      reference: widget.reference,
+      visit: visit,
+    );
+    final header = Semantics(
+      button: true,
+      expanded: _expanded,
+      child: AppPressable(
+        key: const ValueKey('records-school-map-toggle'),
+        onTap: () => _setExpanded(!_expanded),
+        semanticLabel: 'School map',
+        excludeChildSemantics: true,
+        pressedColor: colors.fill,
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(minHeight: AppTokens.minTouchTarget),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 14, 8),
+            child: Row(
+              children: [
+                Icon(AppIcons.map, size: 20, color: colors.ink),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'School map',
+                    style: AppTypography.subheadline.copyWith(
+                        color: colors.ink, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                AppDisclosureChevron(expanded: _expanded),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    return AppPanel(
+      key: const ValueKey('records-school-map'),
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          if (_expanded) ...[
+            if (asset == null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: Text(
+                  'This school map cannot be opened from its saved reference',
+                  style:
+                      AppTypography.subheadline.copyWith(color: colors.muted),
+                ),
+              )
+            else ...[
+              // Saved-copy state and the earlier saved map, as on Info.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: OfflineMediaDownloadStatus(asset: asset),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: OfflineEarlierMapButton(
+                  visit: visit,
+                  currentMap: asset,
+                  padding: const EdgeInsets.only(bottom: 8),
+                ),
+              ),
+              KeyedSubtree(
+                key: _mapKey,
+                child: OfflineMapViewer(
+                  key: const ValueKey('records-map-viewer'),
+                  asset: asset,
+                  height: 220,
+                  enlarged: _enlarged,
+                  onEnlargedChanged: _setEnlarged,
+                ),
+              ),
+            ],
+          ],
+        ],
+      ),
     );
   }
 }
