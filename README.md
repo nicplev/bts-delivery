@@ -1,5 +1,7 @@
 # BTS Delivery App
 
+> The local refresh branch introduces separate delivery visits, durable photo/signature uploads, scoped daily queries, and new server-controlled staff access. It requires a coordinated access migration before release. See [the implementation checklist](REFRESH_PLAN.md) and [offline behaviour and limits](OFFLINE_MODE_GUIDE.md).
+
 A comprehensive Flutter mobile application for Back-to-School (BTS) delivery operations, enabling delivery staff and managers to record proof of delivery, organize photos by classroom/year level/school, capture school-wide consumables, and obtain digital school sign-offs.
 
 ## Features
@@ -13,7 +15,8 @@ A comprehensive Flutter mobile application for Back-to-School (BTS) delivery ope
 
 ### User Roles
 - **Staff Members**: Can view and manage assigned deliveries
-- **Managers**: Full access to all deliveries and staff management
+- **Managers**: Access to all deliveries and school setup
+- **Administrators**: Staff management and administrative controls
 
 ### Key Screens
 - **Authentication**: Email/password login with staff profile linking

@@ -3,8 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/schools_providers.dart';
 import '../../models/school.dart';
+import '../../models/delivery_visit.dart';
+import '../../providers/delivery_visit_provider.dart';
+import '../../services/offline/field_draft_store.dart';
+import '../../widgets/field_draft_dialog.dart';
 import '../../utils/notification_utils.dart';
 import '../../utils/year_level_colors.dart';
+import '../../widgets/delivery_day_list.dart';
+import '../../widgets/design/design.dart';
 
 class ClassroomsScreen extends ConsumerWidget {
   const ClassroomsScreen({
@@ -29,22 +35,21 @@ class ClassroomsScreen extends ConsumerWidget {
       yearLevelId: yearLevelId,
     )));
 
+    final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
+    final yearLevelLabel = yearLevelsAsync.valueOrNull
+        ?.where((level) => level.id == yearLevelId)
+        .firstOrNull
+        ?.label;
+
     return Scaffold(
       appBar: AppBar(
-        title: yearLevelsAsync.when(
-          data: (yearLevels) {
-            final yearLevel = yearLevels.firstWhere(
-              (yl) => yl.id == yearLevelId,
-              orElse: () => YearLevel(
-                id: '',
-                label: 'Classrooms',
-                createdAt: DateTime.now(),
-              ),
-            );
-            return Text('${yearLevel.label} - Classrooms');
-          },
-          loading: () => const Text('Classrooms'),
-          error: (_, __) => const Text('Classrooms'),
+        toolbarHeight: MediaQuery.textScalerOf(context).scale(24) * 2 + 12,
+        title: Text(
+          yearLevelLabel == null
+              ? 'Classrooms'
+              : '$yearLevelLabel – Classrooms',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
         actions: [
           IconButton(
@@ -56,71 +61,71 @@ class ClassroomsScreen extends ConsumerWidget {
       ),
       body: classroomsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
-              Text('Error: $error'),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => ref.invalidate(classroomsProvider((
-                  schoolId: schoolId,
-                  yearLevelId: yearLevelId,
-                ))),
-                child: const Text('Retry'),
-              ),
-            ],
+        error: (_, __) => Center(
+          child: DeliveryMessage(
+            icon: Icons.error_outline,
+            title: 'Couldn’t load classrooms',
+            action: TextButton(
+              onPressed: () => ref.invalidate(classroomsProvider((
+                schoolId: schoolId,
+                yearLevelId: yearLevelId,
+              ))),
+              child: const Text('Retry'),
+            ),
           ),
         ),
         data: (classrooms) {
-          // Get year level label for color coding
-          final yearLevel = yearLevelsAsync.value?.firstWhere(
-            (yl) => yl.id == yearLevelId,
-            orElse: () => YearLevel(
-              id: '',
-              label: '',
-              createdAt: DateTime.now(),
-            ),
-          );
-          final yearLevelLabel = yearLevel?.label ?? '';
-
           if (classrooms.isEmpty) {
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.class_outlined,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No classrooms found',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Add classrooms to start tracking supplies',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: () => _showAddClassroomDialog(context, ref),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Classroom'),
-                  ),
-                ],
+              child: DeliveryMessage(
+                icon: Icons.class_outlined,
+                title: 'No classrooms found',
+                action: FilledButton.icon(
+                  onPressed: () => _showAddClassroomDialog(context, ref),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Classroom'),
+                ),
               ),
             );
           }
 
+          final completed = classrooms
+              .where((room) =>
+                  room.completionStatus == ClassroomCompletionStatus.complete)
+              .length;
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(
+              AppTokens.gutter,
+              12,
+              AppTokens.gutter,
+              MediaQuery.paddingOf(context).bottom + 16,
+            ),
             children: [
-              // Year Level Consumables Totals Card
+              if (isVisit) ...[
+                AppPanel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Pack delivery'),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$completed of ${classrooms.length} classrooms complete',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(
+                        value: completed / classrooms.length,
+                        minHeight: 6,
+                        borderRadius: BorderRadius.circular(99),
+                        color: AppTone.green.accent,
+                        backgroundColor: AppTone.green.tintFor(context),
+                        semanticsLabel: 'Pack delivery completion',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               consumablesTotalsAsync.when(
                 loading: () => const SizedBox.shrink(),
                 error: (_, __) => const SizedBox.shrink(),
@@ -129,61 +134,56 @@ class ClassroomsScreen extends ConsumerWidget {
                     return const SizedBox.shrink();
                   }
 
-                  return Card(
+                  return AppPanel(
                     margin: const EdgeInsets.only(bottom: 16),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.inventory_2,
-                                color: YearLevelColors.getBackgroundColor(yearLevelLabel),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const AppIconTile(icon: Icons.inventory_2_outlined),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
                                 'Year Level Totals',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                style: Theme.of(context).textTheme.titleMedium,
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          ...totals.entries.map((entry) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(entry.key),
-                                  Text(
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        for (final entry in totals.entries)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(child: Text(entry.key)),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Text(
                                     '${entry.value.quantity} ${entry.value.unit}',
+                                    textAlign: TextAlign.end,
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.w500,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                ],
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
               ),
-
-              // Classrooms List
+              const AppSectionHeading(title: 'Classrooms'),
+              const SizedBox(height: 8),
               ...classrooms.map((classroom) {
                 return _ClassroomCard(
                   schoolId: schoolId,
                   yearLevelId: yearLevelId,
-                  yearLevelLabel: yearLevelLabel,
+                  yearLevelLabel: yearLevelLabel ?? '',
                   classroom: classroom,
                 );
               }),
@@ -242,7 +242,6 @@ class ClassroomsScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Classroom created successfully'
                         : 'Failed to create classroom'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
 
@@ -286,159 +285,62 @@ class _ClassroomCard extends ConsumerWidget {
       classroomId: classroom.id,
     )));
 
-    final backgroundColor = YearLevelColors.getBackgroundColor(yearLevelLabel);
-    final iconColor = YearLevelColors.getIconColor(yearLevelLabel);
+    final backgroundColor =
+        YearLevelColors.getBackgroundColor(context, yearLevelLabel);
+    final iconColor = YearLevelColors.getIconColor(context, yearLevelLabel);
     final needsBorder = YearLevelColors.needsBorder(yearLevelLabel);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => context.push(
-          '/schools/$schoolId/year/$yearLevelId/classrooms/${classroom.id}',
+    final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
+    final (statusLabel, statusIcon, statusTone) =
+        switch (classroom.completionStatus) {
+      ClassroomCompletionStatus.notAttended => (
+          'Not Attended',
+          Icons.remove_circle_outline,
+          AppTone.neutral
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+      ClassroomCompletionStatus.incomplete => (
+          'Incomplete',
+          Icons.warning_amber_rounded,
+          AppTone.yellow
+        ),
+      ClassroomCompletionStatus.complete => (
+          'Complete',
+          Icons.check_circle_outline,
+          AppTone.green
+        ),
+    };
+    final breakdowns = yearLevelBreakdownsAsync.asData?.value;
+    final typography = Theme.of(context).textTheme;
+
+    return AppPanel(
+      margin: const EdgeInsets.only(bottom: 10),
+      onTap: () => context.push(schoolWorkPath(
+        schoolId,
+        visit: ref.read(activeDeliveryVisitProvider),
+        suffix:
+            '/year/${Uri.encodeComponent(yearLevelId)}/classrooms/${Uri.encodeComponent(classroom.id)}',
+      )),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
               Container(
-                decoration: needsBorder
-                    ? BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.black,
-                          width: 2,
-                        ),
-                      )
-                    : null,
-                child: CircleAvatar(
-                  backgroundColor: backgroundColor,
-                  child: Icon(Icons.meeting_room, color: iconColor),
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: needsBorder
+                      ? Border.all(color: AppPalette.of(context).outline)
+                      : null,
                 ),
+                child: Icon(Icons.meeting_room_outlined,
+                    size: 21, color: iconColor),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          classroom.name,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        yearLevelBreakdownsAsync.maybeWhen(
-                          data: (breakdowns) {
-                            if (breakdowns.length > 1) {
-                              return Container(
-                                margin: const EdgeInsets.only(left: 8),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.shade100,
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: Colors.orange.shade700,
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Text(
-                                  'Composite',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.orange.shade700,
-                                  ),
-                                ),
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          },
-                          orElse: () => const SizedBox.shrink(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    packTotalAsync.when(
-                      loading: () => const Text(
-                        'Loading pack total...',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      error: (_, __) => const Text(
-                        'Pack total: --',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                      data: (packTotal) => Text(
-                        packTotal != null
-                            ? 'Pack total: ${packTotal.total}'
-                            : 'Pack total: Not set',
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                    ),
-                    yearLevelBreakdownsAsync.maybeWhen(
-                      data: (breakdowns) {
-                        if (breakdowns.isNotEmpty) {
-                          final totalStudents = breakdowns.fold<int>(
-                            0,
-                            (sum, b) => sum + b.studentCount,
-                          );
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.people,
-                                  size: 14,
-                                  color: Colors.blue.shade700,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '$totalStudents ${totalStudents == 1 ? "student" : "students"}',
-                                  style: TextStyle(
-                                    color: Colors.blue.shade700,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                if (breakdowns.length > 1) ...[
-                                  const Text(
-                                    ' (',
-                                    style: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    breakdowns
-                                        .map((b) => '${b.studentCount} ${b.yearLevelLabel}')
-                                        .join(', '),
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                  const Text(
-                                    ')',
-                                    style: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                      orElse: () => const SizedBox.shrink(),
-                    ),
-                  ],
-                ),
+                child: Text(classroom.name, style: typography.titleMedium),
               ),
               PopupMenuButton<String>(
                 shape: RoundedRectangleBorder(
@@ -456,20 +358,21 @@ class _ClassroomCard extends ConsumerWidget {
                 itemBuilder: (context) => [
                   PopupMenuItem(
                     value: 'edit',
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
                         Icon(
                           Icons.edit_outlined,
                           size: 20,
-                          color: Colors.grey.shade700,
+                          color: AppPalette.of(context).muted,
                         ),
                         const SizedBox(width: 12),
                         Text(
                           'Edit',
                           style: TextStyle(
                             fontSize: 15,
-                            color: Colors.grey.shade900,
+                            color: AppPalette.of(context).ink,
                           ),
                         ),
                       ],
@@ -477,20 +380,21 @@ class _ClassroomCard extends ConsumerWidget {
                   ),
                   PopupMenuItem(
                     value: 'delete',
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.delete_outline,
                           size: 20,
-                          color: Colors.red,
+                          color: AppPalette.of(context).error,
                         ),
                         const SizedBox(width: 12),
                         Text(
                           'Delete',
                           style: TextStyle(
                             fontSize: 15,
-                            color: Colors.red.shade700,
+                            color: AppPalette.of(context).error,
                           ),
                         ),
                       ],
@@ -500,7 +404,48 @@ class _ClassroomCard extends ConsumerWidget {
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (isVisit)
+                AppStatusPill(
+                    label: statusLabel, icon: statusIcon, tone: statusTone),
+              if (breakdowns != null && breakdowns.length > 1)
+                const AppStatusPill(label: 'Composite', tone: AppTone.blue),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            packTotalAsync.when(
+              loading: () => 'Loading pack total…',
+              error: (_, __) => 'Pack total unavailable',
+              data: (total) => total == null
+                  ? 'Pack total: Not set'
+                  : 'Pack total: ${total.total}',
+            ),
+            style: typography.bodyMedium
+                ?.copyWith(color: AppPalette.of(context).muted),
+          ),
+          if (breakdowns != null && breakdowns.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${breakdowns.fold<int>(0, (sum, item) => sum + item.studentCount)} students',
+              style: typography.bodyMedium
+                  ?.copyWith(color: AppTone.blue.inkFor(context)),
+            ),
+            if (breakdowns.length > 1)
+              Text(
+                breakdowns
+                    .map(
+                        (item) => '${item.studentCount} ${item.yearLevelLabel}')
+                    .join(', '),
+                style: typography.bodySmall
+                    ?.copyWith(color: AppPalette.of(context).muted),
+              ),
+          ],
+        ],
       ),
     );
   }
@@ -510,66 +455,39 @@ class _ClassroomCard extends ConsumerWidget {
     WidgetRef ref,
     Classroom classroom,
   ) {
-    final nameController = TextEditingController(text: classroom.name);
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    final visit = ref.read(activeDeliveryVisitProvider);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit Classroom'),
-        content: Form(
-          key: formKey,
-          child: TextFormField(
-            controller: nameController,
-            decoration: const InputDecoration(
-              labelText: 'Classroom Name',
-              hintText: 'e.g., Room 1A, Blue Room',
-            ),
-            autofocus: true,
-            validator: (value) =>
-                value?.trim().isEmpty ?? true ? 'Please enter a name' : null,
-          ),
+      ref: ref,
+      target: FieldDraftTarget(
+        schoolId: schoolId,
+        deliveryId: visit?.deliveryId,
+        yearLevelId: yearLevelId,
+        classroomId: classroom.id,
+        form: 'rename',
+      ),
+      title: 'Rename classroom',
+      savedLabel: 'Classroom name',
+      inputs: [
+        FieldDraftInput(
+          id: 'name',
+          label: 'Classroom name',
+          initialText: classroom.name,
+          validator: (value) {
+            final name = value.trim();
+            if (name.isEmpty) return 'Enter a classroom name.';
+            if (name.length > 200) return 'Use 200 characters or fewer.';
+            return null;
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final updatedClassroom = Classroom(
-                id: classroom.id,
-                name: nameController.text.trim(),
-                createdAt: classroom.createdAt,
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .updateClassroom(schoolId, yearLevelId, updatedClassroom);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Classroom updated successfully'
-                        : 'Failed to update classroom'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-
-                // Show notification that sign-off was cleared
-                if (success) {
-                  NotificationUtils.showSignOffClearedNotification(context);
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.updateClassroomName(
+        schoolId,
+        yearLevelId,
+        classroom.id,
+        name: draft.values['name']!.trim(),
+        editId: draft.revision,
       ),
     );
   }
@@ -605,7 +523,6 @@ class _ClassroomCard extends ConsumerWidget {
                     content: Text(success
                         ? 'Classroom deleted successfully'
                         : 'Failed to delete classroom'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
 
@@ -616,7 +533,8 @@ class _ClassroomCard extends ConsumerWidget {
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),

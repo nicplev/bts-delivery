@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/repository_providers.dart';
+import '../../providers/staff_providers.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../models/staff.dart';
-import '../../app/theme/brand_colors.dart';
+import '../../widgets/design/design.dart';
 import '../../widgets/admin/calendar_management_dialog.dart';
 
 class StaffManagementScreen extends ConsumerStatefulWidget {
@@ -36,6 +38,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     _refreshTimer?.cancel();
     super.dispose();
   }
+
   @override
   Widget build(BuildContext context) {
     final staffListAsync = ref.watch(staffListProvider);
@@ -72,7 +75,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error, size: 48, color: Colors.red),
+              Icon(Icons.error,
+                  size: 48, color: Theme.of(context).colorScheme.error),
               const SizedBox(height: 16),
               Text('Error loading staff: $error'),
               const SizedBox(height: 16),
@@ -85,17 +89,18 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
         ),
         data: (staffList) {
           if (staffList.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.people_outline, size: 48, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text('No staff members found'),
-                  SizedBox(height: 8),
+                  Icon(Icons.people_outline,
+                      size: 48, color: AppPalette.of(context).muted),
+                  const SizedBox(height: 16),
+                  const Text('No staff members found'),
+                  const SizedBox(height: 8),
                   Text(
                     'Tap the + button to add your first staff member.',
-                    style: TextStyle(color: Colors.grey),
+                    style: TextStyle(color: AppPalette.of(context).muted),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -113,103 +118,82 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(
+                AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap),
             itemCount: staffList.length,
             itemBuilder: (context, index) {
               final staff = staffList[index];
               final isLinked = staff.uid != null;
 
-              return Card(
+              return AppPanel(
+                key: ValueKey(staff.id),
+                padding: EdgeInsets.zero,
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: staff.isAdmin
-                        ? BrandColors.kakaPink
+                  leading: AppIconTile(
+                    icon: staff.isAdmin
+                        ? Icons.admin_panel_settings_outlined
                         : staff.isManager
-                            ? BrandColors.kakaBlue
-                            : Theme.of(context).primaryColor,
-                    child: Icon(
-                      staff.isAdmin
-                          ? Icons.admin_panel_settings
-                          : staff.isManager
-                              ? Icons.shield
-                              : Icons.person,
-                      color: Colors.white,
-                    ),
+                            ? Icons.shield_outlined
+                            : Icons.person_outline,
+                    tone: staff.isAdmin
+                        ? AppTone.pink
+                        : staff.isManager
+                            ? AppTone.blue
+                            : AppTone.green,
                   ),
                   title: Text(staff.name),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (staff.isAdmin)
-                        const Text('Admin',
-                            style: TextStyle(color: BrandColors.kakaPink))
-                      else if (staff.isManager)
-                        const Text('Manager',
-                            style: TextStyle(color: BrandColors.kakaBlue)),
-                      if (isLinked)
-                        const Text('Linked to user account',
-                            style: TextStyle(color: Colors.green))
-                      else
-                        const Text('Not linked',
-                            style: TextStyle(color: Colors.grey)),
-                      // Calendar status indicator
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final calendarMetadataAsync = ref.watch(calendarMetadataProvider(staff.id));
-                          return calendarMetadataAsync.when(
-                            data: (metadata) {
-                              final hasCalendar = staff.hasCalendarToken;
-                              final isActive = metadata?.isActive ?? false;
-
-                              if (hasCalendar && isActive) {
-                                return Row(
-                                  children: [
-                                    Icon(
-                                      Icons.calendar_today,
-                                      size: 14,
-                                      color: Colors.deepPurple[700],
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Calendar: Active',
-                                      style: TextStyle(
-                                        color: Colors.deepPurple[700],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (staff.isAdmin)
+                          const AppStatusPill(
+                              label: 'Admin', tone: AppTone.pink)
+                        else if (staff.isManager)
+                          const AppStatusPill(
+                              label: 'Manager', tone: AppTone.blue),
+                        AppStatusPill(
+                          label: isLinked
+                              ? 'Linked to user account'
+                              : 'Not linked',
+                          tone: isLinked ? AppTone.green : AppTone.neutral,
+                        ),
+                        Consumer(
+                          builder: (context, ref, child) {
+                            final calendar =
+                                ref.watch(calendarMetadataProvider(staff.id));
+                            return calendar.when(
+                              skipLoadingOnRefresh: false,
+                              data: (metadata) {
+                                if (metadata == null) {
+                                  return const SizedBox.shrink();
+                                }
+                                return AppStatusPill(
+                                  label: metadata.isActive
+                                      ? 'Calendar: Active'
+                                      : 'Calendar: Not subscribed',
+                                  icon: Icons.calendar_today_outlined,
+                                  tone: metadata.isActive
+                                      ? AppTone.blue
+                                      : AppTone.neutral,
                                 );
-                              } else if (hasCalendar) {
-                                return Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.calendar_today_outlined,
-                                      size: 14,
-                                      color: Colors.grey,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Calendar: Not subscribed',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              } else {
-                                return const SizedBox.shrink();
-                              }
-                            },
-                            loading: () => const SizedBox.shrink(),
-                            error: (_, __) => const SizedBox.shrink(),
-                          );
-                        },
-                      ),
-                    ],
+                              },
+                              loading: () => const SizedBox.shrink(),
+                              error: (_, __) => const AppStatusPill(
+                                label: 'Calendar status unavailable',
+                                icon: Icons.info_outline,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                   trailing: PopupMenuButton<String>(
+                    tooltip: 'Staff member actions',
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -220,8 +204,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                         case 'edit':
                           _showEditStaffDialog(staff);
                           break;
-                        case 'regenerate_pin':
-                          _showRegeneratePinDialog(staff);
+                        case 'issue_invite':
+                          _issueInvite(staff);
                           break;
                         case 'manage_calendar':
                           _showCalendarManagementDialog(staff);
@@ -232,88 +216,39 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                       }
                     },
                     itemBuilder: (context) => [
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'edit',
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.edit_outlined,
-                              size: 20,
-                              color: Colors.grey.shade700,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Edit',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.grey.shade900,
-                              ),
-                            ),
-                          ],
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.edit_outlined),
+                          title: Text('Edit'),
                         ),
                       ),
-                      PopupMenuItem(
-                        value: 'regenerate_pin',
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.pin_outlined,
-                              size: 20,
-                              color: Colors.blue.shade700,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              staff.linkPin == null ? 'Generate PIN' : 'Regenerate PIN',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.grey.shade900,
-                              ),
-                            ),
-                          ],
+                      const PopupMenuItem(
+                        value: 'issue_invite',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.vpn_key_outlined),
+                          title: Text('Create invitation'),
                         ),
                       ),
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'manage_calendar',
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_month_outlined,
-                              size: 20,
-                              color: Colors.deepPurple.shade700,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Manage Calendar',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.grey.shade900,
-                              ),
-                            ),
-                          ],
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.calendar_month_outlined),
+                          title: Text('Manage Calendar'),
                         ),
                       ),
                       PopupMenuItem(
                         value: 'delete',
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.delete_outline,
-                              size: 20,
-                              color: Colors.red,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Delete',
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.delete_outline,
+                              color: Theme.of(context).colorScheme.error),
+                          title: Text('Delete',
                               style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.red.shade700,
-                              ),
-                            ),
-                          ],
+                                  color: Theme.of(context).colorScheme.error)),
                         ),
                       ),
                     ],
@@ -334,9 +269,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
   void _showEditStaffDialog(Staff staff) {
     // Debug: Check if staff ID is empty
     if (staff.id.isEmpty) {
-      _showError('Cannot edit this staff member: Invalid data. Please contact support.');
+      _showError(
+          'Cannot edit this staff member: Invalid data. Please contact support.');
       if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
+        debugPrint('Staff record is missing its document ID');
       }
       return;
     }
@@ -354,6 +290,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setState) => AlertDialog(
+            scrollable: true,
             title:
                 Text(staff == null ? 'Add Staff Member' : 'Edit Staff Member'),
             content: Column(
@@ -404,12 +341,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     );
   }
 
-  String _generatePin() {
-    // Generate a random 4-digit PIN
-    final random = DateTime.now().millisecondsSinceEpoch % 10000;
-    return random.toString().padLeft(4, '0');
-  }
-
   Future<void> _saveStaff(
       Staff? existingStaff, String name, String role) async {
     if (name.trim().isEmpty) {
@@ -420,25 +351,16 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     Navigator.of(context, rootNavigator: false).pop();
 
     if (existingStaff == null) {
-      // Generate a unique 4-digit PIN for account linking
-      final linkPin = _generatePin();
-
-      // Create new staff
       final newStaff = Staff(
-        id: '', // Will be set by Firestore
+        id: '',
         name: name.trim(),
         role: role,
-        linkPin: linkPin,
         createdAt: DateTime.now(),
       );
-
-      final success = await _createStaff(newStaff);
-      if (success) {
+      final created = await _createStaff(newStaff);
+      if (created != null && mounted) {
         ref.invalidate(staffListProvider);
-        if (mounted) {
-          // Show PIN to admin/manager
-          _showPinDialog(name.trim(), linkPin);
-        }
+        await _issueInvite(created);
       }
     } else {
       // Update existing staff
@@ -454,7 +376,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Staff member updated successfully'),
-              backgroundColor: Colors.green,
             ),
           );
         }
@@ -462,22 +383,12 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     }
   }
 
-  Future<bool> _createStaff(Staff staff) async {
-    try {
-      final deliveriesRepository = ref.read(deliveriesRepositoryProvider);
-      final result = await deliveriesRepository.createStaff(staff);
-
-      return result.when(
-        success: (_) => true,
-        failure: (message, exception) {
-          _showError(message);
-          return false;
-        },
-      );
-    } catch (e) {
-      _showError('Unexpected error: $e');
-      return false;
+  Future<Staff?> _createStaff(Staff staff) async {
+    final result = await ref.read(staffRepositoryProvider).createStaff(staff);
+    if (result.isFailure && mounted) {
+      _showError(result.errorOrNull ?? 'Could not add staff.');
     }
+    return result.dataOrNull;
   }
 
   Future<bool> _updateStaff(Staff staff) async {
@@ -498,235 +409,56 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     }
   }
 
-  void _showPinDialog(String staffName, String pin) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green[600], size: 28),
-            const SizedBox(width: 12),
-            const Text('Staff Member Added'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$staffName has been added successfully.',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue[200]!, width: 2),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.lock, color: Colors.blue[700], size: 20),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Account Linking PIN',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue[300]!, width: 1),
-                    ),
-                    child: Text(
-                      pin,
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 8,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Share this PIN with $staffName',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey[700],
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!, width: 1),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, color: Colors.orange[800], size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'They will need this PIN to link their account when they first sign in.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.orange[900],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Got It'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showRegeneratePinDialog(Staff staff) {
-    // Debug: Check if staff ID is empty
-    if (staff.id.isEmpty) {
-      _showError('Cannot regenerate PIN for this staff member: Invalid data. Please contact support.');
-      if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
-      }
+  Future<void> _issueInvite(Staff staff) async {
+    final result =
+        await ref.read(staffRepositoryProvider).issueInvite(staff.id);
+    if (!mounted) return;
+    final code = result.dataOrNull;
+    if (code == null) {
+      _showError(result.errorOrNull ?? 'Could not create an invitation.');
       return;
     }
 
-    final actionText = staff.linkPin == null ? 'generate' : 'regenerate';
-    final titleText = staff.linkPin == null ? 'Generate PIN' : 'Regenerate PIN';
-
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(titleText),
+        scrollable: true,
+        title: Text('Invitation for ${staff.name}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Are you sure you want to $actionText a PIN for "${staff.name}"?'),
+            const Text(
+              'Share this code privately with the staff member. It expires in 24 hours and can be used once. Creating a new code replaces this one.',
+            ),
             const SizedBox(height: 12),
-            if (staff.linkPin != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange[200]!, width: 1),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.warning_outlined, color: Colors.orange[800], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'This will replace the existing PIN. The old PIN will no longer work.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.orange[900],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ] else ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!, width: 1),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue[800], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'A new 4-digit PIN will be generated for account linking.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.blue[900],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            SelectableText(code),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: const Text('Close'),
           ),
           FilledButton(
             onPressed: () async {
-              // Close dialog first
-              Navigator.of(context).pop();
-              // Then regenerate PIN
-              await _regeneratePin(staff);
+              await Clipboard.setData(ClipboardData(text: code));
+              if (context.mounted) Navigator.of(context).pop();
             },
-            child: Text(staff.linkPin == null ? 'Generate' : 'Regenerate'),
+            child: const Text('Copy code'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _regeneratePin(Staff staff) async {
-    // Generate a new PIN
-    final newPin = _generatePin();
-
-    // Update staff with new PIN
-    final updatedStaff = staff.copyWith(linkPin: newPin);
-
-    final success = await _updateStaff(updatedStaff);
-    if (success) {
-      ref.invalidate(staffListProvider);
-      if (mounted) {
-        // Show the new PIN to admin
-        _showPinDialog(staff.name, newPin);
-      }
-    }
-  }
-
   void _showCalendarManagementDialog(Staff staff) {
     // Debug: Check if staff ID is empty
     if (staff.id.isEmpty) {
-      _showError('Cannot manage calendar for this staff member: Invalid data. Please contact support.');
+      _showError(
+          'Cannot manage calendar for this staff member: Invalid data. Please contact support.');
       if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
+        debugPrint('Staff record is missing its document ID');
       }
       return;
     }
@@ -743,9 +475,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
   void _showDeleteStaffDialog(Staff staff) {
     // Debug: Check if staff ID is empty
     if (staff.id.isEmpty) {
-      _showError('Cannot delete this staff member: Invalid data. Please contact support.');
+      _showError(
+          'Cannot delete this staff member: Invalid data. Please contact support.');
       if (kDebugMode) {
-        debugPrint('ERROR: Staff has empty ID - ${staff.toJson()}');
+        debugPrint('Staff record is missing its document ID');
       }
       return;
     }
@@ -753,6 +486,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Delete Staff Member'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -761,14 +495,16 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
             Text('Are you sure you want to delete "${staff.name}"?'),
             const SizedBox(height: 8),
             if (staff.uid != null)
-              const Text(
+              Text(
                 'Warning: This staff member is linked to a user account. Deleting will unlink their account.',
-                style: TextStyle(color: BrandColors.kakaBlue, fontSize: 12),
+                style: TextStyle(
+                    color: AppTone.blue.inkFor(context), fontSize: 12),
               ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'This action cannot be undone.',
-              style: TextStyle(color: Colors.red, fontSize: 12),
+              style: TextStyle(
+                  color: Theme.of(context).colorScheme.error, fontSize: 12),
             ),
           ],
         ),
@@ -784,7 +520,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
               // Then delete
               await _deleteStaff(staff);
             },
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -804,7 +543,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Staff member deleted successfully'),
-                backgroundColor: Colors.green,
               ),
             );
           }
@@ -827,7 +565,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: Colors.red,
         ),
       );
     }

@@ -1,209 +1,199 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/pre_delivery_checklist_item.dart';
-import '../models/delivery.dart';
-import '../providers/pre_delivery_checklist_providers.dart';
-import '../providers/auth_providers.dart';
-import '../app/theme/brand_colors.dart';
 
-/// Shows a pre-delivery checklist dialog for a specific delivery.
-/// Returns true if the dialog was closed with all items complete, false otherwise.
+import '../models/delivery.dart';
+import '../models/pre_delivery_checklist_item.dart';
+import '../models/pre_delivery_completion.dart';
+import '../providers/pre_delivery_checklist_providers.dart';
+import '../services/offline/connectivity_service.dart';
+import 'field_draft_dialog.dart';
+import 'design/design.dart';
+
+/// Opens immediately and keeps the checklist responsive as data loads.
 Future<bool> showPreDeliveryChecklistDialog({
   required BuildContext context,
-  required WidgetRef ref,
   required Delivery delivery,
 }) async {
-  // Initialize default checklist items on first use
-  await ref.read(initializePreDeliveryChecklistProvider.future);
-
-  // Get active checklist items
-  final activeItems = await ref.read(activePreDeliveryChecklistItemsProvider.future);
-
-  // If no checklist items, return true (nothing to check)
-  if (activeItems.isEmpty) {
-    return true;
-  }
-
-  // Get current completions for this delivery
-  final completions = await ref.read(deliveryCompletionsProvider(delivery.id).future);
-
-  // Build a map of itemId -> isCompleted
-  final Map<String, bool> completionMap = {};
-  for (final item in activeItems) {
-    final completion = completions.where((c) => c.itemId == item.id).firstOrNull;
-    completionMap[item.id] = completion?.isCompleted ?? false;
-  }
-
-  if (!context.mounted) return false;
-
   final result = await showDialog<bool>(
     context: context,
-    barrierDismissible: true,
-    builder: (dialogContext) => _PreDeliveryChecklistDialogContent(
-      delivery: delivery,
-      activeItems: activeItems,
-      initialCompletionMap: completionMap,
-    ),
+    builder: (_) => _PreDeliveryChecklistDialog(delivery: delivery),
   );
-
   return result ?? false;
 }
 
-class _PreDeliveryChecklistDialogContent extends ConsumerStatefulWidget {
-  const _PreDeliveryChecklistDialogContent({
-    required this.delivery,
-    required this.activeItems,
-    required this.initialCompletionMap,
-  });
+class _PreDeliveryChecklistDialog extends ConsumerStatefulWidget {
+  const _PreDeliveryChecklistDialog({required this.delivery});
 
   final Delivery delivery;
-  final List<PreDeliveryChecklistItem> activeItems;
-  final Map<String, bool> initialCompletionMap;
 
   @override
-  ConsumerState<_PreDeliveryChecklistDialogContent> createState() =>
-      _PreDeliveryChecklistDialogContentState();
+  ConsumerState<_PreDeliveryChecklistDialog> createState() =>
+      _PreDeliveryChecklistDialogState();
 }
 
-class _PreDeliveryChecklistDialogContentState
-    extends ConsumerState<_PreDeliveryChecklistDialogContent> {
-  late Map<String, bool> _checkedItems;
-  bool _isSaving = false;
+class _PreDeliveryChecklistDialogState
+    extends ConsumerState<_PreDeliveryChecklistDialog> {
+  final _saving = <String>{};
+  final _feedback = <String, ({String message, bool error})>{};
 
-  @override
-  void initState() {
-    super.initState();
-    _checkedItems = Map.from(widget.initialCompletionMap);
-  }
-
-  int get _checkedCount => _checkedItems.values.where((v) => v).length;
-  int get _totalItems => _checkedItems.length;
-  bool get _allChecked => _checkedItems.values.every((v) => v);
-
-  Future<void> _toggleItem(String itemId, bool value) async {
+  Future<void> _toggle(PreDeliveryChecklistItem item, bool value) async {
+    if (_saving.contains(item.id)) return;
     setState(() {
-      _checkedItems[itemId] = value;
-      _isSaving = true;
+      _saving.add(item.id);
+      _feedback.remove(item.id);
     });
 
-    // Get current user email
-    final currentUser = ref.read(currentUserProvider).value;
-    final userEmail = currentUser?.email;
-
-    // Persist to Firestore
-    await ref
-        .read(preDeliveryChecklistNotifierProvider.notifier)
-        .updateCompletion(widget.delivery.id, itemId, value, userEmail);
-
-    if (mounted) {
+    try {
+      final result = await ref
+          .read(preDeliveryChecklistNotifierProvider.notifier)
+          .saveCompletion(
+            schoolId: widget.delivery.schoolId,
+            deliveryId: widget.delivery.id,
+            itemId: item.id,
+            isCompleted: value,
+            itemLabel: item.title,
+          );
+      if (!mounted) return;
       setState(() {
-        _isSaving = false;
+        _feedback[item.id] = result.when(
+          success: (status) => (
+            message: fieldEditFeedback('Checklist change', status),
+            error: false
+          ),
+          failure: (message, _) => (message: message, error: true),
+        );
       });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _feedback[item.id] = (
+            message: 'Couldn’t save this checklist item.',
+            error: true,
+          );
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _saving.remove(item.id));
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final items = ref.watch(activePreDeliveryChecklistItemsProvider);
+    final completionProvider = deliveryCompletionsProvider(widget.delivery.id);
+    final completions = ref.watch(completionProvider);
+    final offline = ref.watch(connectivityStatusProvider).valueOrNull ==
+        ConnectivityStatus.offline;
+    final done = completions.valueOrNull
+            ?.where((completion) => completion.isCompleted)
+            .map((completion) => completion.itemId)
+            .toSet() ??
+        const <String>{};
+    final allChecked =
+        items.valueOrNull?.every((item) => done.contains(item.id)) == true &&
+            !items.hasError &&
+            !completions.hasError &&
+            completions.hasValue;
+
     return AlertDialog(
-      title: Row(
-        children: [
-          Icon(
-            _allChecked ? Icons.check_circle : Icons.checklist_rtl,
-            color: _allChecked ? Colors.green : BrandColors.kakaBlue,
+      scrollable: true,
+      title: const Text('Pre-delivery checklist'),
+      content: _buildChecklist(items, completions, offline, done),
+      actions: [
+        if (items.hasError || completions.hasError)
+          TextButton(
+            onPressed: () {
+              if (items.hasError) {
+                ref.invalidate(activePreDeliveryChecklistItemsProvider);
+              }
+              if (completions.hasError) ref.invalidate(completionProvider);
+            },
+            child: const Text('Retry'),
           ),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text('Pre-Delivery Checklist'),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(allChecked),
+          child: Text(allChecked ? 'Done' : 'Close'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChecklist(
+    AsyncValue<List<PreDeliveryChecklistItem>> items,
+    AsyncValue<List<PreDeliveryCompletion>> completions,
+    bool offline,
+    Set<String> done,
+  ) {
+    if (items.hasError || completions.hasError) {
+      return Text(offline
+          ? 'Couldn’t load the checklist on this device.'
+          : 'Couldn’t load the checklist. Try again.');
+    }
+    final active = items.valueOrNull;
+    if (active == null || !completions.hasValue) {
+      return Text(
+          offline ? 'Checking saved checklist items…' : 'Loading checklist…');
+    }
+    if (active.isEmpty) {
+      return Text(offline
+          ? 'No checklist items saved on this device.'
+          : 'No checklist items.');
+    }
+    final completed = active.where((item) => done.contains(item.id)).length;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppSectionHeading(title: widget.delivery.schoolName),
+        const SizedBox(height: 8),
+        Semantics(
+          liveRegion: true,
+          child: AppStatusPill(
+            label:
+                '$completed of ${active.length} checked${offline ? ' on this device' : ''}',
+            icon: Icons.checklist_outlined,
+            tone: completed == active.length ? AppTone.green : AppTone.blue,
           ),
-          if (_isSaving)
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-        ],
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        const SizedBox(height: 8),
+        LinearProgressIndicator(value: completed / active.length),
+        const SizedBox(height: 12),
+        AppGroupedList(
           children: [
-            Text(
-              'Verify items for: ${widget.delivery.schoolName}',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 16),
-            // Checklist items
-            ...widget.activeItems.map((item) {
-              return CheckboxListTile(
-                value: _checkedItems[item.id] ?? false,
-                onChanged: (value) => _toggleItem(item.id, value ?? false),
-                title: Text(
-                  item.title,
-                  style: TextStyle(
-                    fontSize: 14,
-                    decoration: (_checkedItems[item.id] ?? false)
-                        ? TextDecoration.lineThrough
-                        : null,
-                    color: (_checkedItems[item.id] ?? false)
-                        ? Colors.grey
-                        : null,
-                  ),
-                ),
-                subtitle: item.subtitle != null
-                    ? Text(
-                        item.subtitle!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                        ),
-                      )
-                    : null,
-                dense: true,
-                contentPadding: EdgeInsets.zero,
+            for (final item in active)
+              CheckboxListTile(
+                onChanged: _saving.contains(item.id)
+                    ? null
+                    : (value) => _toggle(item, value ?? false),
+                value: done.contains(item.id),
+                title: Text(item.title),
+                subtitle: _buildItemSubtitle(item),
                 controlAffinity: ListTileControlAffinity.leading,
-                activeColor: Colors.green,
-              );
-            }),
-            const SizedBox(height: 16),
-            // Progress indicator
-            LinearProgressIndicator(
-              value: _totalItems > 0 ? _checkedCount / _totalItems : 0,
-              backgroundColor: Colors.grey.shade300,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                _allChecked ? Colors.green : BrandColors.kakaBlue,
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_allChecked) ...[
-                  const Icon(Icons.check_circle, color: Colors.green, size: 16),
-                  const SizedBox(width: 4),
-                  const Text(
-                    'All items completed!',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.green,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ] else
-                  Text(
-                    '$_checkedCount of $_totalItems items completed',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-              ],
-            ),
           ],
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(_allChecked),
-          child: Text(_allChecked ? 'Done' : 'Close'),
-        ),
+      ],
+    );
+  }
+
+  Widget? _buildItemSubtitle(PreDeliveryChecklistItem item) {
+    final feedback = _feedback[item.id];
+    final saving = _saving.contains(item.id);
+    if (item.subtitle == null && feedback == null && !saving) return null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (item.subtitle != null) Text(item.subtitle!),
+        if (saving || feedback != null)
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              saving ? 'Saving…' : feedback!.message,
+              style: feedback?.error == true
+                  ? TextStyle(color: Theme.of(context).colorScheme.error)
+                  : null,
+            ),
+          ),
       ],
     );
   }

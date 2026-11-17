@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../repositories/auth_repository.dart';
-import '../../repositories/deliveries_repository.dart';
-import '../../repositories/schools_repository.dart';
-import '../../repositories/storage_repository.dart';
+import '../repositories/auth_repository.dart';
+import '../repositories/deliveries_repository.dart';
+import '../repositories/schools_repository.dart';
+import '../repositories/storage_repository.dart';
+import 'delivery_visit_provider.dart';
+import 'saved_edit_providers.dart';
+import '../models/delivery_visit.dart';
 import '../services/photo_service.dart';
 import '../services/permissions_service.dart';
 
@@ -14,10 +17,22 @@ final deliveriesRepositoryProvider = Provider<DeliveriesRepository>((ref) {
   return FirebaseDeliveriesRepository();
 });
 
-final schoolsRepositoryProvider = Provider<SchoolsRepository>((ref) {
-  final storageRepository = ref.watch(storageRepositoryProvider);
-  return FirebaseSchoolsRepository(storageRepository);
+// Background evidence uploads are explicit about which visit they update.
+final baseSchoolsRepositoryProvider = Provider<SchoolsRepository>((ref) {
+  return FirebaseSchoolsRepository(recovery: ref.watch(savedEditRecoveryProvider));
 });
+
+final visitSchoolsRepositoryFactoryProvider =
+    Provider<SchoolsRepository Function(DeliveryVisit)>((ref) {
+  final recovery = ref.watch(savedEditRecoveryProvider);
+  return (visit) => FirebaseSchoolsRepository(visit: visit, recovery: recovery);
+});
+
+final schoolsRepositoryProvider = Provider<SchoolsRepository>((ref) {
+  final visit = ref.watch(activeDeliveryVisitProvider);
+  if (visit == null) return ref.watch(baseSchoolsRepositoryProvider);
+  return ref.watch(visitSchoolsRepositoryFactoryProvider)(visit);
+}, dependencies: [activeDeliveryVisitProvider]);
 
 final storageRepositoryProvider = Provider<StorageRepository>((ref) {
   return FirebaseStorageRepository();

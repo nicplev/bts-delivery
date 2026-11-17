@@ -17,6 +17,7 @@ class ConnectivityService {
   ConnectivityStatus get currentStatus => _currentStatus;
 
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
+  bool _disposed = false;
 
   ConnectivityService() {
     _initialize();
@@ -45,16 +46,15 @@ class ConnectivityService {
 
   void _updateConnectionStatus(ConnectivityResult result) {
     // Check if the result indicates a connection
-    final hasConnection = 
-      result != ConnectivityResult.none && 
-      result != ConnectivityResult.bluetooth;
+    final hasConnection = result != ConnectivityResult.none &&
+        result != ConnectivityResult.bluetooth;
 
     _updateStatus(
-      hasConnection ? ConnectivityStatus.online : ConnectivityStatus.offline
-    );
+        hasConnection ? ConnectivityStatus.online : ConnectivityStatus.offline);
   }
 
   void _updateStatus(ConnectivityStatus status) {
+    if (_disposed) return;
     _currentStatus = status;
     _statusController.add(status);
   }
@@ -65,8 +65,8 @@ class ConnectivityService {
   Future<bool> hasInternetConnection() async {
     try {
       final result = await _connectivity.checkConnectivity();
-      return result != ConnectivityResult.none && 
-             result != ConnectivityResult.bluetooth;
+      return result != ConnectivityResult.none &&
+          result != ConnectivityResult.bluetooth;
     } catch (e) {
       return false;
     }
@@ -82,6 +82,7 @@ class ConnectivityService {
   }
 
   void dispose() {
+    _disposed = true;
     _connectivitySubscription?.cancel();
     _statusController.close();
   }
@@ -97,7 +98,12 @@ final connectivityServiceProvider = Provider<ConnectivityService>((ref) {
 // Provider for connectivity status stream
 final connectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) {
   final service = ref.watch(connectivityServiceProvider);
-  return service.statusStream;
+  return Stream.multi((sink) {
+    final subscription =
+        service.statusStream.listen(sink.add, onDone: sink.close);
+    sink.onCancel = subscription.cancel;
+    sink.add(service.currentStatus);
+  });
 });
 
 // Provider for current connectivity status

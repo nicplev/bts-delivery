@@ -1,61 +1,55 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 
-/**
- * Firestore trigger that runs when a delivery is created, updated, or deleted
- * This helps track calendar changes and can be used for notifications
- */
+export function changedSchoolIds(before: unknown, after: unknown): string[] {
+  return [...new Set([before, after].filter((id): id is string =>
+    typeof id === "string" && id.length > 0 && !id.includes("/")))];
+}
+
 export const onDeliveryChange = functions.firestore
   .document("deliveries/{deliveryId}")
   .onWrite(async (change, context) => {
-    const deliveryId = context.params.deliveryId;
-    const before = change.before.exists ? change.before.data() : null;
-    const after = change.after.exists ? change.after.data() : null;
-
-    let changeType: string;
-    if (!before && after) {
-      changeType = "created";
-    } else if (before && !after) {
-      changeType = "deleted";
-    } else {
-      changeType = "updated";
-    }
-
-    functions.logger.info(`Delivery ${changeType}: ${deliveryId}`);
-
+    const before = change.before.data();
+    const after = change.after.data();
+    const changeType = !before ? "created" : !after ? "deleted" : "updated";
     const db = admin.firestore();
+    const timestamp = Timestamp.fromDate(new Date(context.timestamp));
 
-    try {
-      // Update a global calendar metadata document to track last update time
-      // This can be used to show users when calendars were last modified
-      await db.collection("system_metadata").doc("calendar_last_updated").set({
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        deliveryId,
-        changeType,
-      }, {merge: true});
-
-      // If the delivery affects specific staff, we could update their metadata here
-      if (after && after.staffIds && Array.isArray(after.staffIds)) {
-        const staffIds = after.staffIds as string[];
-
-        // Update each affected staff member's calendar metadata
-        const batch = db.batch();
-        for (const staffId of staffIds) {
-          const metadataRef = db.collection("calendar_metadata").doc(staffId);
-          batch.set(metadataRef, {
-            staffId,
-            lastDeliveryChange: admin.firestore.FieldValue.serverTimestamp(),
-            lastAffectedDelivery: deliveryId,
-          }, {merge: true});
-        }
-        await batch.commit();
-
-        functions.logger.info(`Updated calendar metadata for ${staffIds.length} staff members`);
-      }
-    } catch (error) {
-      functions.logger.error("Error in delivery change trigger:", error);
-      // Don't throw - we don't want to fail the delivery operation
+    const staff = db.collection("staff");
+    const schools = changedSchoolIds(before?.schoolId, after?.schoolId);
+    const queries = [staff.where("role", "in", ["admin", "manager"])];
+    if (schools.length > 0) {
+      queries.push(staff.where("assignedSchoolIds", "array-contains-any", schools));
     }
+    const snapshots = await Promise.all(queries.map((query) => query.get()));
+    const affected = new Set(snapshots.flatMap((snapshot) => snapshot.docs.map((doc) => doc.id)));
 
+    const system = db.collection("system_metadata").doc("calendar_last_updated");
+    await db.runTransaction(async (tx) => {
+      const prior = (await tx.get(system)).get("lastUpdated");
+      if (prior && prior.toMillis() > timestamp.toMillis()) return;
+      tx.set(system, {lastUpdated: timestamp, changeType}, {merge: true});
+    });
+
+    // Only subscriptions already in use need per-staff change notifications.
+    const ids = [...affected];
+    for (let offset = 0; offset < ids.length; offset += 400) {
+      const refs = ids.slice(offset, offset + 400)
+        .map((id) => db.collection("calendar_metadata").doc(id));
+      await db.runTransaction(async (tx) => {
+        const docs = await tx.getAll(...refs);
+        for (const doc of docs) {
+          const prior = doc.get("lastDeliveryChange");
+          if (doc.get("subscriptionActive") === true &&
+              (!prior || prior.toMillis() <= timestamp.toMillis())) {
+            tx.update(doc.ref, {
+              lastDeliveryChange: timestamp,
+              token: FieldValue.delete(),
+            });
+          }
+        }
+      });
+    }
     return null;
   });

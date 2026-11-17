@@ -1,21 +1,60 @@
+import 'dart:async';
 import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signature/signature.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
+import '../models/checklist_item.dart';
+import '../models/delivery_visit.dart';
+import '../models/offline/evidence_upload.dart';
+import '../models/signoff_snapshot.dart';
 import '../providers/schools_providers.dart';
+import '../providers/auth_providers.dart';
+import '../providers/delivery_visit_provider.dart';
 import '../providers/repository_providers.dart';
 import '../providers/checklist_providers.dart';
-import '../services/image_service.dart';
+import '../providers/offline_delivery_providers.dart';
+import '../services/offline/connectivity_service.dart';
+import '../services/offline/evidence_upload_worker.dart';
+import 'sync_status_detail_sheet.dart';
+import 'delivery_visit_gate.dart';
 import '../services/date_utils.dart';
 import '../services/excel_export_service.dart';
 import '../models/school.dart';
-import '../app/theme/brand_colors.dart';
+import 'design/design.dart';
+
+final _signedEvidenceProvider = StreamProvider.autoDispose
+    .family<SignedEvidence?, ({String schoolId, String? deliveryId})>(
+        (ref, scope) {
+  return ref
+      .watch(baseSchoolsRepositoryProvider)
+      .watchSignedEvidence(scope.schoolId, scope.deliveryId);
+});
+
+final _signatureUrlProvider =
+    FutureProvider.autoDispose.family<String?, String>(
+  (ref, path) async {
+    final result =
+        await ref.watch(storageRepositoryProvider).getDownloadUrl(path);
+    return result.dataOrNull;
+  },
+);
 
 class SignOffTab extends ConsumerStatefulWidget {
-  const SignOffTab({super.key, required this.schoolId});
+  const SignOffTab({
+    super.key,
+    required this.schoolId,
+    required this.schoolName,
+    this.deliveryId,
+    this.visitDate,
+  });
 
   final String schoolId;
+  final String schoolName;
+  final String? deliveryId;
+  final DateTime? visitDate;
 
   @override
   ConsumerState<SignOffTab> createState() => _SignOffTabState();
@@ -28,195 +67,250 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     penColor: Colors.black,
     exportBackgroundColor: Colors.white,
   );
-  final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _noteKeys =
       {}; // Map of yearLevelId_classroomId -> GlobalKey
-  bool _isUploading = false;
+  MaterialPageRoute<void>? _captureRoute;
+  DialogRoute<bool>? _reviewRoute;
+  bool _isCorrecting = false;
 
   @override
   void dispose() {
+    final capture = _captureRoute;
+    final review = _reviewRoute;
+    if (capture == null) {
+      _disposeControllers();
+    } else {
+      // The visit gate can remove this tab while the capture is still on the
+      // navigator. Keep the controllers alive through route removal.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (review?.isActive == true) review!.navigator?.removeRoute(review);
+        if (capture.isActive) capture.navigator?.removeRoute(capture);
+      });
+      unawaited(capture.completed.whenComplete(_disposeControllers));
+    }
+    super.dispose();
+  }
+
+  void _disposeControllers() {
     _nameController.dispose();
     _signatureController.dispose();
-    _scrollController.dispose();
-    super.dispose();
+  }
+
+  void _openCapture() {
+    final uid = ref.read(authRepositoryProvider).currentUser?.uid;
+    final visit = ref.read(activeDeliveryVisitProvider);
+    if (_captureRoute != null) return;
+    if (uid == null || visit == null || !_canSaveCapture(uid, visit)) {
+      _showError(
+          'This visit is unavailable for signing. Check its saved work.');
+      return;
+    }
+
+    final capture = MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          if (ref.watch(authStateProvider).valueOrNull?.uid != uid) {
+            return const Scaffold();
+          }
+          return DeliveryVisitGate(
+            visit: visit,
+            child: _SignatureCaptureScreen(
+              schoolName: widget.schoolName,
+              visitId: visit.deliveryId,
+              visitDate: widget.visitDate,
+              name: _nameController,
+              signature: _signatureController,
+              onReview: (context) => _handleSignOff(context, uid, visit),
+            ),
+          );
+        },
+      ),
+    );
+    _captureRoute = capture;
+    Navigator.of(context, rootNavigator: true).push(capture);
+    unawaited(capture.completed.then((_) {
+      if (mounted && identical(_captureRoute, capture)) _captureRoute = null;
+    }));
   }
 
   void _scrollToNote(String yearLevelId, String classroomId) {
     final key = '${yearLevelId}_$classroomId';
     final globalKey = _noteKeys[key];
 
-    if (globalKey?.currentContext != null) {
-      Scrollable.ensureVisible(
-        globalKey!.currentContext!,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-        alignment: 0.1, // Position near the top of the viewport
-      );
-    }
+    _scrollToSection(globalKey?.currentContext);
+  }
+
+  void _scrollToSection(BuildContext? target) {
+    if (target == null) return;
+    final renderObject = target.findRenderObject();
+    if (renderObject == null) return;
+    // The inner position coordinates with the visit header. Scrolling the
+    // outer position separately can reset the inner offset during the jump.
+    Scrollable.maybeOf(target)?.position.ensureVisible(
+          renderObject,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
   }
 
   @override
   Widget build(BuildContext context) {
-    final signOffAsync = ref.watch(signOffProvider(widget.schoolId));
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildOverviewCard(),
-                const SizedBox(height: 16),
-                _buildNotesCard(),
-                const SizedBox(height: 16),
-                _buildSignOffCard(signOffAsync),
-              ],
-            ),
+    final legacy = ref.watch(signOffProvider(widget.schoolId)).valueOrNull;
+    final signed = ref.watch(_signedEvidenceProvider((
+      schoolId: widget.schoolId,
+      deliveryId: widget.deliveryId,
+    )));
+    final uploadState = ref.watch(evidenceUploadsProvider);
+    final uploads = uploadState.valueOrNull;
+    final pending = _pendingSignature(uploads);
+    final signatureStatusLoading = !signed.hasValue && signed.isLoading ||
+        uploads == null && uploadState.isLoading;
+    final signatureStatusUnavailable = signed.hasError || uploadState.hasError;
+    ref.watch(activeChecklistItemsProvider);
+    final showForm = widget.deliveryId != null &&
+        !signatureStatusLoading &&
+        !signatureStatusUnavailable &&
+        pending == null &&
+        (signed.valueOrNull == null || _isCorrecting);
+    return SingleChildScrollView(
+      key: const PageStorageKey('school-signoff'),
+      primary: true,
+      padding: EdgeInsets.fromLTRB(
+        AppTokens.gutter,
+        16,
+        AppTokens.gutter,
+        MediaQuery.paddingOf(context).bottom + 16,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildOverviewCard(
+            showForm: showForm,
+            signatureStatusLoading: signatureStatusLoading,
+            signatureStatusUnavailable: signatureStatusUnavailable,
           ),
-        );
-      },
+          const SizedBox(height: AppTokens.sectionGap),
+          _buildNotesCard(),
+          const SizedBox(height: AppTokens.sectionGap),
+          _buildSignOffCard(signed, pending, uploads?.activeId),
+          if (legacy != null) ...[
+            const SizedBox(height: 16),
+            AppPanel(
+              child: ExpansionTile(
+                title: const Text('Earlier school sign-off'),
+                subtitle: const Text('No delivery visit was recorded'),
+                children: [_buildCompletedSignOff(legacy)],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
-  Widget _buildOverviewCard() {
+  Widget _buildOverviewCard({
+    required bool showForm,
+    required bool signatureStatusLoading,
+    required bool signatureStatusUnavailable,
+  }) {
     final schoolTotalAsync = ref.watch(schoolTotalProvider(widget.schoolId));
     final schoolConsumablesTotalsAsync =
         ref.watch(schoolConsumablesTotalsProvider(widget.schoolId));
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16.0),
+    final typography = Theme.of(context).textTheme;
+    return AppPanel(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(Icons.summarize, color: Theme.of(context).primaryColor),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Delivery Overview',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
+          AppSectionHeading(
+            title: 'Delivery Overview',
+            trailing: IconButton(
+              onPressed: _refreshTotals,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+            ),
+          ),
+          if (widget.deliveryId != null && signatureStatusUnavailable)
+            const Text(
+                'Signature status unavailable. Saved work may need attention.')
+          else if (widget.deliveryId != null && signatureStatusLoading)
+            const Text('Checking signature status…')
+          else if (showForm)
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: FilledButton.icon(
+                onPressed: _openCapture,
+                icon: const Icon(Icons.draw_outlined),
+                label: const Text('Capture signature'),
               ),
-              // Use IconButton instead of OutlinedButton
-              IconButton(
-                onPressed: _refreshTotals,
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh',
+            ),
+          const Divider(height: 20),
+          Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text('Expected pack total'),
+              schoolTotalAsync.when(
+                data: (total) => Text(
+                  '$total',
+                  style: typography.headlineMedium
+                      ?.copyWith(color: AppTone.blue.inkFor(context)),
+                ),
+                loading: () => const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                error: (_, __) => const Text('Pack total unavailable'),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // School-wide total summary
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total Packs Delivered',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                schoolTotalAsync.when(
-                  data: (total) => Text(
-                    '$total',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor,
-                        ),
-                  ),
-                  loading: () => const CircularProgressIndicator(),
-                  error: (error, _) => const Text(
-                    '?',
-                    style: TextStyle(fontSize: 18, color: Colors.red),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Consumables Totals Summary
           schoolConsumablesTotalsAsync.when(
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            loading: () => const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('Loading consumables totals…'),
+            ),
+            error: (_, __) => const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text('Consumables totals unavailable'),
+            ),
             data: (totals) {
-              if (totals.isEmpty) {
-                return const SizedBox.shrink();
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Consumables Totals',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: BrandColors.kakaBlue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: BrandColors.kakaBlue.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Column(
-                      children: totals.entries.map((entry) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  entry.key,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ),
-                              Text(
+              if (totals.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Consumables Totals', style: typography.titleMedium),
+                    const SizedBox(height: 8),
+                    for (final entry in totals.entries)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: Text(entry.key)),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
                                 '${entry.value.quantity} ${entry.value.unit}',
+                                textAlign: TextAlign.end,
                                 style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
+                                    fontWeight: FontWeight.w600),
                               ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               );
             },
           ),
+          const SizedBox(height: 16),
           _buildDeliveryBreakdown(),
         ],
       ),
@@ -230,137 +324,58 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Classroom Totals',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ],
-        ),
+        Text('Classroom Totals',
+            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        // Color Legend
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildLegendItem(Icons.check_circle, Colors.green, 'Complete'),
-              _buildLegendItem(Icons.warning, Colors.orange, 'Incomplete'),
-              _buildLegendItem(Icons.cancel, Colors.red, 'Not Attended'),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
         yearLevelsAsync.when(
           data: (yearLevels) => yearLevels.isEmpty
-              ? Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
-                  ),
-                  child: const Center(
-                    child: Text('No year levels found'),
-                  ),
+              ? const Text('No year levels found')
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final yearLevel in yearLevels)
+                      _buildYearLevelGroup(yearLevel),
+                  ],
+                ),
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => const Text('Couldn’t load year levels'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYearLevelGroup(YearLevel yearLevel) {
+    final classroomsAsync = ref.watch(classroomsProvider(
+      (schoolId: widget.schoolId, yearLevelId: yearLevel.id),
+    ));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 20),
+        Text(
+          yearLevel.label,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        classroomsAsync.when(
+          data: (classrooms) => classrooms.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('No classrooms found'),
                 )
               : Column(
-                  children: yearLevels
-                      .map((yearLevel) => _buildYearLevelCard(yearLevel))
-                      .toList(),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var index = 0; index < classrooms.length; index++) ...[
+                      if (index > 0) const Divider(height: 1),
+                      _buildClassroomRow(classrooms[index], yearLevel.id),
+                    ],
+                  ],
                 ),
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.withOpacity(0.3)),
-            ),
-            child: Text('Error loading year levels: $error'),
-          ),
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => const Text('Couldn’t load classrooms'),
         ),
       ],
-    );
-  }
-
-  Widget _buildLegendItem(IconData icon, Color color, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: color, size: 16),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildYearLevelCard(YearLevel yearLevel) {
-    final classroomsAsync = ref.watch(classroomsProvider(
-        (schoolId: widget.schoolId, yearLevelId: yearLevel.id)));
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.withOpacity(0.3)),
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            yearLevel.label,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          classroomsAsync.when(
-            data: (classrooms) => classrooms.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 4),
-                    child: Text(
-                      'No classrooms found',
-                      style: TextStyle(fontSize: 14, color: Colors.grey),
-                    ),
-                  )
-                : Column(
-                    children: classrooms
-                        .map((classroom) =>
-                            _buildClassroomRow(classroom, yearLevel.id))
-                        .toList(),
-                  ),
-            loading: () => const Padding(
-              padding: EdgeInsets.all(8),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (error, _) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text(
-                'Error loading classrooms: $error',
-                style: const TextStyle(fontSize: 14, color: Colors.red),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -389,521 +404,166 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       classroomId: classroom.id,
     )));
 
-    // Get color based on completion status - must check consumables too
-    Color getStatusColor(List<Consumable> consumables) {
-      // If not attended, return red immediately
-      if (classroom.completionStatus == ClassroomCompletionStatus.notAttended) {
-        return Colors.red;
-      }
-
-      // If classroom is marked complete, verify all consumables are actually complete
-      if (classroom.completionStatus == ClassroomCompletionStatus.complete) {
-        // Check if any consumables are incomplete (partial delivery)
-        final hasPartialConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered != null &&
-              consumable.actualQuantityDelivered != consumable.quantity;
-        });
-
-        // Check if any consumables are not attended (no actual quantity set)
-        final hasUnattendedConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered == null;
-        });
-
-        // If any consumables are incomplete or not attended, show orange
-        if (hasPartialConsumables || hasUnattendedConsumables) {
-          return Colors.orange;
-        }
-
-        // All consumables are complete, show green
-        return Colors.green;
-      }
-
-      // Otherwise use the classroom's status
-      switch (classroom.completionStatus) {
-        case ClassroomCompletionStatus.complete:
-          return Colors.green;
-        case ClassroomCompletionStatus.incomplete:
-          return Colors.orange;
-        case ClassroomCompletionStatus.notAttended:
-          return Colors.red;
-      }
-    }
-
-    IconData getStatusIcon(List<Consumable> consumables) {
-      // If not attended, return cancel icon immediately
-      if (classroom.completionStatus == ClassroomCompletionStatus.notAttended) {
-        return Icons.cancel;
-      }
-
-      // If classroom is marked complete, verify all consumables are actually complete
-      if (classroom.completionStatus == ClassroomCompletionStatus.complete) {
-        // Check if any consumables are incomplete (partial delivery)
-        final hasPartialConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered != null &&
-              consumable.actualQuantityDelivered != consumable.quantity;
-        });
-
-        // Check if any consumables are not attended (no actual quantity set)
-        final hasUnattendedConsumables = consumables.any((consumable) {
-          return consumable.actualQuantityDelivered == null;
-        });
-
-        // If any consumables are incomplete or not attended, show warning
-        if (hasPartialConsumables || hasUnattendedConsumables) {
-          return Icons.warning;
-        }
-
-        // All consumables are complete, show check circle
-        return Icons.check_circle;
-      }
-
-      // Otherwise use the classroom's status
-      switch (classroom.completionStatus) {
-        case ClassroomCompletionStatus.complete:
-          return Icons.check_circle;
-        case ClassroomCompletionStatus.incomplete:
-          return Icons.warning;
-        case ClassroomCompletionStatus.notAttended:
-          return Icons.cancel;
-      }
-    }
+    final typography = Theme.of(context).textTheme;
+    final notes = notesAsync.asData?.value;
+    final breakdowns = breakdownsAsync.asData?.value;
 
     return consumablesAsync.when(
       data: (consumables) {
-        final statusColor = getStatusColor(consumables);
-        final statusIcon = getStatusIcon(consumables);
-
-        return Container(
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: statusColor,
-              width: 2,
+        final allConsumablesDelivered = consumables.every(
+          (item) => item.actualQuantityDelivered == item.quantity,
+        );
+        final (status, icon, tone) = switch (classroom.completionStatus) {
+          ClassroomCompletionStatus.notAttended => (
+              'Not Attended',
+              Icons.remove_circle_outline,
+              AppTone.neutral
             ),
-          ),
+          ClassroomCompletionStatus.complete when allConsumablesDelivered => (
+              'Complete',
+              Icons.check_circle_outline,
+              AppTone.green
+            ),
+          _ => ('Incomplete', Icons.warning_amber_rounded, AppTone.yellow),
+        };
+        final actual = classroom.actualPacksDelivered;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Classroom name and pack total row
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Expanded(
+                  Text(classroom.name, style: typography.titleMedium),
+                  AppStatusPill(label: status, icon: icon, tone: tone),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                packTotalAsync.when(
+                  data: (total) {
+                    if (classroom.completionStatus ==
+                            ClassroomCompletionStatus.incomplete &&
+                        actual != null) {
+                      return total == null
+                          ? '$actual packs delivered'
+                          : '$actual of ${total.total} packs delivered';
+                    }
+                    return total == null
+                        ? 'No pack total set'
+                        : '${total.total} expected packs';
+                  },
+                  loading: () => 'Loading pack total…',
+                  error: (_, __) => 'Pack total unavailable',
+                ),
+                style: typography.bodyMedium,
+              ),
+              if (breakdowns != null && breakdowns.length > 1)
+                Text(
+                  'Composite · ${breakdowns.map((item) => '${item.yearLevelLabel}: ${item.studentCount}').join(' · ')}',
+                  style: typography.bodySmall,
+                ),
+              if (notes != null && notes.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () => _scrollToNote(yearLevelId, classroom.id),
+                  icon: const Icon(Icons.notes_outlined),
+                  label: const Text('View notes'),
+                ),
+              if (consumables.isNotEmpty) ...[
+                const Divider(height: 16),
+                for (final item in consumables)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          statusIcon,
-                          color: statusColor,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          classroom.name,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                        Icon(_getConsumableIcon(item.itemName),
+                            size: 16, color: AppTone.blue.inkFor(context)),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(item.itemName)),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            item.actualQuantityDelivered == null
+                                ? '${item.quantity} ${item.unit} expected'
+                                : '${item.actualQuantityDelivered} / ${item.quantity} ${item.unit}',
+                            textAlign: TextAlign.end,
+                            style: typography.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
                           ),
-                        ),
-                        // Composite class indicator badge only
-                        breakdownsAsync.when(
-                          data: (breakdowns) {
-                            if (breakdowns.length <= 1) {
-                              return const SizedBox.shrink();
-                            }
-                            return Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.shade100,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  'Composite',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.teal.shade700,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                          loading: () => const SizedBox.shrink(),
-                          error: (_, __) => const SizedBox.shrink(),
                         ),
                       ],
                     ),
                   ),
-                  packTotalAsync.when(
-                    data: (packTotal) {
-                      final expectedTotal = packTotal?.total ?? 0;
-                      final isIncomplete = classroom.completionStatus ==
-                          ClassroomCompletionStatus.incomplete;
-                      final hasActualQuantity =
-                          classroom.actualPacksDelivered != null;
-
-                      // Determine display color based on status
-                      final displayColor = isIncomplete
-                          ? Colors.orange
-                          : Theme.of(context).primaryColor;
-                      final backgroundColor = isIncomplete
-                          ? Colors.orange.withValues(alpha: 0.15)
-                          : Theme.of(context)
-                              .primaryColor
-                              .withValues(alpha: 0.15);
-
-                      String displayText;
-                      if (isIncomplete && hasActualQuantity) {
-                        // Show actual/expected for incomplete deliveries
-                        displayText =
-                            '${classroom.actualPacksDelivered}/$expectedTotal packs';
-                      } else {
-                        // Show total for complete or not attended
-                        displayText = '$expectedTotal packs';
-                      }
-
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: backgroundColor,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.inventory_2,
-                              size: 14,
-                              color: displayColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              displayText,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: displayColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    error: (error, _) => const Text(
-                      '?',
-                      style: TextStyle(fontSize: 12, color: Colors.red),
-                    ),
-                  ),
-                ],
-              ),
-
-              // Second row: year level distribution + note badge
-              breakdownsAsync.when(
-                data: (breakdowns) {
-                  return notesAsync.when(
-                    data: (notes) {
-                      final isComposite = breakdowns.length > 1;
-                      final hasNotes = notes.isNotEmpty;
-
-                      if (!isComposite && !hasNotes) {
-                        return const SizedBox.shrink();
-                      }
-
-                      // Build distribution text if composite
-                      String? distributionText;
-                      if (isComposite) {
-                        distributionText = breakdowns.map((b) {
-                          final label = b.yearLevelLabel.replaceAll('Year ', 'Y');
-                          return '$label: ${b.studentCount}';
-                        }).join('  •  ');
-                      }
-
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 4, left: 24),
-                        child: Row(
-                          children: [
-                            if (distributionText != null)
-                              Text(
-                                distributionText,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.teal.shade600,
-                                ),
-                              ),
-                            if (hasNotes) ...[
-                              if (isComposite) const SizedBox(width: 12),
-                              InkWell(
-                                onTap: () => _scrollToNote(yearLevelId, classroom.id),
-                                borderRadius: BorderRadius.circular(8),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.pink.shade400,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Text(
-                                    'note',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-
-              // Consumables section
-              consumablesAsync.when(
-                data: (consumables) {
-                  if (consumables.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 8),
-                      const Divider(height: 1),
-                      const SizedBox(height: 8),
-                      ...consumables.map((consumable) {
-                        final hasActualQuantity =
-                            consumable.actualQuantityDelivered != null;
-                        final isPartialDelivery = hasActualQuantity &&
-                            consumable.actualQuantityDelivered !=
-                                consumable.quantity;
-
-                        // Determine icon and color based on delivery status
-                        final icon = _getConsumableIcon(consumable.itemName);
-                        final iconColor = isPartialDelivery
-                            ? Colors.orange
-                            : BrandColors.kakaBlue;
-
-                        // Format quantity text
-                        String quantityText;
-                        Color quantityColor;
-                        if (hasActualQuantity) {
-                          quantityText =
-                              '${consumable.actualQuantityDelivered}/${consumable.quantity} ${consumable.unit}';
-                          quantityColor =
-                              isPartialDelivery ? Colors.orange : Colors.green;
-                        } else {
-                          quantityText =
-                              '${consumable.quantity} ${consumable.unit}';
-                          quantityColor = BrandColors.kakaBlue;
-                        }
-
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            children: [
-                              Icon(
-                                icon,
-                                size: 14,
-                                color: iconColor,
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  consumable.itemName,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                quantityText,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: quantityColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (error, _) => const SizedBox.shrink(),
-              ),
-
-              // Last updated info
+              ],
               if (classroom.lastUpdatedBy != null &&
                   classroom.lastUpdatedAt != null) ...[
-                const SizedBox(height: 8),
-                const Divider(height: 1),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.update,
-                      size: 12,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                  ],
+                const Divider(height: 16),
+                Text(
+                  'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
+                  style: typography.bodySmall
+                      ?.copyWith(color: AppPalette.of(context).muted),
                 ),
               ],
             ],
           ),
         );
       },
-      loading: () => Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.grey.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade300, width: 2),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
-      ),
-      error: (_, __) => Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.grey.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade300, width: 2),
-        ),
-        child: const Text('Error loading classroom'),
-      ),
+      loading: () => const LinearProgressIndicator(),
+      error: (_, __) => Text('Error loading classroom: ${classroom.name}'),
     );
   }
 
   Widget _buildNotesCard() {
-    final yearLevelsAsync = ref.watch(yearLevelsProvider(widget.schoolId));
+    final years = ref.watch(yearLevelsProvider(widget.schoolId));
+    var loading = years.isLoading;
+    var unavailable = years.hasError;
+    final sections = <Widget>[];
+    for (final year in years.valueOrNull ?? <YearLevel>[]) {
+      final rooms = ref.watch(classroomsProvider((
+        schoolId: widget.schoolId,
+        yearLevelId: year.id,
+      )));
+      loading = loading || rooms.isLoading;
+      unavailable = unavailable || rooms.hasError;
+      for (final room in rooms.valueOrNull ?? <Classroom>[]) {
+        final notes = ref.watch(classroomNotesProvider((
+          schoolId: widget.schoolId,
+          yearLevelId: year.id,
+          classroomId: room.id,
+        )));
+        loading = loading || notes.isLoading;
+        unavailable = unavailable || notes.hasError;
+        final entries = notes.valueOrNull;
+        if (entries != null && entries.isNotEmpty) {
+          sections.add(_buildClassroomNoteSection(
+            year.label,
+            room,
+            year.id,
+            room.id,
+            entries,
+          ));
+        }
+      }
+    }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16.0),
+    return AppPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.note_outlined, color: Theme.of(context).primaryColor),
-              const SizedBox(width: 8),
-              Text(
-                'Classroom Notes',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          yearLevelsAsync.when(
-            data: (yearLevels) {
-              if (yearLevels.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(
-                    child: Text('No year levels found'),
-                  ),
-                );
-              }
-
-              return Column(
-                children: yearLevels.map((yearLevel) {
-                  return _buildYearLevelNotes(yearLevel);
-                }).toList(),
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Error loading notes: $error'),
-            ),
-          ),
+          const AppSectionHeading(title: 'Classroom Notes'),
+          const SizedBox(height: 12),
+          if (loading) const Text('Loading classroom notes…'),
+          if (unavailable) const Text('Some classroom notes are unavailable.'),
+          if (sections.isEmpty && !loading && !unavailable)
+            const Text('No classroom notes recorded.'),
+          ...sections,
         ],
       ),
-    );
-  }
-
-  Widget _buildYearLevelNotes(YearLevel yearLevel) {
-    final classroomsAsync = ref.watch(classroomsProvider((
-      schoolId: widget.schoolId,
-      yearLevelId: yearLevel.id,
-    )));
-
-    return classroomsAsync.when(
-      data: (classrooms) {
-        if (classrooms.isEmpty) return const SizedBox.shrink();
-
-        // Build widgets for classrooms with notes
-        final classroomNoteWidgets = <Widget>[];
-
-        for (final classroom in classrooms) {
-          final notesAsync = ref.watch(classroomNotesProvider((
-            schoolId: widget.schoolId,
-            yearLevelId: yearLevel.id,
-            classroomId: classroom.id,
-          )));
-
-          notesAsync.whenData((notes) {
-            if (notes.isNotEmpty) {
-              classroomNoteWidgets.add(_buildClassroomNoteSection(
-                yearLevel.label,
-                classroom,
-                yearLevel.id,
-                classroom.id,
-                notes,
-              ));
-            }
-          });
-        }
-
-        return Column(children: classroomNoteWidgets);
-      },
-      loading: () => const SizedBox.shrink(),
-      error: (error, _) => const SizedBox.shrink(),
     );
   }
 
@@ -920,241 +580,189 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final key = '${yearLevelId}_$classroomId';
     _noteKeys.putIfAbsent(key, () => GlobalKey());
 
-    return Container(
-      key: _noteKeys[key],
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: BrandColors.kakaYellow.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: BrandColors.kakaYellow.withValues(alpha: 0.3),
-        ),
-      ),
+    final typography = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          const Divider(height: 12),
+          Text(
+            '$yearLevelLabel – ${classroom.name}',
+            style: typography.titleMedium,
+          ),
+          if (classroom.lastUpdatedBy != null &&
+              classroom.lastUpdatedAt != null)
+            Text(
+              'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
+              style: typography.bodySmall,
+            ),
+          for (final (index, note) in notes.indexed)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(
-                    Icons.class_,
-                    size: 16,
-                    color: BrandColors.kakaYellow,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$yearLevelLabel - ${classroom.name}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: BrandColors.kakaYellow.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '${notes.length} ${notes.length == 1 ? 'note' : 'notes'}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+                  Text(note.content, key: index == 0 ? _noteKeys[key] : null),
+                  if (note.author != null)
+                    Text('by ${note.author}', style: typography.bodySmall),
                 ],
               ),
-              if (classroom.lastUpdatedBy != null &&
-                  classroom.lastUpdatedAt != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                    fontStyle: FontStyle.italic,
-                  ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSignOffCard(
+    AsyncValue<SignedEvidence?> signed,
+    EvidenceUpload? pending,
+    String? activeId,
+  ) {
+    final latest = signed.valueOrNull;
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (pending != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppStatusPill(
+                  label: 'Signature saved on this device',
+                  icon: Icons.cloud_upload_outlined,
+                  tone: AppTone.blue,
                 ),
+                const SizedBox(height: 8),
+                Text(pending.id == activeId ? 'Syncing' : pending.statusText),
+                if (pending.id != activeId)
+                  EvidenceUploadActions(item: pending),
               ],
-            ],
+            ),
+          if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
+          if (widget.deliveryId == null && latest == null && pending == null)
+            const Text('Open a scheduled delivery to create a sign-off.'),
+          if (signed.hasError)
+            const Text('Could not load earlier signed snapshots.'),
+          if (pending == null && _isCorrecting)
+            TextButton(
+              onPressed: () => setState(() => _isCorrecting = false),
+              child: const Text('Cancel correction'),
+            ),
+          TextButton.icon(
+            onPressed: _showSignOffHistory,
+            icon: const Icon(Icons.history),
+            label: const Text('Recent signed snapshots'),
           ),
-          const SizedBox(height: 8),
-          ...notes.map((note) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Icon(
-                        Icons.note,
-                        size: 12,
-                        color: BrandColors.kakaYellow,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            note.content,
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          if (note.author != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(
-                                'by ${note.author}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade600,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              )),
         ],
       ),
     );
   }
 
-  Widget _buildSignOffCard(AsyncValue<SignOff?> signOffAsync) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: signOffAsync.when(
-        loading: () => const Center(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: CircularProgressIndicator(),
-          ),
-        ),
-        error: (error, _) => Center(
-          child: Text('Error loading sign-off: $error'),
-        ),
-        data: (signOff) {
-          if (signOff != null) {
-            return _buildCompletedSignOff(signOff);
-          } else {
-            return _buildSignOffForm();
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildSignOffForm() {
+  Widget _buildSignedEvidence(SignedEvidence evidence) {
+    final reviewed = evidence.snapshot.serverReviewed;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Icon(Icons.edit, color: Theme.of(context).primaryColor),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Sign-off',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _nameController,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            hintText: 'Enter your full name',
-            prefixIcon: Icon(Icons.person),
-          ),
-          enabled: !_isUploading,
-        ),
-        const SizedBox(height: 16),
         Text(
-          'Signature',
-          style: Theme.of(context).textTheme.titleMedium,
+          reviewed ? 'Signed snapshot' : 'Synced signature needs review',
+          style: Theme.of(context).textTheme.titleLarge,
         ),
-        const SizedBox(height: 8),
-        AspectRatio(
-          aspectRatio: 2.0,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Stack(
-                children: [
-                  Signature(
-                    controller: _signatureController,
-                    backgroundColor: Colors.white,
-                  ),
-                  if (_isUploading)
-                    Container(
-                      color: Colors.white.withOpacity(0.7),
-                      child: const Center(
-                        child: CircularProgressIndicator(),
-                      ),
+        Text(
+          '${evidence.typedName} · ${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}',
+        ),
+        Text(reviewed
+            ? 'Covers the delivery details reviewed at signing.'
+            : 'Captured with incomplete or cached delivery details. Sign again after review.'),
+        ref.watch(_signatureUrlProvider(evidence.signaturePath)).when(
+              loading: () => const LinearProgressIndicator(),
+              error: (_, __) => const Text('Signature image unavailable'),
+              data: (url) => url == null
+                  ? const Text('Signature image unavailable')
+                  : Image.network(
+                      url,
+                      height: 90,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) =>
+                          const Text('Signature image unavailable'),
                     ),
-                ],
-              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 8,
           children: [
-            Flexible(
-              child: TextButton.icon(
-                onPressed:
-                    _isUploading ? null : () => _signatureController.clear(),
-                icon: const Icon(Icons.clear),
-                label: const Text('Clear'),
+            if (reviewed)
+              OutlinedButton.icon(
+                onPressed: () => _exportSummary(evidence: evidence),
+                icon: const Icon(Icons.table_chart_outlined),
+                label: const Text('Export snapshot'),
               ),
-            ),
-            const SizedBox(width: 16),
-            Flexible(
-              child: FilledButton.icon(
-                onPressed: _isUploading ? null : _handleSignOff,
-                icon: _isUploading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.check),
-                label: Text(_isUploading ? 'Uploading...' : 'Sign-off'),
+            if (widget.deliveryId != null)
+              TextButton(
+                onPressed: () => setState(() => _isCorrecting = true),
+                child: const Text('Sign a correction'),
               ),
-            ),
           ],
         ),
       ],
+    );
+  }
+
+  Future<void> _showSignOffHistory() async {
+    final repository = ref.read(baseSchoolsRepositoryProvider);
+    final history = repository
+        .readSignOffHistory(widget.schoolId, widget.deliveryId)
+        .timeout(const Duration(seconds: 12));
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Recent signed snapshots'),
+        content: FutureBuilder<List<SignedEvidence>>(
+          future: history,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const Text('Could not load history. Try again.');
+            }
+            final records = snapshot.data;
+            if (records == null) return const LinearProgressIndicator();
+            if (records.isEmpty) {
+              return const Text('No signed snapshots found.');
+            }
+            return SizedBox(
+              width: 380,
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final evidence in records)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(evidence.typedName),
+                      subtitle: Text(
+                        '${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}'
+                        '${evidence.snapshot.serverReviewed ? '' : ' · Review required'}',
+                      ),
+                      trailing: evidence.snapshot.serverReviewed
+                          ? IconButton(
+                              tooltip: 'Export snapshot',
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                _exportSummary(evidence: evidence);
+                              },
+                              icon: const Icon(Icons.download_outlined),
+                            )
+                          : null,
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1165,22 +773,16 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       children: [
         Row(
           children: [
-            const Icon(Icons.check_circle, color: Colors.green),
+            Icon(Icons.check_circle, color: AppTone.green.inkFor(context)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Signed Off',
+                'School-level record',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: Colors.green,
+                      color: AppTone.green.inkFor(context),
                     ),
               ),
-            ),
-            // Use IconButton instead of OutlinedButton
-            IconButton(
-              onPressed: () => _showEditDialog(signOff),
-              icon: const Icon(Icons.edit),
-              tooltip: 'Edit',
             ),
           ],
         ),
@@ -1223,11 +825,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           aspectRatio: 2.5,
           child: Container(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppPalette.of(context).muted),
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
               child: Image.network(
                 signOff.signatureURL,
                 fit: BoxFit.contain,
@@ -1235,27 +837,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                   if (loadingProgress == null) return child;
                   return const Center(child: CircularProgressIndicator());
                 },
-                errorBuilder: (context, error, stackTrace) {
-                  debugPrint(
-                      'Failed to load signature from URL: ${signOff.signatureURL}');
-                  debugPrint('Error: $error');
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.error, color: Colors.red),
-                        const Text('Failed to load signature'),
-                        const SizedBox(height: 8),
-                        Text(
-                          error.toString(),
-                          style:
-                              const TextStyle(fontSize: 10, color: Colors.grey),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                errorBuilder: (_, __, ___) =>
+                    const Center(child: Text('Signature image unavailable')),
               ),
             ),
           ),
@@ -1317,230 +900,357 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     ref.invalidate(signOffProvider(widget.schoolId));
   }
 
-  Future<void> _handleSignOff() async {
-    debugPrint('=== SIGN-OFF HANDLER STARTED ===');
+  EvidenceUpload? _pendingSignature(EvidenceUploadStatus? uploads) => uploads
+      ?.items
+      .where((item) =>
+          item.kind == EvidenceKind.signature &&
+          item.schoolId == widget.schoolId &&
+          item.deliveryId == widget.deliveryId)
+      .firstOrNull;
 
-    if (_nameController.text.trim().isEmpty) {
-      debugPrint('ERROR: Name is empty');
-      _showError('Please enter your name');
-      return;
+  bool _canSaveCapture(String uid, DeliveryVisit visit) {
+    if (!mounted ||
+        visit.deliveryId != widget.deliveryId ||
+        visit.schoolId != widget.schoolId ||
+        ref.read(activeDeliveryVisitProvider) != visit ||
+        ref.read(authRepositoryProvider).currentUser?.uid != uid ||
+        ref.read(authStateProvider).valueOrNull?.uid != uid) {
+      return false;
     }
-
-    if (_signatureController.isEmpty) {
-      debugPrint('ERROR: Signature is empty');
-      _showError('Please provide your signature');
-      return;
-    }
-
-    // Show pre-signoff dialog for optional notes
-    final shouldProceed = await _showPreSignoffDialog();
-    if (!shouldProceed) {
-      debugPrint('User cancelled sign-off');
-      return;
-    }
-
-    setState(() {
-      _isUploading = true;
-    });
-
-    try {
-      debugPrint('Step 1: Capturing signature bytes...');
-      final signatureBytes = await _signatureController.toPngBytes();
-      if (signatureBytes == null) {
-        debugPrint('ERROR: Failed to capture signature bytes');
-        _showError('Failed to capture signature');
-        return;
-      }
-      debugPrint('Signature bytes captured: ${signatureBytes.length} bytes');
-
-      debugPrint('Step 2: Compressing image...');
-      final compressResult =
-          await ImageService.compressImageBytes(signatureBytes);
-      if (!compressResult.isSuccess) {
-        debugPrint(
-            'ERROR: Image compression failed: ${compressResult.errorOrNull}');
-        _showError(compressResult.errorOrNull!);
-        return;
-      }
-      debugPrint('Image compressed successfully');
-
-      debugPrint('Step 3: Uploading to storage...');
-      // Use simple 'current.png' path that was working before
-      final storagePath = 'schools/${widget.schoolId}/signoffs/current.png';
-      final storageRepository = ref.read(storageRepositoryProvider);
-      final uploadResult = await storageRepository.uploadImageBytes(
-          storagePath, compressResult.dataOrNull!);
-
-      if (!uploadResult.isSuccess) {
-        debugPrint('ERROR: Upload failed: ${uploadResult.errorOrNull}');
-        _showError(uploadResult.errorOrNull!);
-        return;
-      }
-      debugPrint('Upload successful: ${uploadResult.dataOrNull}');
-
-      debugPrint('Step 4: Creating SignOff object...');
-      final signOff = SignOff(
-        typedName: _nameController.text.trim(),
-        signatureURL: uploadResult.dataOrNull!,
-        createdAt: DateTime.now(),
-      );
-      debugPrint('SignOff object created');
-
-      debugPrint('Step 5: Saving sign-off to Firestore...');
-      final success = await ref
-          .read(schoolsNotifierProvider.notifier)
-          .createOrUpdateSignOff(widget.schoolId, signOff);
-      debugPrint('Sign-off save result: $success');
-
-      if (success) {
-        // Create the signed school summary document
-        debugPrint('Sign-off saved, now generating summary...');
-        final summarySuccess = await ref
-            .read(schoolsNotifierProvider.notifier)
-            .createSignedSchoolSummary(
-              widget.schoolId,
-              _nameController.text.trim(),
-              uploadResult.dataOrNull,
-            );
-
-        debugPrint('Summary generation result: $summarySuccess');
-
-        _nameController.clear();
-        _signatureController.clear();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(summarySuccess
-                  ? 'Sign-off completed and summary generated successfully'
-                  : 'Sign-off completed but summary generation failed'),
-              backgroundColor:
-                  summarySuccess ? BrandColors.kakaGreen : BrandColors.kakaBlue,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      } else {
-        _showError('Failed to save sign-off');
-      }
-    } catch (e) {
-      _showError('Unexpected error: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUploading = false;
-        });
-      }
-    }
+    final staff = ref.read(currentStaffProvider);
+    final access = ref.read(deliveryVisitReadinessProvider(visit));
+    final member = staff.valueOrNull;
+    final readiness = access.valueOrNull;
+    final uploads = ref.read(evidenceUploadsProvider);
+    final queue = uploads.valueOrNull ??
+        ref.read(evidenceUploadWorkerProvider).valueOrNull?.status;
+    final signed = ref.read(_signedEvidenceProvider((
+      schoolId: visit.schoolId,
+      deliveryId: visit.deliveryId,
+    )));
+    return member != null &&
+        member.uid == uid &&
+        !staff.hasError &&
+        (member.hasManagerAccess ||
+            member.assignedSchoolIds.contains(visit.schoolId)) &&
+        readiness != null &&
+        !access.hasError &&
+        readiness.uid == uid &&
+        readiness.status.canOpen(online: ref.read(isOnlineProvider)) &&
+        !uploads.hasError &&
+        queue != null &&
+        _pendingSignature(queue) == null &&
+        !signed.hasError &&
+        signed.hasValue &&
+        (signed.valueOrNull == null || _isCorrecting);
   }
 
-  void _showEditDialog(SignOff signOff) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sign-off Actions'),
-        content: const Text('Choose an action for the current sign-off:'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _clearSignOff();
-            },
-            child: const Text('Clear Sign-off',
-                style: TextStyle(color: Colors.red)),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _nameController.text = signOff.typedName;
-              _signatureController.clear();
-            },
-            child: const Text('Create New'),
-          ),
-        ],
+  Future<({SignOffSnapshot snapshot, List<ChecklistItem> checklist})>
+      _readSigningReview(DeliveryVisit visit) async {
+    final repository = ref.read(baseSchoolsRepositoryProvider);
+    final checklist = ref.read(activeChecklistItemsProvider).asData?.value;
+    if (checklist != null &&
+        checklist.length > SignOffSnapshot.maxReviewChecklistItems) {
+      throw const _ReviewChecklistTooLarge();
+    }
+    SignOffSnapshot? draft;
+    if (ref.read(isOnlineProvider)) {
+      try {
+        draft = await repository
+            .readSignOffDraft(visit.schoolId,
+                server: true, deliveryId: visit.deliveryId)
+            .timeout(const Duration(seconds: 20));
+      } catch (_) {
+        // A connection does not guarantee that the server read succeeds.
+      }
+    }
+    if (draft == null) {
+      try {
+        draft = await repository
+            .readSignOffDraft(visit.schoolId,
+                server: false, deliveryId: visit.deliveryId)
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        draft = SignOffSnapshot.incomplete(visit.schoolId);
+      }
+    }
+    return (
+      checklist: checklist ?? [],
+      snapshot: SignOffSnapshot(
+        sourceReadAt: draft.sourceReadAt,
+        serverReviewed: draft.serverReviewed && checklist != null,
+        summary: {
+          ...draft.summary,
+          'reviewChecklist': [
+            for (final item in checklist ?? <ChecklistItem>[])
+              {'id': item.id, 'title': item.title},
+          ],
+        },
       ),
     );
   }
 
-  Future<void> _clearSignOff() async {
+  Future<bool> _handleSignOff(
+    BuildContext captureContext,
+    String uid,
+    DeliveryVisit visit,
+  ) async {
+    if (!_canSaveCapture(uid, visit)) {
+      _showError('This visit is no longer available for signing.',
+          displayContext: captureContext);
+      return false;
+    }
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      _showError('Please enter your name', displayContext: captureContext);
+      return false;
+    }
+    if (_signatureController.isEmpty) {
+      _showError('Please provide your signature',
+          displayContext: captureContext);
+      return false;
+    }
+    final worker = ref.read(evidenceUploadWorkerProvider).valueOrNull;
+    if (worker == null) {
+      _showError('Saved signatures are unavailable. Try again.',
+          displayContext: captureContext);
+      return false;
+    }
+
     try {
-      debugPrint('=== CLEAR SIGN-OFF STARTED ===');
+      var review = await _readSigningReview(visit);
+      var changed = false;
+      var photosChanged = false;
+      while (_canSaveCapture(uid, visit)) {
+        if (!captureContext.mounted) return false;
+        final confirmed = await _reviewSnapshot(
+          captureContext,
+          review.snapshot,
+          review.checklist,
+          changed: changed,
+          photosChanged: photosChanged,
+        );
+        if (!confirmed ||
+            !captureContext.mounted ||
+            !_canSaveCapture(uid, visit)) {
+          return false;
+        }
+        final current = await _readSigningReview(visit);
+        if (!captureContext.mounted || !_canSaveCapture(uid, visit)) {
+          return false;
+        }
+        if (!review.snapshot.hasSameReviewContent(current.snapshot) ||
+            !listEquals(review.checklist, current.checklist)) {
+          photosChanged = !listEquals(
+            review.snapshot.summary['photoUrls'] as List?,
+            current.snapshot.summary['photoUrls'] as List?,
+          );
+          review = current;
+          changed = true;
+          continue;
+        }
 
-      // Delete the sign-off document
-      debugPrint(
-          'Step 1: Deleting sign-off document from schools/${widget.schoolId}/meta/signoff');
-      await FirebaseFirestore.instance
-          .collection('schools')
-          .doc(widget.schoolId)
-          .collection('meta')
-          .doc('signoff')
-          .delete();
-      debugPrint('✓ Sign-off document deleted');
-
-      // Delete the signed school summary
-      debugPrint(
-          'Step 2: Deleting signed school summary from signed_school_summaries/${widget.schoolId}');
-      await FirebaseFirestore.instance
-          .collection('signed_school_summaries')
-          .doc(widget.schoolId)
-          .delete();
-      debugPrint('✓ Signed school summary deleted');
-
-      // Update the school document to remove sign-off status
-      debugPrint('Step 3: Updating school document to clear sign-off flags');
-      try {
-        await FirebaseFirestore.instance
-            .collection('schools')
-            .doc(widget.schoolId)
-            .update({
-          'isSignedOff': false,
-          'lastSignOffDate': FieldValue.delete(),
-          'signedBy': FieldValue.delete(),
-        });
-        debugPrint('✓ School document updated');
-      } catch (updateError) {
-        debugPrint(
-            'Warning: Could not update school document (this is optional): $updateError');
-        // Continue anyway - the important deletions are done
-      }
-
-      debugPrint('=== CLEAR SIGN-OFF COMPLETED SUCCESSFULLY ===');
-
-      if (mounted) {
+        final signature = await _signatureController.toPngBytes();
+        if (!captureContext.mounted || !_canSaveCapture(uid, visit)) {
+          return false;
+        }
+        if (signature == null) {
+          _showError('Could not capture the signature. Try again.',
+              displayContext: captureContext);
+          return false;
+        }
+        await worker.enqueueSignature(
+          id: const Uuid().v4(),
+          ownerUid: uid,
+          schoolId: visit.schoolId,
+          deliveryId: visit.deliveryId,
+          bytes: signature,
+          payload: {'typedName': name, 'snapshot': review.snapshot.toJson()},
+        );
+        if (!mounted || !captureContext.mounted) return false;
+        _nameController.clear();
+        _signatureController.clear();
+        setState(() => _isCorrecting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sign-off cleared successfully'),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text('Signature saved on this device')),
+        );
+        return true;
+      }
+      return false;
+    } on _ReviewChecklistTooLarge {
+      if (captureContext.mounted) {
+        _showError(
+          'The signing checklist exceeds ${SignOffSnapshot.maxReviewChecklistItems} items. '
+          'Ask a manager to shorten it.',
+          displayContext: captureContext,
         );
       }
-    } catch (e) {
-      debugPrint('✗ ERROR in _clearSignOff: $e');
-      debugPrint('Error type: ${e.runtimeType}');
-      _showError('Failed to clear sign-off: $e');
+      return false;
+    } catch (_) {
+      if (captureContext.mounted) {
+        _showError('Could not save the signature. Your entry is still open.',
+            displayContext: captureContext);
+      }
+      return false;
     }
   }
 
-  void _showError(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
+  Future<bool> _reviewSnapshot(
+    BuildContext captureContext,
+    SignOffSnapshot draft,
+    List<ChecklistItem> checklist, {
+    required bool changed,
+    required bool photosChanged,
+  }) async {
+    final summary = draft.summary;
+    final schoolNotes = summary['notes'] as String?;
+    final notesByRoom = summary['notesByClassroom'] as Map?;
+    final photoCount = (summary['photoUrls'] as List?)?.length ?? 0;
+    final checked = <String>{};
+    final route = DialogRoute<bool>(
+      context: captureContext,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          scrollable: true,
+          title: const Text('Review delivery details'),
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (changed) ...[
+                const Text(
+                    'Delivery information changed. Review the updated details.'),
+                const SizedBox(height: 8),
+              ],
+              if (draft.serverReviewed)
+                Text(
+                    'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
+              else
+                const Text(
+                  'Some delivery information is cached or unavailable. '
+                  'This signature will need another review after syncing.',
+                ),
+              const SizedBox(height: 12),
+              if (schoolNotes?.isNotEmpty == true) ...[
+                Text('School notes',
+                    style: Theme.of(context).textTheme.titleSmall),
+                Text(schoolNotes!),
+                const SizedBox(height: 8),
+              ],
+              if (photoCount > 0 || photosChanged) ...[
+                Text('$photoCount classroom photo attachments'),
+                if (photosChanged)
+                  const Text(
+                    'Photo attachments changed. Return to the classroom to inspect them.',
+                  ),
+                const SizedBox(height: 8),
+              ],
+              if (draft.classrooms.isEmpty)
+                const Text(
+                    'No classroom quantities are available in this snapshot.')
+              else ...[
+                Text(
+                  '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs',
+                ),
+                for (final row in draft.classrooms)
+                  _buildSnapshotClassroom(row as Map, notesByRoom),
+              ],
+              for (final item in checklist)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: checked.contains(item.id),
+                  title: Text(item.title),
+                  subtitle: item.subtitle == null ? null : Text(item.subtitle!),
+                  onChanged: (value) => setState(() {
+                    if (value == true) {
+                      checked.add(item.id);
+                    } else {
+                      checked.remove(item.id);
+                    }
+                  }),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: checked.length == checklist.length
+                  ? () => Navigator.of(context).pop(true)
+                  : null,
+              child: Text(
+                  draft.serverReviewed ? 'Save signature' : 'Save for review'),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+    _reviewRoute = route;
+    try {
+      return await Navigator.of(captureContext).push(route) ?? false;
+    } finally {
+      if (identical(_reviewRoute, route)) _reviewRoute = null;
     }
   }
 
-  Future<void> _exportSummary() async {
+  Widget _buildSnapshotClassroom(Map row, Map? notesByRoom) {
+    final level = row['yearLevel'];
+    final name = row['classroomName'];
+    final notes = (notesByRoom?[level] as Map?)?[name] as List? ?? const [];
+    final status = switch (row['status']) {
+      'complete' => 'Complete',
+      'incomplete' => 'Incomplete',
+      'notAttended' => 'Not attended',
+      _ => 'Unknown',
+    };
+    final expected = row['expectedPacksUnavailable'] == true
+        ? 'Expected packs unavailable'
+        : '${row['expectedPacks']} expected packs';
+    final actual = row['actualPacksDelivered'];
+
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text('$level · $name'),
+      subtitle: Text(
+        '$status\n$expected · ${actual == null ? 'No recorded pack count' : '$actual recorded packs'}',
+      ),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final note in notes)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(note as String),
+          ),
+        for (final item in (row['consumables'] as Map).values)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(item['itemName'] as String),
+            subtitle: Text(
+              '${item['actualQuantityDelivered'] ?? 'Unrecorded'} '
+              'of ${item['expectedQuantity']} ${item['unit']}',
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _showError(String message, {BuildContext? displayContext}) {
+    final target = displayContext ?? (mounted ? context : null);
+    if (target == null || !target.mounted) return;
+    ScaffoldMessenger.of(target).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _exportSummary({SignedEvidence? evidence}) async {
     try {
       // Show loading indicator
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Row(
               children: [
                 SizedBox(
@@ -1548,29 +1258,43 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                   height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    color: AppPalette.of(context).canvas,
                   ),
                 ),
-                SizedBox(width: 16),
-                Text('Generating Excel file...'),
+                const SizedBox(width: 16),
+                const Text('Generating Excel file...'),
               ],
             ),
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
 
-      // Fetch the signed summary from Firestore
-      final schoolsRepository = ref.read(schoolsRepositoryProvider);
-      final result =
-          await schoolsRepository.getSignedSchoolSummary(widget.schoolId);
-
-      if (!result.isSuccess) {
-        _showError('Failed to fetch summary: ${result.errorOrNull}');
-        return;
+      final SignedSchoolSummary? summary;
+      if (evidence != null) {
+        if (!evidence.snapshot.serverReviewed) return;
+        final signatureUrl = await ref
+            .read(_signatureUrlProvider(evidence.signaturePath).future);
+        if (signatureUrl == null) {
+          _showError('Could not load the signature for export.');
+          return;
+        }
+        summary = evidence.snapshot.export(
+          evidenceId: evidence.id,
+          schoolId: evidence.schoolId,
+          typedName: evidence.typedName,
+          capturedAt: evidence.capturedAt,
+          signatureUrl: signatureUrl,
+        );
+      } else {
+        final repository = ref.read(baseSchoolsRepositoryProvider);
+        final result = await repository.getSignedSchoolSummary(widget.schoolId);
+        if (result.isFailure) {
+          _showError('Could not load the earlier signed summary.');
+          return;
+        }
+        summary = result.dataOrNull;
       }
-
-      final summary = result.dataOrNull;
       if (summary == null) {
         _showError('No signed summary found for this school');
         return;
@@ -1578,7 +1302,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
 
       // Export to Excel
       debugPrint('Exporting summary to Excel...');
-      final filePath = await ExcelExportService.exportSummaryToExcel(summary);
+      final filePath = await ExcelExportService.exportSummaryToExcel(
+        summary,
+        snapshotReadAt: evidence?.snapshot.sourceReadAt.toLocal(),
+        deliveryId: evidence?.deliveryId,
+      );
 
       if (filePath == null) {
         _showError('Failed to create Excel file');
@@ -1592,8 +1320,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         _showExportOptionsDialog(filePath, summary.schoolName);
       }
     } catch (e) {
-      debugPrint('Error exporting summary: $e');
-      _showError('Failed to export summary: $e');
+      _showError('Could not export the signed snapshot.');
     }
   }
 
@@ -1637,127 +1364,181 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       ),
     );
   }
+}
 
-  Future<bool> _showPreSignoffDialog() async {
-    // Get active checklist items from Firestore
-    final checklistItemsAsync =
-        await ref.read(activeChecklistItemsProvider.future);
+class _ReviewChecklistTooLarge implements Exception {
+  const _ReviewChecklistTooLarge();
+}
 
-    // If no checklist items, proceed directly
-    if (checklistItemsAsync.isEmpty) {
-      return true;
+class _SignatureCaptureScreen extends StatefulWidget {
+  const _SignatureCaptureScreen({
+    required this.schoolName,
+    required this.visitId,
+    required this.visitDate,
+    required this.name,
+    required this.signature,
+    required this.onReview,
+  });
+
+  final String schoolName;
+  final String visitId;
+  final DateTime? visitDate;
+  final TextEditingController name;
+  final SignatureController signature;
+  final Future<bool> Function(BuildContext context) onReview;
+
+  @override
+  State<_SignatureCaptureScreen> createState() =>
+      _SignatureCaptureScreenState();
+}
+
+class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
+  bool _reviewing = false;
+
+  Future<void> _reviewAndSave(BuildContext captureContext) async {
+    if (_reviewing) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _reviewing = true);
+    final saved = await widget.onReview(captureContext);
+    if (!mounted) return;
+    setState(() => _reviewing = false);
+    if (saved && ModalRoute.of(context)?.isCurrent == true) {
+      Navigator.of(context).pop();
     }
+  }
 
-    // Track checked state for each item
-    final Map<String, bool> checkedItems = {};
-    for (var item in checklistItemsAsync) {
-      checkedItems[item.id] = false;
-    }
-
-    if (!mounted) return false;
-
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) {
-          // Check if all items are checked
-          final allChecked = checkedItems.values.every((checked) => checked);
-          final checkedCount =
-              checkedItems.values.where((checked) => checked).length;
-          final totalItems = checkedItems.length;
-
-          // Auto-close dialog when all items are checked
-          if (allChecked) {
-            // Use Future.delayed to avoid calling Navigator during build
-            Future.delayed(Duration.zero, () {
-              if (dialogContext.mounted) {
-                Navigator.of(dialogContext).pop(true);
-              }
-            });
-          }
-
-          return AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.checklist, color: BrandColors.kakaGreen),
-                SizedBox(width: 8),
-                Text('Pre-Signoff Checklist'),
-              ],
+  @override
+  Widget build(BuildContext context) {
+    final typography = Theme.of(context).textTheme;
+    final colors = AppPalette.of(context);
+    final visitDate = widget.visitDate;
+    return PopScope(
+      canPop: !_reviewing,
+      child: ScaffoldMessenger(
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            toolbarHeight: MediaQuery.textScalerOf(context).scale(16) * 2 + 32,
+            titleSpacing: 8,
+            title: TextButton.icon(
+              onPressed: _reviewing ? null : () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back to review'),
             ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Please confirm the following items before signing off:',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 16),
-                  // Dynamic checklist items
-                  ...checklistItemsAsync.map((item) {
-                    return CheckboxListTile(
-                      value: checkedItems[item.id] ?? false,
-                      onChanged: (value) {
-                        setState(() {
-                          checkedItems[item.id] = value ?? false;
-                        });
-                      },
-                      title: Text(
-                        item.title,
-                        style: const TextStyle(fontSize: 14),
+          ),
+          body: Builder(
+              builder: (captureContext) => SafeArea(
+                    top: false,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(AppTokens.gutter),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Semantics(
+                                header: true,
+                                child: Text(
+                                  'Capture signature',
+                                  style: typography.headlineMedium,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(widget.schoolName,
+                                  style: typography.titleMedium),
+                              Text(
+                                visitDate == null
+                                    ? 'Delivery visit'
+                                    : DateTimeUtils.formatDate(visitDate),
+                                style: typography.bodyMedium
+                                    ?.copyWith(color: colors.muted),
+                              ),
+                              Text('Visit ${widget.visitId}',
+                                  style: typography.bodySmall),
+                              const SizedBox(height: AppTokens.sectionGap),
+                              Semantics(
+                                container: true,
+                                child: TextField(
+                                  controller: widget.name,
+                                  enabled: !_reviewing,
+                                  maxLength: 200,
+                                  textCapitalization: TextCapitalization.words,
+                                  textInputAction: TextInputAction.done,
+                                  decoration:
+                                      const InputDecoration(labelText: 'Name'),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text('Signature', style: typography.titleMedium),
+                              const SizedBox(height: 8),
+                              Semantics(
+                                container: true,
+                                label: 'Signature drawing area',
+                                child: AbsorbPointer(
+                                  absorbing: _reviewing,
+                                  child: AspectRatio(
+                                    aspectRatio: 2,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(
+                                          AppTokens.controlRadius),
+                                      child: DecoratedBox(
+                                        position: DecorationPosition.foreground,
+                                        decoration: BoxDecoration(
+                                          border:
+                                              Border.all(color: colors.outline),
+                                          borderRadius: BorderRadius.circular(
+                                            AppTokens.controlRadius,
+                                          ),
+                                        ),
+                                        child: Signature(
+                                          controller: widget.signature,
+                                          backgroundColor: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: _reviewing
+                                        ? null
+                                        : widget.signature.clear,
+                                    icon: const Icon(Icons.clear),
+                                    label: const Text('Clear'),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: _reviewing
+                                        ? null
+                                        : () => _reviewAndSave(captureContext),
+                                    icon: _reviewing
+                                        ? const SizedBox.square(
+                                            dimension: 16,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.check),
+                                    label: Text(
+                                      _reviewing
+                                          ? 'Checking…'
+                                          : 'Review and save',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      subtitle: item.subtitle != null
-                          ? Text(
-                              item.subtitle!,
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.grey),
-                            )
-                          : null,
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                    );
-                  }),
-                  if (!allChecked) ...[
-                    const SizedBox(height: 12),
-                    LinearProgressIndicator(
-                      value: checkedCount / totalItems,
-                      backgroundColor: Colors.grey.shade300,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          BrandColors.kakaGreen),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '$checkedCount of $totalItems items completed',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Cancel'),
-              ),
-              if (!allChecked)
-                TextButton(
-                  onPressed: null,
-                  child: Text(
-                    'Complete all items to continue',
-                    style: TextStyle(color: Colors.grey.shade400),
-                  ),
-                ),
-            ],
-          );
-        },
+                  )),
+        ),
       ),
     );
-
-    return result ?? false;
   }
 }

@@ -1,45 +1,23 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../providers/schools_providers.dart';
+import '../../providers/delivery_visit_provider.dart';
 import '../../providers/repository_providers.dart';
+import '../../repositories/classroom_edit.dart';
+import '../../services/offline/field_draft_store.dart';
+import '../../widgets/field_draft_dialog.dart';
 import '../../providers/auth_providers.dart';
 import '../../models/school.dart';
-import '../../models/offline/offline_models.dart';
-import '../../services/offline/offline_storage_service.dart';
-import '../../utils/notification_utils.dart';
+import '../../models/offline/evidence_upload.dart';
+import '../../models/offline/offline_media.dart';
+import '../../models/delivery_visit.dart';
+import '../../providers/offline_delivery_providers.dart';
+import '../../providers/offline_media_providers.dart';
+import '../../widgets/sync_status_detail_sheet.dart';
+import '../../widgets/offline_media_view.dart';
 import 'package:uuid/uuid.dart';
-
-/// Represents a photo that is being uploaded
-class _PendingPhoto {
-  final String id;
-  final File localFile;
-  final bool hasError;
-  final String? errorMessage;
-
-  const _PendingPhoto({
-    required this.id,
-    required this.localFile,
-    this.hasError = false,
-    this.errorMessage,
-  });
-
-  _PendingPhoto copyWith({
-    String? id,
-    File? localFile,
-    bool? hasError,
-    String? errorMessage,
-  }) {
-    return _PendingPhoto(
-      id: id ?? this.id,
-      localFile: localFile ?? this.localFile,
-      hasError: hasError ?? this.hasError,
-      errorMessage: errorMessage ?? this.errorMessage,
-    );
-  }
-}
+import '../../widgets/design/design.dart';
 
 class ClassroomDetailScreen extends ConsumerWidget {
   const ClassroomDetailScreen({
@@ -47,14 +25,23 @@ class ClassroomDetailScreen extends ConsumerWidget {
     required this.schoolId,
     required this.yearLevelId,
     required this.classroomId,
+    this.deliveryId,
   });
 
   final String schoolId;
   final String yearLevelId;
   final String classroomId;
+  final String? deliveryId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final visit = ref.watch(activeDeliveryVisitProvider);
+    if (deliveryId != null &&
+        (visit?.deliveryId != deliveryId || visit?.schoolId != schoolId)) {
+      return const Scaffold(
+        body: Center(child: Text('Couldn’t open the records for this visit.')),
+      );
+    }
     final classroomsAsync = ref.watch(classroomsProvider((
       schoolId: schoolId,
       yearLevelId: yearLevelId,
@@ -78,6 +65,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: MediaQuery.textScalerOf(context).scale(24) * 2 + 12,
         title: classroomsAsync.when(
           data: (classrooms) {
             final classroom = classrooms.firstWhere(
@@ -88,447 +76,352 @@ class ClassroomDetailScreen extends ConsumerWidget {
                 createdAt: DateTime.now(),
               ),
             );
-            return Text(classroom.name);
+            return Text(classroom.name,
+                maxLines: 2, overflow: TextOverflow.ellipsis);
           },
           loading: () => const Text('Classroom'),
           error: (_, __) => const Text('Classroom'),
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          AppTokens.gutter,
+          12,
+          AppTokens.gutter,
+          MediaQuery.paddingOf(context).bottom + 16,
+        ),
         children: [
-          // Completion Status Card
-          classroomsAsync.when(
-            data: (classrooms) {
-              final classroom = classrooms.firstWhere(
-                (c) => c.id == classroomId,
-                orElse: () => Classroom(
-                  id: '',
-                  name: 'Classroom',
-                  createdAt: DateTime.now(),
-                ),
-              );
-              return _buildCompletionStatusCard(context, ref, classroom);
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+          _buildPacksPanel(
+            context,
+            ref,
+            classroomsAsync: classroomsAsync,
+            packTotalAsync: packTotalAsync,
+            canEditExpected: isAdmin,
           ),
-          const SizedBox(height: 16),
-
-          // Pack Total Card
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.inventory_2_outlined, size: 28),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'Pack Total',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      if (isAdmin)
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _showUpdatePackTotalDialog(
-                            context,
-                            ref,
-                            packTotalAsync.value?.total,
-                          ),
-                          tooltip: 'Update Pack Total',
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  packTotalAsync.when(
-                    loading: () => const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: CircularProgressIndicator(),
-                      ),
-                    ),
-                    error: (error, _) => const Text(
-                      'Error loading pack total',
-                      style: TextStyle(color: Colors.red),
-                    ),
-                    data: (packTotal) {
-                      if (packTotal == null) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text(
-                              'No pack total set',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                            if (isAdmin) ...[
-                              const SizedBox(height: 12),
-                              Center(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _showUpdatePackTotalDialog(
-                                    context,
-                                    ref,
-                                    null,
-                                  ),
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Set Pack Total'),
-                                ),
-                              ),
-                            ],
-                          ],
-                        );
-                      }
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${packTotal.total} packs',
-                            style: TextStyle(
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).primaryColor,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Last updated: ${_formatDate(packTotal.createdAt)}',
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 24),
+          const SizedBox(height: AppTokens.sectionGap),
 
           // Year Level Breakdown Section (for composite classes)
-          ref.watch(yearLevelBreakdownsProvider((
-            schoolId: schoolId,
-            yearLevelId: yearLevelId,
-            classroomId: classroomId,
-          ))).when(
-            data: (breakdowns) {
-              if (breakdowns.isEmpty) {
-                // Only show empty state with Add button for admins
-                // Non-admins don't see this section when no breakdowns exist
-                if (!isAdmin) {
-                  return const SizedBox.shrink();
-                }
-                return Column(
-                  children: [
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Row(
+          ref
+              .watch(yearLevelBreakdownsProvider((
+                schoolId: schoolId,
+                yearLevelId: yearLevelId,
+                classroomId: classroomId,
+              )))
+              .when(
+                data: (breakdowns) {
+                  if (breakdowns.isEmpty) {
+                    // Only show empty state with Add button for admins
+                    // Non-admins don't see this section when no breakdowns exist
+                    if (!isAdmin) {
+                      return const SizedBox.shrink();
+                    }
+                    return Column(
+                      children: [
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Icon(Icons.people_outline, size: 28),
-                                SizedBox(width: 12),
-                                Text(
-                                  'Student Distribution',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'No student distribution set. Add year level breakdowns for composite classes.',
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                            const SizedBox(height: 12),
-                            Center(
-                              child: ElevatedButton.icon(
-                                onPressed: () => _showAddYearLevelBreakdownDialog(
-                                  context,
-                                  ref,
-                                ),
-                                icon: const Icon(Icons.add),
-                                label: const Text('Add Year Level'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                );
-              } else if (breakdowns.isNotEmpty) {
-                // Show year level breakdown table
-                final totalStudents = breakdowns.fold<int>(
-                  0,
-                  (sum, b) => sum + b.studentCount,
-                );
-                return Column(
-                  children: [
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.people_outline, size: 28),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'Student Distribution',
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                const Row(
+                                  children: [
+                                    Icon(Icons.people_outline, size: 28),
+                                    SizedBox(width: 12),
+                                    Text(
+                                      'Student Distribution',
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
                                       ),
-                                      if (breakdowns.length > 1)
-                                        Text(
-                                          'Composite Class',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.orange.shade700,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
-                                // Only admins can add new year level breakdowns
-                                if (isAdmin)
-                                  IconButton(
-                                    icon: const Icon(Icons.add),
-                                    onPressed: () => _showAddYearLevelBreakdownDialog(
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No student distribution set. Add year level breakdowns for composite classes.',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                const SizedBox(height: 12),
+                                Center(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () =>
+                                        _showAddYearLevelBreakdownDialog(
                                       context,
                                       ref,
                                     ),
-                                    tooltip: 'Add Year Level',
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Add Year Level'),
                                   ),
+                                ),
                               ],
                             ),
-                            const SizedBox(height: 16),
-                            Table(
-                              border: TableBorder.all(
-                                color: Colors.grey.shade300,
-                                width: 1,
-                              ),
-                              columnWidths: {
-                                0: const FlexColumnWidth(2),
-                                1: const FlexColumnWidth(1),
-                                // Only show action column for admins
-                                if (isAdmin) 2: const FixedColumnWidth(48),
-                              },
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    );
+                  } else if (breakdowns.isNotEmpty) {
+                    // Show year level breakdown table
+                    final totalStudents = breakdowns.fold<int>(
+                      0,
+                      (sum, b) => sum + b.studentCount,
+                    );
+                    return Column(
+                      children: [
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                TableRow(
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade100,
-                                  ),
+                                Row(
                                   children: [
-                                    const Padding(
-                                      padding: EdgeInsets.all(8),
-                                      child: Text(
-                                        'Year Level',
-                                        style: TextStyle(fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                    const Padding(
-                                      padding: EdgeInsets.all(8),
-                                      child: Text(
-                                        'Students',
-                                        style: TextStyle(fontWeight: FontWeight.bold),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    // Only show action column header for admins
-                                    if (isAdmin) const SizedBox.shrink(),
-                                  ],
-                                ),
-                                ...breakdowns.map((breakdown) => TableRow(
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.all(8),
-                                      child: Text(breakdown.yearLevelLabel),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.all(8),
-                                      child: Text(
-                                        '${breakdown.studentCount}',
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    // Only admins can edit/delete breakdowns
-                                    if (isAdmin)
-                                      PopupMenuButton(
-                                        icon: const Icon(Icons.more_vert, size: 20),
-                                        itemBuilder: (context) => [
-                                          PopupMenuItem(
-                                            child: const Row(
-                                              children: [
-                                                Icon(Icons.edit, size: 16),
-                                                SizedBox(width: 8),
-                                                Text('Edit'),
-                                              ],
+                                    const Icon(Icons.people_outline, size: 28),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Student Distribution',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
                                             ),
-                                            onTap: () {
-                                              Future.delayed(Duration.zero, () {
-                                                _showEditYearLevelBreakdownDialog(
-                                                  context,
-                                                  ref,
-                                                  breakdown,
-                                                );
-                                              });
-                                            },
                                           ),
-                                          PopupMenuItem(
-                                            child: const Row(
-                                              children: [
-                                                Icon(Icons.delete, size: 16, color: Colors.red),
-                                                SizedBox(width: 8),
-                                                Text('Delete', style: TextStyle(color: Colors.red)),
-                                              ],
+                                          if (breakdowns.length > 1)
+                                            Text(
+                                              'Composite Class',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: AppTone.yellow
+                                                    .inkFor(context),
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
-                                            onTap: () {
-                                              Future.delayed(Duration.zero, () {
-                                                _deleteYearLevelBreakdown(context, ref, breakdown);
-                                              });
-                                            },
-                                          ),
                                         ],
                                       ),
+                                    ),
+                                    // Only admins can add new year level breakdowns
+                                    if (isAdmin)
+                                      IconButton(
+                                        icon: const Icon(Icons.add),
+                                        onPressed: () =>
+                                            _showAddYearLevelBreakdownDialog(
+                                          context,
+                                          ref,
+                                        ),
+                                        tooltip: 'Add Year Level',
+                                      ),
                                   ],
-                                )),
+                                ),
+                                const SizedBox(height: 16),
+                                Table(
+                                  border: TableBorder.all(
+                                    color: AppPalette.of(context).outline,
+                                    width: 1,
+                                  ),
+                                  columnWidths: {
+                                    0: const FlexColumnWidth(2),
+                                    1: const FlexColumnWidth(1),
+                                    // Only show action column for admins
+                                    if (isAdmin) 2: const FixedColumnWidth(48),
+                                  },
+                                  children: [
+                                    TableRow(
+                                      decoration: BoxDecoration(
+                                        color:
+                                            AppPalette.of(context).surfaceQuiet,
+                                      ),
+                                      children: [
+                                        const Padding(
+                                          padding: EdgeInsets.all(8),
+                                          child: Text(
+                                            'Year Level',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                        const Padding(
+                                          padding: EdgeInsets.all(8),
+                                          child: Text(
+                                            'Students',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                        // Only show action column header for admins
+                                        if (isAdmin) const SizedBox.shrink(),
+                                      ],
+                                    ),
+                                    ...breakdowns.map((breakdown) => TableRow(
+                                          children: [
+                                            Padding(
+                                              padding: const EdgeInsets.all(8),
+                                              child: Text(
+                                                  breakdown.yearLevelLabel),
+                                            ),
+                                            Padding(
+                                              padding: const EdgeInsets.all(8),
+                                              child: Text(
+                                                '${breakdown.studentCount}',
+                                                textAlign: TextAlign.center,
+                                              ),
+                                            ),
+                                            // Only admins can edit/delete breakdowns
+                                            if (isAdmin)
+                                              PopupMenuButton<bool>(
+                                                icon: const Icon(
+                                                    Icons.more_vert,
+                                                    size: 20),
+                                                onSelected: (edit) {
+                                                  if (!context.mounted) return;
+                                                  if (edit) {
+                                                    _showEditYearLevelBreakdownDialog(
+                                                      context,
+                                                      ref,
+                                                      breakdown,
+                                                    );
+                                                  } else {
+                                                    _deleteYearLevelBreakdown(
+                                                      context,
+                                                      ref,
+                                                      breakdown,
+                                                    );
+                                                  }
+                                                },
+                                                itemBuilder: (_) => [
+                                                  const PopupMenuItem(
+                                                    value: true,
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(Icons.edit,
+                                                            size: 16),
+                                                        SizedBox(width: 8),
+                                                        Text('Edit'),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  PopupMenuItem(
+                                                    value: false,
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(Icons.delete,
+                                                            size: 16,
+                                                            color:
+                                                                AppPalette.of(
+                                                                        context)
+                                                                    .error),
+                                                        const SizedBox(width: 8),
+                                                        Text('Delete',
+                                                            style: TextStyle(
+                                                                color: AppPalette.of(context).error)),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                          ],
+                                        )),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: AppTone.blue.tintFor(context),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text(
+                                        'Total Students',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      Text(
+                                        '$totalStudents',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 18,
+                                          color: AppTone.blue.inkFor(context),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Total Students',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  Text(
-                                    '$totalStudents',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 18,
-                                      color: Colors.blue.shade700,
-                                    ),
-                                  ),
-                                ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+                loading: () => const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 8),
+                          Text('Loading student distribution...'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                error: (error, stackTrace) => Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.error,
+                                color: AppPalette.of(context).error),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Error loading student distribution',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppPalette.of(context).error,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                );
-              }
-              return const SizedBox.shrink();
-            },
-            loading: () => const Card(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(
-                  child: Column(
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 8),
-                      Text('Loading student distribution...'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            error: (error, stackTrace) => Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.error, color: Colors.red),
-                        SizedBox(width: 8),
+                        const SizedBox(height: 8),
                         Text(
-                          'Error loading student distribution',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.red,
-                          ),
+                          'Error: $error',
+                          style: const TextStyle(fontSize: 12),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Error: $error',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Consumables Section Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.inventory_outlined, size: 24),
-                const SizedBox(width: 8),
-                const Text(
-                  'Consumables',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: () => _showAddConsumableDialog(context, ref),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add'),
-                ),
-              ],
+              ),
+
+          AppSectionHeading(
+            title: 'Consumables',
+            trailing: TextButton.icon(
+              onPressed: () => _showAddConsumableDialog(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('Add'),
             ),
           ),
-
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // Consumables List
           consumablesAsync.when(
@@ -543,7 +436,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   'Error loading consumables',
-                  style: TextStyle(color: Colors.red.shade700),
+                  style: TextStyle(color: AppPalette.of(context).error),
                 ),
               ),
             ),
@@ -558,13 +451,13 @@ class ClassroomDetailScreen extends ConsumerWidget {
                           Icon(
                             Icons.inventory_2_outlined,
                             size: 48,
-                            color: Colors.grey.shade400,
+                            color: AppPalette.of(context).muted,
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'No consumables yet',
                             style: TextStyle(
-                              color: Colors.grey.shade600,
+                              color: AppPalette.of(context).muted,
                               fontSize: 16,
                             ),
                           ),
@@ -572,7 +465,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
                           Text(
                             'Add items like tissues, paper, etc.',
                             style: TextStyle(
-                              color: Colors.grey.shade600,
+                              color: AppPalette.of(context).muted,
                               fontSize: 12,
                             ),
                           ),
@@ -585,228 +478,174 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
               return Column(
                 children: consumables.map((consumable) {
-                  final hasActualQuantity = consumable.actualQuantityDelivered != null;
+                  final hasActualQuantity =
+                      consumable.actualQuantityDelivered != null;
                   final isPartialDelivery = hasActualQuantity &&
                       consumable.actualQuantityDelivered != consumable.quantity;
                   final isFullyDelivered = hasActualQuantity &&
                       consumable.actualQuantityDelivered == consumable.quantity;
 
-                  // Determine colors based on status
-                  Color backgroundColor;
-                  Color iconColor;
-                  Color textColor;
-                  IconData iconData;
+                  final (tone, icon, status) = isPartialDelivery
+                      ? (
+                          AppTone.yellow,
+                          Icons.warning_amber_rounded,
+                          'Quantity differs'
+                        )
+                      : isFullyDelivered
+                          ? (
+                              AppTone.green,
+                              Icons.check_circle_outline,
+                              'Delivered'
+                            )
+                          : (
+                              AppTone.neutral,
+                              Icons.inventory_2_outlined,
+                              'Quantity unrecorded'
+                            );
 
-                  if (isPartialDelivery) {
-                    backgroundColor = Colors.orange.shade50;
-                    iconColor = Colors.orange.shade700;
-                    textColor = Colors.orange.shade900;
-                    iconData = Icons.warning_amber_rounded;
-                  } else if (isFullyDelivered) {
-                    backgroundColor = Colors.green.shade50;
-                    iconColor = Colors.green.shade700;
-                    textColor = Colors.green.shade900;
-                    iconData = Icons.check_circle_rounded;
-                  } else {
-                    backgroundColor = Colors.white;
-                    iconColor = Colors.grey.shade600;
-                    textColor = Colors.black87;
-                    iconData = Icons.inventory_2_outlined;
-                  }
-
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: isPartialDelivery
-                            ? Colors.orange.shade300
-                            : isFullyDelivered
-                                ? Colors.green.shade300
-                                : Colors.grey.shade200,
-                        width: 1.5,
-                      ),
-                    ),
-                    color: backgroundColor,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Header row with icon, name, and menu
-                          Row(
-                            children: [
-                              // Icon
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: iconColor.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  iconData,
-                                  size: 24,
-                                  color: iconColor,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              // Content
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      consumable.itemName,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    hasActualQuantity
-                                        ? RichText(
-                                            text: TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text: '${consumable.actualQuantityDelivered}',
-                                                  style: TextStyle(
-                                                    fontSize: 20,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: textColor,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: ' / ${consumable.quantity}',
-                                                  style: TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w500,
-                                                    color: Colors.grey.shade600,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: ' ${consumable.unit}',
-                                                  style: TextStyle(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.normal,
-                                                    color: Colors.grey.shade600,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          )
-                                        : Text(
-                                            '${consumable.quantity} ${consumable.unit}',
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              color: Colors.grey.shade600,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                  ],
-                                ),
-                              ),
-                              // Menu button
-                              PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  if (value == 'edit') {
-                                    _showEditConsumableDialog(context, ref, consumable);
-                                  } else if (value == 'delete') {
-                                    _showDeleteConsumableConfirmation(
-                                        context, ref, consumable);
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.edit, size: 20),
-                                        SizedBox(width: 12),
-                                        Text('Edit'),
-                                      ],
+                  return AppPanel(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            AppIconTile(icon: icon, tone: tone),
+                            const SizedBox(width: 12),
+                            // Content
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    consumable.itemName,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.delete, size: 20, color: Colors.red),
-                                        SizedBox(width: 12),
-                                        Text('Delete',
-                                            style: TextStyle(color: Colors.red)),
-                                      ],
-                                    ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    hasActualQuantity
+                                        ? '${consumable.actualQuantityDelivered} / ${consumable.quantity} ${consumable.unit}'
+                                        : '${consumable.quantity} ${consumable.unit}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          color: tone.inkFor(context),
+                                        ),
                                   ),
                                 ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          // Quick action buttons
-                          Row(
-                            children: [
-                              // Mark as Complete button
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    // Store mounted state before async operation
-                                    if (!context.mounted) return;
+                            ),
+                            // Menu button
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  _showEditConsumableDialog(
+                                      context, ref, consumable);
+                                } else if (value == 'delete') {
+                                  _showDeleteConsumableConfirmation(
+                                      context, ref, consumable);
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.edit, size: 20),
+                                      SizedBox(width: 12),
+                                      Text('Edit'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.delete,
+                                          size: 20,
+                                          color: AppPalette.of(context).error),
+                                      const SizedBox(width: 12),
+                                      Text('Delete',
+                                          style: TextStyle(
+                                              color: AppPalette.of(context)
+                                                  .error)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        AppStatusPill(label: status, tone: tone),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                // Store mounted state before async operation
+                                if (!context.mounted) return;
 
-                                    final updatedConsumable = consumable.copyWith(
-                                      actualQuantityDelivered: consumable.quantity,
-                                    );
+                                final updatedConsumable = consumable.copyWith(
+                                  actualQuantityDelivered: consumable.quantity,
+                                );
 
-                                    final success = await ref
-                                        .read(schoolsNotifierProvider.notifier)
-                                        .updateClassroomConsumable(
+                                final success = await ref
+                                    .read(schoolsNotifierProvider.notifier)
+                                    .updateClassroomConsumable(
                                       schoolId,
                                       yearLevelId,
                                       classroomId,
                                       updatedConsumable,
                                     );
 
-                                    if (!context.mounted) return;
+                                if (!context.mounted) return;
 
-                                    if (success) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('${consumable.itemName} marked as complete'),
-                                          backgroundColor: Colors.green,
-                                          duration: const Duration(seconds: 2),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                                  label: const Text('Complete'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.green,
-                                    side: BorderSide(color: Colors.green.shade300),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                  ),
-                                ),
+                                if (success) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          '${consumable.itemName} marked as complete'),
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.check_circle_outline,
+                                  size: 18),
+                              label: const Text('Complete'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTone.green.inkFor(context),
+                                side: BorderSide(
+                                    color: AppPalette.of(context).outline),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
                               ),
-                              const SizedBox(width: 8),
-                              // Set Actual Quantity button
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    _showSetActualConsumableDialog(context, ref, consumable);
-                                  },
-                                  icon: const Icon(Icons.edit_outlined, size: 18),
-                                  label: const Text('Set Qty'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.orange,
-                                    side: BorderSide(color: Colors.orange.shade300),
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                  ),
-                                ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                _showSetActualConsumableDialog(
+                                    context, ref, consumable);
+                              },
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                              label: const Text('Set Qty'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTone.yellow.inkFor(context),
+                                side: BorderSide(
+                                    color: AppPalette.of(context).outline),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
                               ),
-                            ],
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   );
                 }).toList(),
@@ -816,40 +655,25 @@ class ClassroomDetailScreen extends ConsumerWidget {
 
           const SizedBox(height: 24),
 
-          // Photos Section (with optimistic upload support)
+          // Photos
           _PhotosSection(
             schoolId: schoolId,
             yearLevelId: yearLevelId,
             classroomId: classroomId,
+            deliveryId: deliveryId,
           ),
 
           const SizedBox(height: 24),
 
-          // Notes Section Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                const Icon(Icons.note_outlined, size: 24),
-                const SizedBox(width: 8),
-                const Text(
-                  'Notes',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: () => _showAddNoteDialog(context, ref),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add'),
-                ),
-              ],
+          AppSectionHeading(
+            title: 'Notes',
+            trailing: TextButton.icon(
+              onPressed: () => _showNoteDialog(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('Add'),
             ),
           ),
-
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
 
           // Notes List
           notesAsync.when(
@@ -867,12 +691,15 @@ class ClassroomDetailScreen extends ConsumerWidget {
                   children: [
                     Text(
                       'Error loading notes',
-                      style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: AppPalette.of(context).error,
+                          fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Error: $error',
-                      style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                      style: TextStyle(
+                          color: AppPalette.of(context).error, fontSize: 12),
                     ),
                   ],
                 ),
@@ -889,13 +716,13 @@ class ClassroomDetailScreen extends ConsumerWidget {
                           Icon(
                             Icons.note_alt_outlined,
                             size: 48,
-                            color: Colors.grey.shade400,
+                            color: AppPalette.of(context).muted,
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'No notes yet',
                             style: TextStyle(
-                              color: Colors.grey.shade600,
+                              color: AppPalette.of(context).muted,
                               fontSize: 16,
                             ),
                           ),
@@ -903,7 +730,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
                           Text(
                             'Add notes about this classroom',
                             style: TextStyle(
-                              color: Colors.grey.shade600,
+                              color: AppPalette.of(context).muted,
                               fontSize: 12,
                             ),
                           ),
@@ -934,9 +761,10 @@ class ClassroomDetailScreen extends ConsumerWidget {
                               PopupMenuButton<String>(
                                 onSelected: (value) {
                                   if (value == 'edit') {
-                                    _showEditNoteDialog(context, ref, note);
+                                    _showNoteDialog(context, ref, note: note);
                                   } else if (value == 'delete') {
-                                    _showDeleteNoteConfirmation(context, ref, note);
+                                    _showDeleteNoteConfirmation(
+                                        context, ref, note);
                                   }
                                 },
                                 itemBuilder: (context) => [
@@ -950,13 +778,19 @@ class ClassroomDetailScreen extends ConsumerWidget {
                                       ],
                                     ),
                                   ),
-                                  const PopupMenuItem(
+                                  PopupMenuItem(
                                     value: 'delete',
                                     child: Row(
                                       children: [
-                                        Icon(Icons.delete, size: 20, color: Colors.red),
-                                        SizedBox(width: 12),
-                                        Text('Delete', style: TextStyle(color: Colors.red)),
+                                        Icon(Icons.delete,
+                                            size: 20,
+                                            color:
+                                                AppPalette.of(context).error),
+                                        const SizedBox(width: 12),
+                                        Text('Delete',
+                                            style: TextStyle(
+                                                color: AppPalette.of(context)
+                                                    .error)),
                                       ],
                                     ),
                                   ),
@@ -968,24 +802,28 @@ class ClassroomDetailScreen extends ConsumerWidget {
                           Row(
                             children: [
                               if (note.author != null) ...[
-                                Icon(Icons.person, size: 14, color: Colors.grey.shade600),
+                                Icon(Icons.person,
+                                    size: 14,
+                                    color: AppPalette.of(context).muted),
                                 const SizedBox(width: 4),
                                 Text(
                                   note.author!,
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey.shade600,
+                                    color: AppPalette.of(context).muted,
                                   ),
                                 ),
                                 const SizedBox(width: 12),
                               ],
-                              Icon(Icons.access_time, size: 14, color: Colors.grey.shade600),
+                              Icon(Icons.access_time,
+                                  size: 14,
+                                  color: AppPalette.of(context).muted),
                               const SizedBox(width: 4),
                               Text(
                                 _formatDate(note.createdAt),
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Colors.grey.shade600,
+                                  color: AppPalette.of(context).muted,
                                 ),
                               ),
                             ],
@@ -1003,156 +841,118 @@ class ClassroomDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildCompletionStatusCard(
-      BuildContext context, WidgetRef ref, Classroom classroom) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.shade200, width: 1),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.inventory_2_outlined, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Pack Delivery Status',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+  Widget _buildPacksPanel(
+    BuildContext context,
+    WidgetRef ref, {
+    required AsyncValue<List<Classroom>> classroomsAsync,
+    required AsyncValue<PackTotal?> packTotalAsync,
+    required bool canEditExpected,
+  }) {
+    final typography = Theme.of(context).textTheme;
+    final colors = AppPalette.of(context);
+    final classroom = classroomsAsync.asData?.value
+        .where((room) => room.id == classroomId)
+        .firstOrNull;
+    final actual = classroom?.actualPacksDelivered;
+    final expected = packTotalAsync.asData?.value;
+
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppSectionHeading(
+            title: 'Packs',
+            trailing: canEditExpected
+                ? IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    tooltip: 'Update Pack Total',
+                    onPressed: () => _showUpdatePackTotalDialog(
+                      context,
+                      ref,
+                      expected?.total,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 12),
+          Text('Expected packs', style: typography.bodySmall),
+          packTotalAsync.when(
+            data: (total) => Text(
+              total == null ? 'Not set' : '${total.total}',
+              style: typography.titleLarge,
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Select the status for packs only (not consumables)',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey,
-                fontStyle: FontStyle.italic,
-              ),
+            loading: () => const LinearProgressIndicator(),
+            error: (_, __) => Text('Expected packs unavailable',
+                style: TextStyle(color: colors.error)),
+          ),
+          if (expected != null)
+            Text('Updated ${_formatDate(expected.createdAt)}',
+                style: typography.bodySmall),
+          if (deliveryId != null) ...[
+            const Divider(height: 24),
+            Text('Recorded packs', style: typography.bodySmall),
+            Text(
+              classroom == null
+                  ? (classroomsAsync.isLoading ? 'Loading…' : 'Unavailable')
+                  : actual?.toString() ?? 'Unrecorded',
+              style: typography.titleLarge,
             ),
-            const SizedBox(height: 20),
-            // Status options as clean buttons
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatusOption(
+            if (classroom != null) ...[
+              const SizedBox(height: 12),
+              Text('Pack delivery status', style: typography.titleSmall),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _buildStatusOption(
                     context,
                     ref,
                     classroom,
-                    yearLevelId,
                     ClassroomCompletionStatus.notAttended,
                     'Not Attended',
-                    Icons.cancel_rounded,
-                    Colors.red,
+                    Icons.remove_circle_outline,
+                    AppTone.neutral,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatusOption(
+                  _buildStatusOption(
                     context,
                     ref,
                     classroom,
-                    yearLevelId,
                     ClassroomCompletionStatus.incomplete,
                     'Incomplete',
                     Icons.warning_amber_rounded,
-                    Colors.orange,
+                    AppTone.yellow,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatusOption(
+                  _buildStatusOption(
                     context,
                     ref,
                     classroom,
-                    yearLevelId,
                     ClassroomCompletionStatus.complete,
                     'Complete',
-                    Icons.check_circle_rounded,
-                    Colors.green,
+                    Icons.check_circle_outline,
+                    AppTone.green,
+                  ),
+                ],
+              ),
+              if (classroom.completionStatus ==
+                      ClassroomCompletionStatus.incomplete &&
+                  actual != null)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: () => _showActualQuantityDialog(
+                      context,
+                      ref,
+                      classroom,
+                      yearLevelId,
+                    ),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit recorded quantity'),
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            // Show actual vs expected if incomplete
-            if (classroom.completionStatus == ClassroomCompletionStatus.incomplete &&
-                classroom.actualPacksDelivered != null)
-              Builder(
-                builder: (context) {
-                  final packTotalAsync = ref.watch(packTotalProvider((
-                    schoolId: schoolId,
-                    yearLevelId: yearLevelId,
-                    classroomId: classroom.id,
-                  )));
-
-                  return packTotalAsync.when(
-                    data: (packTotal) {
-                      final expected = packTotal?.total ?? 0;
-                      final actual = classroom.actualPacksDelivered ?? 0;
-
-                      return Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.orange),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Partial Delivery',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '$actual of $expected packs delivered',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.orange,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                _showActualQuantityDialog(context, ref, classroom, yearLevelId);
-                              },
-                              child: const Text('Edit'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const SizedBox.shrink(),
-                    error: (_, __) => const SizedBox.shrink(),
-                  );
-                },
-              ),
-            if (classroom.completionStatus == ClassroomCompletionStatus.incomplete &&
-                classroom.actualPacksDelivered != null)
-              const SizedBox(height: 0),
+            ],
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1161,92 +961,59 @@ class ClassroomDetailScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     Classroom classroom,
-    String yearLevelId,
     ClassroomCompletionStatus status,
     String label,
     IconData icon,
-    Color color,
+    AppTone tone,
   ) {
-    final isSelected = classroom.completionStatus == status;
+    final selected = classroom.completionStatus == status;
+    final colors = AppPalette.of(context);
 
-    return GestureDetector(
-      onTap: () async {
-        // Get current staff's name
-        final currentStaff = ref.read(currentStaffProvider).value;
-        final currentUser = ref.read(currentUserProvider).value;
-
-        // Use staff name if available, otherwise use user email
-        String staffName = 'Unknown';
-        if (currentStaff?.name != null) {
-          staffName = currentStaff!.name;
-        } else if (currentUser?.email != null) {
-          staffName = currentUser!.email.split('@').first;
-        }
-
-        // If status is incomplete, show dialog to enter actual quantity
-        if (status == ClassroomCompletionStatus.incomplete) {
-          _showActualQuantityDialog(context, ref, classroom, yearLevelId);
-        } else {
-          // For complete or not attended, clear actual quantity
-          final updatedClassroom = classroom.copyWith(
-            completionStatus: status,
-            actualPacksDelivered: null,
-            lastUpdatedBy: staffName,
-            lastUpdatedAt: DateTime.now(),
-          );
-
-          final success = await ref
-              .read(schoolsNotifierProvider.notifier)
-              .updateClassroom(schoolId, yearLevelId, updatedClassroom);
-
-          if (context.mounted && success) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Status updated to $label'),
-                backgroundColor: color,
-                duration: const Duration(seconds: 2),
-              ),
-            );
+    return Semantics(
+      selected: selected,
+      child: OutlinedButton.icon(
+        onPressed: () {
+          if (status == ClassroomCompletionStatus.incomplete) {
+            _showActualQuantityDialog(context, ref, classroom, yearLevelId);
+          } else {
+            _saveClassroomStatus(context, ref, status);
           }
-        }
-      },
-      child: AspectRatio(
-        aspectRatio: 1.0, // Makes it square
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? color : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                color: isSelected ? Colors.white : Colors.grey.shade600,
-                size: 32,
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.grey.shade700,
-                    height: 1.1,
-                  ),
-                ),
-              ),
-            ],
-          ),
+        },
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: selected ? tone.inkFor(context) : colors.ink,
+          backgroundColor: selected ? tone.tintFor(context) : colors.surface,
+          side: BorderSide(
+              color: selected ? tone.inkFor(context) : colors.outline),
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          shape: const StadiumBorder(),
         ),
       ),
     );
+  }
+
+  FieldDraftTarget _draftTarget(String form, {String? entityId}) {
+    return FieldDraftTarget(
+      schoolId: schoolId,
+      deliveryId: deliveryId,
+      yearLevelId: yearLevelId,
+      classroomId: classroomId,
+      form: form,
+      entityId: entityId,
+    );
+  }
+
+  static String? _validateCount(String value, {bool optional = false}) {
+    if (value.trim().isEmpty) {
+      return optional ? null : 'Enter a quantity.';
+    }
+    final count = int.tryParse(value.trim());
+    if (count == null || count < 0 || count > 1000000) {
+      return 'Enter a whole number from 0 to 1,000,000.';
+    }
+    return null;
   }
 
   void _showActualQuantityDialog(
@@ -1255,116 +1022,64 @@ class ClassroomDetailScreen extends ConsumerWidget {
     Classroom classroom,
     String yearLevelId,
   ) {
-    // Get the current pack total for reference
-    final packTotalAsync = ref.read(packTotalProvider((
-      schoolId: schoolId,
-      yearLevelId: yearLevelId,
-      classroomId: classroom.id,
-    )));
-
-    final expectedTotal = packTotalAsync.value?.total ?? 0;
-
-    final controller = TextEditingController(
-      text: classroom.actualPacksDelivered?.toString() ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    final expected = ref
+        .read(packTotalProvider((
+          schoolId: schoolId,
+          yearLevelId: yearLevelId,
+          classroomId: classroom.id,
+        )))
+        .valueOrNull
+        ?.total;
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Actual Packs Delivered'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Expected: $expectedTotal packs',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  labelText: 'Actual Packs Delivered',
-                  hintText: 'e.g., 23',
-                  suffixText: 'packs',
-                  helperText: 'Enter the actual number of packs delivered',
-                ),
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter the actual quantity';
-                  }
-                  final number = int.tryParse(value.trim());
-                  if (number == null) {
-                    return 'Please enter a valid number';
-                  }
-                  if (number < 0) {
-                    return 'Quantity cannot be negative';
-                  }
-                  return null;
-                },
-              ),
-            ],
-          ),
+      ref: ref,
+      target: _draftTarget('actualPacks'),
+      title: 'Actual packs delivered',
+      savedLabel: 'Classroom status',
+      description: expected == null ? null : 'Expected $expected packs',
+      inputs: [
+        FieldDraftInput(
+          id: 'quantity',
+          label: 'Packs delivered',
+          initialText: classroom.actualPacksDelivered?.toString() ?? '',
+          keyboardType: TextInputType.number,
+          validator: _validateCount,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (formKey.currentState?.validate() ?? false) {
-                Navigator.pop(dialogContext);
+      ],
+      onSave: (draft) => schools.updateClassroomStatus(
+        schoolId,
+        yearLevelId,
+        classroomId,
+        status: ClassroomCompletionStatus.incomplete,
+        actualPacksDelivered: int.parse(draft.values['quantity']!.trim()),
+        editId: draft.revision,
+      ),
+    );
+  }
 
-                // Get current staff's name
-                final currentStaff = ref.read(currentStaffProvider).value;
-                final currentUser = ref.read(currentUserProvider).value;
+  Future<void> _saveClassroomStatus(
+    BuildContext context,
+    WidgetRef ref,
+    ClassroomCompletionStatus status,
+  ) async {
+    final result =
+        await ref.read(schoolsNotifierProvider.notifier).updateClassroomStatus(
+              schoolId,
+              yearLevelId,
+              classroomId,
+              status: status,
+              actualPacksDelivered: null,
+            );
+    if (!context.mounted) return;
 
-                // Use staff name if available, otherwise use user email
-                String staffName = 'Unknown';
-                if (currentStaff?.name != null) {
-                  staffName = currentStaff!.name;
-                } else if (currentUser?.email != null) {
-                  staffName = currentUser!.email.split('@').first;
-                }
-
-                final actualQuantity = int.parse(controller.text.trim());
-                final updatedClassroom = classroom.copyWith(
-                  completionStatus: ClassroomCompletionStatus.incomplete,
-                  actualPacksDelivered: actualQuantity,
-                  lastUpdatedBy: staffName,
-                  lastUpdatedAt: DateTime.now(),
-                );
-
-                final success = await ref
-                    .read(schoolsNotifierProvider.notifier)
-                    .updateClassroom(schoolId, yearLevelId, updatedClassroom);
-
-                if (context.mounted && success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Status updated: $actualQuantity/$expectedTotal packs delivered',
-                      ),
-                      backgroundColor: Colors.orange,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.when(
+          success: (progress) =>
+              fieldEditFeedback('Classroom status', progress),
+          failure: (message, _) => message,
+        )),
       ),
     );
   }
@@ -1374,81 +1089,28 @@ class ClassroomDetailScreen extends ConsumerWidget {
     WidgetRef ref,
     int? currentTotal,
   ) {
-    final controller = TextEditingController(
-      text: currentTotal?.toString() ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title:
-            Text(currentTotal == null ? 'Set Pack Total' : 'Update Pack Total'),
-        content: Form(
-          key: formKey,
-          child: TextFormField(
-            controller: controller,
-            decoration: const InputDecoration(
-              labelText: 'Number of Packs',
-              hintText: 'e.g., 25',
-              suffixText: 'packs',
-            ),
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            autofocus: true,
-            validator: (value) {
-              if (value?.trim().isEmpty ?? true) {
-                return 'Please enter a number';
-              }
-              final number = int.tryParse(value!);
-              if (number == null || number < 0) {
-                return 'Please enter a valid number';
-              }
-              return null;
-            },
-          ),
+      ref: ref,
+      target: _draftTarget('packTotal'),
+      title: currentTotal == null ? 'Set pack total' : 'Update pack total',
+      savedLabel: 'Pack total',
+      inputs: [
+        FieldDraftInput(
+          id: 'quantity',
+          label: 'Number of packs',
+          initialText: currentTotal?.toString() ?? '',
+          keyboardType: TextInputType.number,
+          validator: _validateCount,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final packTotal = PackTotal(
-                id: '',
-                total: int.parse(controller.text.trim()),
-                createdAt: DateTime.now(),
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .updatePackTotal(
-                      schoolId, yearLevelId, classroomId, packTotal);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Pack total updated successfully'
-                        : 'Failed to update pack total'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-
-                // Show notification that sign-off was cleared
-                if (success) {
-                  NotificationUtils.showSignOffClearedNotification(context);
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.saveClassroomPackTotal(
+        schoolId,
+        yearLevelId,
+        classroomId,
+        int.parse(draft.values['quantity']!.trim()),
+        editId: draft.revision,
       ),
     );
   }
@@ -1469,113 +1131,35 @@ class ClassroomDetailScreen extends ConsumerWidget {
   }
 
   void _showSetActualConsumableDialog(
-      BuildContext context, WidgetRef ref, Consumable consumable) {
-    final controller = TextEditingController(
-      text: consumable.actualQuantityDelivered?.toString() ?? '',
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
+    BuildContext context,
+    WidgetRef ref,
+    Consumable consumable,
+  ) {
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Set Actual Quantity Delivered'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                consumable.itemName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Expected: ${consumable.quantity} ${consumable.unit}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: controller,
-                decoration: InputDecoration(
-                  labelText: 'Actual Quantity Delivered',
-                  hintText: 'e.g., ${consumable.quantity - 2}',
-                  suffixText: consumable.unit,
-                  helperText: 'Leave empty to clear partial delivery',
-                ),
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return null; // Allow empty to clear
-                  }
-                  final number = int.tryParse(value.trim());
-                  if (number == null) {
-                    return 'Please enter a valid number';
-                  }
-                  if (number < 0) {
-                    return 'Quantity cannot be negative';
-                  }
-                  return null;
-                },
-              ),
-            ],
-          ),
+      ref: ref,
+      target: _draftTarget('actualConsumable', entityId: consumable.id),
+      title: 'Actual quantity delivered',
+      savedLabel: 'Quantity',
+      description: '${consumable.itemName} · Expected ${consumable.quantity} '
+          '${consumable.unit}\n\nLeave the quantity blank to clear it.',
+      inputs: [
+        FieldDraftInput(
+          id: 'quantity',
+          label: 'Delivered quantity',
+          initialText: consumable.actualQuantityDelivered?.toString() ?? '',
+          keyboardType: TextInputType.number,
+          validator: (value) => _validateCount(value, optional: true),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (formKey.currentState?.validate() ?? false) {
-                Navigator.pop(dialogContext);
-
-                final valueText = controller.text.trim();
-                final actualQuantity = valueText.isEmpty
-                    ? null
-                    : int.parse(valueText);
-
-                final updatedConsumable = consumable.copyWith(
-                  actualQuantityDelivered: actualQuantity,
-                );
-
-                final success = await ref
-                    .read(schoolsNotifierProvider.notifier)
-                    .updateClassroomConsumable(
-                  schoolId,
-                  yearLevelId,
-                  classroomId,
-                  updatedConsumable,
-                );
-
-                if (context.mounted && success) {
-                  final message = actualQuantity == null
-                      ? 'Partial delivery cleared for ${consumable.itemName}'
-                      : 'Actual quantity set: $actualQuantity/${consumable.quantity} ${consumable.unit}';
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(message),
-                      backgroundColor:
-                          actualQuantity == null ? Colors.blue : Colors.orange,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      ],
+      onSave: (draft) => schools.saveClassroomActualQuantity(
+        schoolId,
+        yearLevelId,
+        classroomId,
+        consumable.id,
+        int.tryParse(draft.values['quantity']!.trim()),
+        editId: draft.revision,
       ),
     );
   }
@@ -1670,7 +1254,6 @@ class ClassroomDetailScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Consumable added successfully'
                         : 'Failed to add consumable'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
@@ -1774,7 +1357,6 @@ class ClassroomDetailScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Consumable updated successfully'
                         : 'Failed to update consumable'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
@@ -1816,13 +1398,13 @@ class ClassroomDetailScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Consumable deleted successfully'
                         : 'Failed to delete consumable'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),
@@ -1831,237 +1413,92 @@ class ClassroomDetailScreen extends ConsumerWidget {
     );
   }
 
-  // Note management methods
-  void _showAddNoteDialog(BuildContext context, WidgetRef ref) {
-    final contentController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    // Get current staff's name for auto-assignment
-    final currentStaff = ref.read(currentStaffProvider).value;
-    final currentUser = ref.read(currentUserProvider).value;
-
-    // Use staff name if available, otherwise use user email (without domain for brevity)
-    String staffName = 'Unknown';
-    if (currentStaff?.name != null) {
-      staffName = currentStaff!.name;
-    } else if (currentUser?.email != null) {
-      // Extract name part from email (everything before @)
-      staffName = currentUser!.email.split('@').first;
-    }
-
-    showDialog(
+  void _showNoteDialog(BuildContext context, WidgetRef ref, {Note? note}) {
+    final schools = ref.read(schoolsNotifierProvider.notifier);
+    final staffName = ref.read(currentStaffProvider).valueOrNull?.name;
+    showFieldDraftDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Note'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: contentController,
-                decoration: const InputDecoration(
-                  labelText: 'Note',
-                  hintText: 'Enter your note here...',
-                ),
-                maxLines: 3,
-                autofocus: true,
-                validator: (value) => value?.trim().isEmpty ?? true
-                    ? 'Please enter a note'
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.person_outline, size: 16, color: Colors.grey),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Author: $staffName',
-                      style: const TextStyle(fontSize: 13, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+      ref: ref,
+      target: _draftTarget('note', entityId: note?.id),
+      title: note == null ? 'Add note' : 'Edit note',
+      savedLabel: 'Note',
+      inputs: [
+        FieldDraftInput(
+          id: 'content',
+          label: 'Note',
+          initialText: note?.content ?? '',
+          maxLines: 4,
+          keyboardType: TextInputType.multiline,
+          validator: (value) {
+            final content = value.trim();
+            if (content.isEmpty) return 'Enter a note.';
+            if (content.length > 20000) {
+              return 'Use 20,000 characters or fewer.';
+            }
+            return null;
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final note = Note(
+      ],
+      onSave: (draft) {
+        final content = draft.values['content']!.trim();
+        return schools.saveClassroomNote(
+          schoolId,
+          yearLevelId,
+          classroomId,
+          note?.copyWith(content: content) ??
+              Note(
                 id: '',
-                content: contentController.text.trim(),
+                content: content,
                 author: staffName,
                 createdAt: DateTime.now(),
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .createClassroomNote(schoolId, yearLevelId, classroomId, note);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Note added successfully'
-                        : 'Failed to add note'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditNoteDialog(BuildContext context, WidgetRef ref, Note note) {
-    final contentController = TextEditingController(text: note.content);
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit Note'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: contentController,
-                decoration: const InputDecoration(
-                  labelText: 'Note',
-                  hintText: 'Enter your note here...',
-                ),
-                maxLines: 3,
-                autofocus: true,
-                validator: (value) => value?.trim().isEmpty ?? true
-                    ? 'Please enter a note'
-                    : null,
               ),
-              if (note.author != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.person_outline, size: 16, color: Colors.grey),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Original author: ${note.author}',
-                        style: const TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
-
-              final updatedNote = Note(
-                id: note.id,
-                content: contentController.text.trim(),
-                author: note.author,  // Keep the original author
-                createdAt: note.createdAt,
-              );
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .updateClassroomNote(
-                      schoolId, yearLevelId, classroomId, updatedNote);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Note updated successfully'
-                        : 'Failed to update note'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+          editId: draft.revision,
+        );
+      },
     );
   }
 
-  void _showDeleteNoteConfirmation(
-      BuildContext context, WidgetRef ref, Note note) {
-    showDialog(
+  Future<void> _showDeleteNoteConfirmation(
+    BuildContext context,
+    WidgetRef ref,
+    Note note,
+  ) async {
+    final confirmed = await showDialog<bool>(
       context: context,
+      useRootNavigator: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Note'),
-        content: const Text(
-          'Are you sure you want to delete this note? This action cannot be undone.',
-        ),
+        title: const Text('Delete note?'),
+        content: const Text('This removes the note from this classroom.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-
-              final success = await ref
-                  .read(schoolsNotifierProvider.notifier)
-                  .deleteClassroomNote(
-                      schoolId, yearLevelId, classroomId, note.id);
-
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(success
-                        ? 'Note deleted successfully'
-                        : 'Failed to delete note'),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+    if (confirmed != true || !context.mounted) return;
+
+    final result = await ref
+        .read(schoolsNotifierProvider.notifier)
+        .saveClassroomNoteDeletion(schoolId, yearLevelId, classroomId, note);
+    if (!context.mounted) return;
+    final message = result.when(
+      success: (status) => switch (status) {
+        ClassroomEditStatus.saved => 'Note deleted',
+        ClassroomEditStatus.pending =>
+          'Note removal saved on this device · Sync pending',
+        ClassroomEditStatus.unconfirmed =>
+          'Deletion request saved on this device. Review it when connected.',
+      },
+      failure: (message, _) => message,
+    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   // Year Level Breakdown Dialog Methods
@@ -2166,7 +1603,6 @@ class ClassroomDetailScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Year level added successfully'
                         : 'Failed to add year level'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
@@ -2197,12 +1633,12 @@ class ClassroomDetailScreen extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
+                  color: AppPalette.of(context).surfaceQuiet,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.school, color: Colors.grey),
+                    Icon(Icons.school, color: AppPalette.of(context).muted),
                     const SizedBox(width: 8),
                     Text(
                       breakdown.yearLevelLabel,
@@ -2246,14 +1682,16 @@ class ClassroomDetailScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-
-              Navigator.pop(dialogContext);
+              if (!context.mounted ||
+                  !(formKey.currentState?.validate() ?? false)) {
+                return;
+              }
 
               final updated = breakdown.copyWith(
                 studentCount: int.parse(studentCountController.text),
               );
 
+              Navigator.pop(dialogContext);
               final success = await ref
                   .read(schoolsNotifierProvider.notifier)
                   .updateYearLevelBreakdown(
@@ -2265,7 +1703,6 @@ class ClassroomDetailScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Year level updated successfully'
                         : 'Failed to update year level'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
@@ -2293,6 +1730,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
+              if (!context.mounted) return;
               Navigator.pop(dialogContext);
 
               final success = await ref
@@ -2306,13 +1744,13 @@ class ClassroomDetailScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Year level removed successfully'
                         : 'Failed to remove year level'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),
@@ -2322,228 +1760,75 @@ class ClassroomDetailScreen extends ConsumerWidget {
   }
 }
 
-/// Widget to display a photo card with delete option
 class _PhotoCard extends ConsumerWidget {
   const _PhotoCard({
+    super.key,
     required this.photo,
-    required this.onDelete,
+    required this.asset,
+    required this.schoolId,
+    required this.onRemove,
   });
 
   final Photo photo;
-  final VoidCallback onDelete;
+  final OfflineMediaAsset? asset;
+  final String schoolId;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final storageRepository = ref.watch(storageRepositoryProvider);
-    final currentUser = ref.watch(currentUserProvider).value;
-    final isAdmin = ref.watch(isAdminProvider);
-    final isManager = ref.watch(isManagerProvider);
+    final owner = ref.watch(offlineMediaOwnerProvider(schoolId));
+    final canRemove = owner != null &&
+        (ref.watch(isAdminProvider) ||
+            ref.watch(isManagerProvider) ||
+            photo.uploadedBy == owner);
+    final source = asset;
 
-    // Determine if user can delete this photo
-    // Admins and managers can delete any photo
-    // Regular staff can only delete photos they uploaded
-    final canDelete = isAdmin ||
-                      isManager ||
-                      (photo.uploadedBy != null && photo.uploadedBy == currentUser?.uid);
-
-    return FutureBuilder<String>(
-      future: storageRepository.getDownloadUrl(photo.storagePath).then(
-            (result) => result.dataOrNull ?? '',
-          ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Card(
-            child: Center(
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.grey.shade400,
-              ),
-            ),
-          );
-        }
-
-        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
-          return Card(
-            child: Center(
-              child: Icon(Icons.broken_image, color: Colors.grey.shade400),
-            ),
-          );
-        }
-
-        return GestureDetector(
-          onTap: () => _showFullScreenImage(context, snapshot.data!),
-          child: Card(
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  snapshot.data!,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        value: loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded /
-                                loadingProgress.expectedTotalBytes!
-                            : null,
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Center(
-                      child: Icon(Icons.broken_image,
-                          color: Colors.grey.shade400),
-                    );
-                  },
-                ),
-                if (canDelete)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: Material(
-                      color: Colors.black54,
-                      shape: const CircleBorder(),
-                      clipBehavior: Clip.antiAlias,
-                      child: IconButton(
-                        icon: const Icon(Icons.delete, size: 18),
-                        color: Colors.white,
-                        padding: const EdgeInsets.all(4),
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                        onPressed: onDelete,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showFullScreenImage(BuildContext context, String imageUrl) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.black,
-        insetPadding: EdgeInsets.zero,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            InteractiveViewer(
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-              ),
-            ),
-            Positioned(
-              top: 40,
-              right: 16,
-              child: Material(
-                color: Colors.black54,
-                shape: const CircleBorder(),
-                clipBehavior: Clip.antiAlias,
-                child: IconButton(
-                  icon: const Icon(Icons.close),
-                  color: Colors.white,
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Widget to display a pending photo card with upload indicator
-class _PendingPhotoCard extends StatelessWidget {
-  const _PendingPhotoCard({
-    required this.pendingPhoto,
-    required this.onRetry,
-    required this.onCancel,
-  });
-
-  final _PendingPhoto pendingPhoto;
-  final VoidCallback onRetry;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Local file thumbnail
-          Image.file(
-            pendingPhoto.localFile,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) {
-              return Center(
-                child: Icon(Icons.broken_image, color: Colors.grey.shade400),
-              );
-            },
-          ),
-          // Uploading overlay
-          if (!pendingPhoto.hasError)
-            Container(
-              color: Colors.black38,
-              child: const Center(
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
+          if (owner != null && source != null)
+            Semantics(
+              button: true,
+              label: 'Open classroom photo',
+              child: InkWell(
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => OfflineMediaScreen(
+                      asset: source,
+                      ownerUid: owner,
+                      title: 'Classroom photo',
+                    ),
+                  ),
                 ),
+                child: OfflineMediaPreview(asset: source, fit: BoxFit.cover),
+              ),
+            )
+          else
+            const Center(child: Icon(Icons.broken_image_outlined)),
+          if (source?.visit != null)
+            Positioned(
+              top: 4,
+              left: 4,
+              child: Material(
+                color: Theme.of(context).colorScheme.surface,
+                shape: const CircleBorder(),
+                child: OfflineMediaDownloadButton(asset: source!),
               ),
             ),
-          // Error overlay with retry
-          if (pendingPhoto.hasError)
-            Container(
-              color: Colors.red.withValues(alpha: 0.8),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.white, size: 28),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Failed',
-                    style: TextStyle(color: Colors.white, fontSize: 11),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: onRetry,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'Retry',
-                            style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: onCancel,
-                        child: const Icon(Icons.close, color: Colors.white, size: 20),
-                      ),
-                    ],
-                  ),
-                ],
+          if (canRemove)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: Material(
+                color: Theme.of(context).colorScheme.surface,
+                shape: const CircleBorder(),
+                child: IconButton(
+                  icon: const Icon(Icons.remove_circle_outline, size: 18),
+                  tooltip: 'Remove from classroom',
+                  onPressed: onRemove,
+                ),
               ),
             ),
         ],
@@ -2552,349 +1837,215 @@ class _PendingPhotoCard extends StatelessWidget {
   }
 }
 
-/// Stateful widget that manages the photos section with optimistic uploads
 class _PhotosSection extends ConsumerStatefulWidget {
   const _PhotosSection({
     required this.schoolId,
     required this.yearLevelId,
     required this.classroomId,
+    this.deliveryId,
   });
 
   final String schoolId;
   final String yearLevelId;
   final String classroomId;
+  final String? deliveryId;
 
   @override
   ConsumerState<_PhotosSection> createState() => _PhotosSectionState();
 }
 
 class _PhotosSectionState extends ConsumerState<_PhotosSection> {
-  final List<_PendingPhoto> _pendingPhotos = [];
+  bool _saving = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadUnuploadedPhotos();
-  }
-
-  /// Load any photos that were saved locally but not yet uploaded
-  Future<void> _loadUnuploadedPhotos() async {
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-    final localPhotos = await offlineStorage.getPhotosForClassroom(
-      widget.schoolId,
-      widget.yearLevelId,
-      widget.classroomId,
-    );
-
-    final unuploaded = localPhotos.where((p) => !p.isUploaded).toList();
-    if (unuploaded.isNotEmpty && mounted) {
-      setState(() {
-        for (final localPhoto in unuploaded) {
-          final file = File(localPhoto.localPath);
-          if (file.existsSync()) {
-            _pendingPhotos.add(_PendingPhoto(
-              id: localPhoto.id,
-              localFile: file,
-            ));
-          }
-        }
-      });
-      // Retry uploading these photos
-      for (final localPhoto in unuploaded) {
-        final file = File(localPhoto.localPath);
-        if (file.existsSync()) {
-          _uploadPhotoInBackground(localPhoto.id, file);
-        }
-      }
-    }
-  }
-
-  /// Save photo to persistent local storage before upload
-  Future<File> _savePhotoLocally(File sourceFile, String photoId) async {
-    final directory = await getApplicationDocumentsDirectory();
-    final photosDir = Directory('${directory.path}/classroom_photos');
-    if (!await photosDir.exists()) {
-      await photosDir.create(recursive: true);
-    }
-    final localPath = '${photosDir.path}/$photoId.jpg';
-    return await sourceFile.copy(localPath);
-  }
+  ({
+    String schoolId,
+    String yearLevelId,
+    String classroomId,
+    String? deliveryId
+  }) get _classroom => (
+        schoolId: widget.schoolId,
+        yearLevelId: widget.yearLevelId,
+        classroomId: widget.classroomId,
+        deliveryId: widget.deliveryId,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final photosAsync = ref.watch(classroomPhotosProvider((
-      schoolId: widget.schoolId,
-      yearLevelId: widget.yearLevelId,
-      classroomId: widget.classroomId,
-    )));
+    final photos = ref.watch(classroomPhotosProvider(_classroom));
+    final mediaBucket = photos.valueOrNull?.isNotEmpty == true
+        ? ref.watch(offlineMediaBucketProvider)
+        : null;
+    final uploads = ref.watch(evidenceUploadsProvider);
+    final status = uploads.valueOrNull;
+    final worker = ref.watch(evidenceUploadWorkerProvider).valueOrNull;
+    final pending = status?.items
+            .where((item) =>
+                item.kind == EvidenceKind.photo &&
+                item.schoolId == widget.schoolId &&
+                item.yearLevelId == widget.yearLevelId &&
+                item.classroomId == widget.classroomId &&
+                item.deliveryId == widget.deliveryId)
+            .toList() ??
+        [];
+    final pendingIds = pending.map((item) => item.id).toSet();
+    final remote = photos.valueOrNull
+            ?.where((item) => !pendingIds.contains(item.id))
+            .toList() ??
+        [];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Photos Section Header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            children: [
-              const Icon(Icons.photo_library_outlined, size: 24),
-              const SizedBox(width: 8),
-              const Text(
-                'Photos',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => _handleAddPhoto(),
-                icon: const Icon(Icons.add_a_photo, size: 18),
-                label: const Text('Add'),
-              ),
-            ],
-          ),
+        Wrap(
+          spacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('Photos', style: Theme.of(context).textTheme.titleLarge),
+            FilledButton.icon(
+              onPressed: _saving || worker == null ? null : _handleAddPhoto,
+              icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+              label: Text(_saving ? 'Saving…' : 'Add photo'),
+            ),
+          ],
         ),
-
-        const SizedBox(height: 16),
-
-        // Photos Grid/List
-        photosAsync.when(
-          loading: () => const Card(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+        if (uploads.hasError || status?.localError == true)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Saved photos need attention'),
+            trailing: TextButton(
+              onPressed: () => SyncStatusDetailSheet.show(context),
+              child: const Text('Review'),
             ),
           ),
-          error: (error, _) => Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Error loading photos',
-                style: TextStyle(color: Colors.red.shade700),
-              ),
-            ),
-          ),
-          data: (photos) {
-            // Filter out pending photos that have already been uploaded
-            // This prevents brief duplicate when Firestore updates before setState
-            final uploadedIds = photos.map((p) => p.id).toSet();
-            final activePendingPhotos = _pendingPhotos
-                .where((p) => !uploadedIds.contains(p.id))
-                .toList();
-
-            final totalCount = activePendingPhotos.length + photos.length;
-
-            if (totalCount == 0) {
-              return Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(
-                          Icons.photo_camera_outlined,
-                          size: 48,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No photos yet',
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Add photos to document classroom setup',
-                          style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 12,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
+        if (worker != null)
+          for (final item in pending)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.file(
+                  worker.localFile(item),
+                  cacheWidth: 144,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(
+                      width: 52, child: Icon(Icons.broken_image)),
                 ),
-              );
-            }
-
-            return GridView.builder(
+              ),
+              title: const Text('Classroom photo'),
+              subtitle: Text(
+                  item.id == status?.activeId ? 'Syncing' : item.statusText),
+              trailing: item.id == status?.activeId
+                  ? null
+                  : EvidenceUploadActions(item: item),
+            ),
+        if (photos.isLoading && remote.isEmpty && pending.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: LinearProgressIndicator(),
+          ),
+        if (photos.hasError)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Could not load synced photos'),
+            trailing: TextButton(
+              onPressed: () =>
+                  ref.invalidate(classroomPhotosProvider(_classroom)),
+              child: const Text('Retry'),
+            ),
+          ),
+        if (photos.hasValue && remote.isEmpty && pending.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('No photos yet'),
+          ),
+        if (remote.isNotEmpty && pending.isNotEmpty)
+          Text('Synced photos', style: Theme.of(context).textTheme.titleSmall),
+        if (remote.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 180,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
               ),
-              itemCount: totalCount,
+              itemCount: remote.length,
               itemBuilder: (context, index) {
-                // Show pending photos first
-                if (index < activePendingPhotos.length) {
-                  final pendingPhoto = activePendingPhotos[index];
-                  return _PendingPhotoCard(
-                    pendingPhoto: pendingPhoto,
-                    onRetry: () => _retryUpload(pendingPhoto),
-                    onCancel: () => _cancelUpload(pendingPhoto),
-                  );
-                }
-                // Then show uploaded photos
-                final photo = photos[index - activePendingPhotos.length];
+                final photo = remote[index];
+                final deliveryId = widget.deliveryId;
+                final visit = deliveryId == null
+                    ? null
+                    : DeliveryVisit(
+                        deliveryId: deliveryId, schoolId: widget.schoolId);
+                final asset = OfflineMediaAsset.classroomPhoto(
+                  bucket: mediaBucket!,
+                  schoolId: widget.schoolId,
+                  yearLevelId: widget.yearLevelId,
+                  classroomId: widget.classroomId,
+                  photoId: photo.id,
+                  reference: photo.storagePath,
+                  visit: visit,
+                );
                 return _PhotoCard(
+                  key: ValueKey(photo.id),
                   photo: photo,
-                  onDelete: () => _handleDeletePhoto(photo),
+                  asset: asset,
+                  schoolId: widget.schoolId,
+                  onRemove: () => _handleRemovePhoto(photo),
                 );
               },
-            );
-          },
-        ),
+            ),
+          ),
       ],
     );
   }
 
-  /// Handle adding a new photo with optimistic UI
   Future<void> _handleAddPhoto() async {
+    final worker = ref.read(evidenceUploadWorkerProvider).valueOrNull;
+    final uid = ref.read(authRepositoryProvider).currentUser?.uid;
+    if (worker == null || uid == null) return;
+
     final photoService = ref.read(photoServiceProvider);
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-
-    // Pick image
-    final imageFile = await photoService.pickImage(context);
-    if (imageFile == null) return;
-
-    // Generate photo ID
-    final photoId = const Uuid().v4();
-
-    // Save photo locally FIRST to ensure it's not lost on poor connection
-    final localFile = await _savePhotoLocally(imageFile, photoId);
-
-    // Create LocalPhoto record and save to Hive
-    final localPhoto = LocalPhoto(
-      id: photoId,
-      localPath: localFile.path,
-      schoolId: widget.schoolId,
-      yearLevelId: widget.yearLevelId,
-      classroomId: widget.classroomId,
-      createdAt: DateTime.now(),
-      isUploaded: false,
-      fileSize: await localFile.length(),
-    );
-    await offlineStorage.addLocalPhoto(localPhoto);
-
-    // Add to pending photos immediately (optimistic update)
-    setState(() {
-      _pendingPhotos.add(_PendingPhoto(
-        id: photoId,
-        localFile: localFile,
-      ));
-    });
-
-    // Upload in background
-    await _uploadPhotoInBackground(photoId, localFile);
-  }
-
-  /// Upload photo to Firebase in the background
-  Future<void> _uploadPhotoInBackground(String photoId, File imageFile) async {
-    final photoService = ref.read(photoServiceProvider);
-    final schoolsNotifier = ref.read(schoolsNotifierProvider.notifier);
-    final currentUser = ref.read(currentUserProvider).value;
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-
-    final storagePath =
-        'schools/${widget.schoolId}/yearLevels/${widget.yearLevelId}/classrooms/${widget.classroomId}/photos/$photoId.jpg';
-
-    // Upload to Firebase Storage
-    final uploadResult = await photoService.uploadPhoto(storagePath, imageFile);
-
-    if (!mounted) return;
-
-    if (!uploadResult.isSuccess) {
-      // Mark as error in pending list
-      setState(() {
-        final index = _pendingPhotos.indexWhere((p) => p.id == photoId);
-        if (index != -1) {
-          _pendingPhotos[index] = _pendingPhotos[index].copyWith(
-            hasError: true,
-            errorMessage: uploadResult.errorOrNull,
-          );
-        }
-      });
-      return;
-    }
-
-    // Create Photo object and save to Firestore
-    final photo = Photo(
-      id: photoId,
-      storagePath: storagePath,
-      uploadedBy: currentUser?.uid,
-      uploadedAt: DateTime.now(),
-    );
-
-    final result = await schoolsNotifier.addClassroomPhoto(
-      widget.schoolId,
-      widget.yearLevelId,
-      widget.classroomId,
-      photo,
-    );
-
-    if (!mounted) return;
-
-    // Remove from pending (Firestore stream will show the uploaded photo)
-    setState(() {
-      _pendingPhotos.removeWhere((p) => p.id == photoId);
-    });
-
-    if (result) {
-      // Mark as uploaded in local storage and clean up local file
-      await offlineStorage.markPhotoAsUploaded(photoId, storagePath);
-      await offlineStorage.deleteLocalPhoto(photoId);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to save photo'),
-          backgroundColor: Colors.red,
-        ),
+    final classroom = _classroom;
+    setState(() => _saving = true);
+    try {
+      final file = await photoService.pickImage(context);
+      if (file == null) return;
+      await worker.enqueuePhoto(
+        ownerUid: uid,
+        schoolId: classroom.schoolId,
+        yearLevelId: classroom.yearLevelId,
+        classroomId: classroom.classroomId,
+        source: file,
+        deliveryId: classroom.deliveryId,
       );
-    }
-  }
-
-  /// Retry a failed upload
-  void _retryUpload(_PendingPhoto pendingPhoto) {
-    // Reset error state
-    setState(() {
-      final index = _pendingPhotos.indexWhere((p) => p.id == pendingPhoto.id);
-      if (index != -1) {
-        _pendingPhotos[index] = pendingPhoto.copyWith(
-          hasError: false,
-          errorMessage: null,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo saved on this device')),
         );
       }
-    });
-
-    // Try uploading again
-    _uploadPhotoInBackground(pendingPhoto.id, pendingPhoto.localFile);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save the photo. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
-  /// Cancel/remove a pending photo
-  Future<void> _cancelUpload(_PendingPhoto pendingPhoto) async {
-    final offlineStorage = ref.read(offlineStorageServiceProvider);
-
-    setState(() {
-      _pendingPhotos.removeWhere((p) => p.id == pendingPhoto.id);
-    });
-
-    // Clean up local storage
-    await offlineStorage.deleteLocalPhoto(pendingPhoto.id);
-  }
-
-  /// Handle deleting a photo
-  Future<void> _handleDeletePhoto(Photo photo) async {
+  Future<void> _handleRemovePhoto(Photo photo) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Photo'),
+        title: const Text('Remove photo from classroom?'),
         content: const Text(
-          'Are you sure you want to delete this photo? This action cannot be undone.',
+          'The saved photo stays available to signed records that include it.',
         ),
         actions: [
           TextButton(
@@ -2904,36 +2055,35 @@ class _PhotosSectionState extends ConsumerState<_PhotosSection> {
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final success = await ref
         .read(schoolsNotifierProvider.notifier)
-        .deleteClassroomPhoto(widget.schoolId, widget.yearLevelId, widget.classroomId, photo.id);
+        .deleteClassroomPhoto(
+            widget.schoolId, widget.yearLevelId, widget.classroomId, photo.id,
+            deliveryId: widget.deliveryId);
 
-    if (success) {
-      // Invalidate the photos provider to refresh the UI
-      ref.invalidate(classroomPhotosProvider((
-        schoolId: widget.schoolId,
-        yearLevelId: widget.yearLevelId,
-        classroomId: widget.classroomId,
-      )));
+    if (success && mounted) {
+      ref.invalidate(classroomPhotosProvider(_classroom));
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            success ? 'Photo deleted successfully' : 'Failed to delete photo',
+            success
+                ? 'Photo removed from classroom'
+                : 'Could not remove the photo from the classroom',
           ),
-          backgroundColor: success ? Colors.green : Colors.red,
         ),
       );
     }

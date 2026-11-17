@@ -1,5 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
+import '../models/offline/saved_edit.dart';
+import '../repositories/classroom_edit.dart';
+import '../services/result.dart';
+import 'repository_providers.dart';
+import 'saved_edit_providers.dart';
 import '../models/pre_delivery_checklist_item.dart';
 import '../models/pre_delivery_completion.dart';
 import '../repositories/pre_delivery_checklist_repository.dart';
@@ -24,9 +30,10 @@ final activePreDeliveryChecklistItemsProvider = StreamProvider<List<PreDeliveryC
 
 // StateNotifier for managing checklist operations
 class PreDeliveryChecklistNotifier extends StateNotifier<AsyncValue<void>> {
-  PreDeliveryChecklistNotifier(this._repository) : super(const AsyncValue.data(null));
+  PreDeliveryChecklistNotifier(this._repository, this._ref) : super(const AsyncValue.data(null));
 
   final PreDeliveryChecklistRepository _repository;
+  final Ref _ref;
 
   Future<bool> createChecklistItem(PreDeliveryChecklistItem item) async {
     state = const AsyncValue.loading();
@@ -92,6 +99,45 @@ class PreDeliveryChecklistNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
+  Future<Result<ClassroomEditStatus>> saveCompletion({
+    required String schoolId,
+    required String deliveryId,
+    required String itemId,
+    required bool isCompleted,
+    required String itemLabel,
+    String? editId,
+  }) async {
+    final user = _ref.read(authRepositoryProvider).currentUser;
+    if (user == null || user.email == null) {
+      return const Result.failure('Sign in to save this checklist item.');
+    }
+    try {
+      final edit = EditIntent(
+        id: editId ?? const Uuid().v4(),
+        rememberId: editId != null,
+        ownerUid: user.uid,
+        schoolId: schoolId,
+        deliveryId: deliveryId,
+        itemId: itemId,
+        itemLabel: itemLabel,
+        capturedAt: DateTime.now().toUtc(),
+        updatedBy: '',
+        kind: SavedEditKind.checklist,
+        values: {
+          'isCompleted': isCompleted,
+          'completedBy': isCompleted ? user.email : null,
+        },
+      );
+      final result = await _ref.read(savedEditRecoveryProvider).save(edit);
+      return result.when(
+        success: (receipt) => Result.success(receipt.status),
+        failure: Result<ClassroomEditStatus>.failure,
+      );
+    } catch (_) {
+      return const Result.failure('Could not save this checklist item.');
+    }
+  }
+
   Future<bool> updateCompletion(String deliveryId, String itemId, bool isCompleted, String? userEmail) async {
     final result = await _repository.updateCompletion(deliveryId, itemId, isCompleted, userEmail);
 
@@ -106,7 +152,7 @@ class PreDeliveryChecklistNotifier extends StateNotifier<AsyncValue<void>> {
 final preDeliveryChecklistNotifierProvider =
     StateNotifierProvider<PreDeliveryChecklistNotifier, AsyncValue<void>>((ref) {
   final repository = ref.watch(preDeliveryChecklistRepositoryProvider);
-  return PreDeliveryChecklistNotifier(repository);
+  return PreDeliveryChecklistNotifier(repository, ref);
 });
 
 // Provider to initialize default checklist items on first run

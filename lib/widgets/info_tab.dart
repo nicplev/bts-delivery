@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:async';
+import '../models/offline/offline_media.dart';
 import '../models/school.dart';
 import '../providers/schools_providers.dart';
+import '../providers/delivery_visit_provider.dart';
 import '../providers/auth_providers.dart';
 import '../providers/repository_providers.dart';
+import '../providers/offline_media_providers.dart';
 import 'package:uuid/uuid.dart';
+import 'offline_media_view.dart';
 import 'school_timer_history.dart';
+import 'design/design.dart';
 
 class InfoTab extends ConsumerStatefulWidget {
   const InfoTab({super.key, required this.schoolId});
@@ -29,8 +31,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   final _schoolNameController = TextEditingController();
   final _schoolAddressController = TextEditingController();
 
-  GoogleMapController? _mapController;
-
   @override
   void dispose() {
     _contactNameController.dispose();
@@ -38,22 +38,19 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     _contactEmailController.dispose();
     _schoolNameController.dispose();
     _schoolAddressController.dispose();
-    _mapController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final schoolsAsync = ref.watch(schoolsProvider);
+    final schoolAsync = ref.watch(schoolByIdProvider(widget.schoolId));
     final contactsAsync = ref.watch(contactsProvider(widget.schoolId));
 
-    return schoolsAsync.when(
+    return schoolAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => Center(child: Text('Error: $error')),
-      data: (schools) {
-        final school =
-            schools.where((s) => s.id == widget.schoolId).firstOrNull;
-
+      error: (_, __) =>
+          const Center(child: Text('Couldn’t load school information')),
+      data: (school) {
         if (school == null) {
           return const Center(child: Text('School not found'));
         }
@@ -61,21 +58,27 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         final canEditSchoolData = ref.watch(canEditSchoolDataProvider);
 
         return ListView(
-          padding: const EdgeInsets.all(16),
+          key: const PageStorageKey('school-info'),
+          primary: true,
+          padding: EdgeInsets.fromLTRB(
+            AppTokens.gutter,
+            16,
+            AppTokens.gutter,
+            MediaQuery.paddingOf(context).bottom + 16,
+          ),
           children: [
             _buildSchoolInfoCard(school),
             const SizedBox(height: 16),
+            _buildLocationCard(school.address),
+            const SizedBox(height: 16),
             _buildSchoolMapCard(school),
             const SizedBox(height: 16),
-            if (canEditSchoolData) ...[
+            if (canEditSchoolData &&
+                ref.watch(activeDeliveryVisitProvider) == null) ...[
               _buildBulkImportCard(school),
               const SizedBox(height: 16),
             ],
-            if (school.address?.isNotEmpty == true) ...[
-              _buildMapCard(school),
-              const SizedBox(height: 16),
-            ],
-            _buildContactsCard(contactsAsync),
+            _buildContactsCard(contactsAsync, canEdit: canEditSchoolData),
             const SizedBox(height: 16),
             _buildTimerHistoryCard(),
           ],
@@ -85,38 +88,36 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   }
 
   Widget _buildTimerHistoryCard() {
-    final isAdmin = ref.watch(isAdminProvider);
+    final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
+    final isAdmin = isVisit && ref.watch(isAdminProvider);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.history, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Timer History',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.history, tone: AppTone.green),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  isVisit ? 'Visit timer history' : 'Earlier timer history',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
-                if (isAdmin)
-                  IconButton(
-                    onPressed: () => _showAddTimerDialog(),
-                    icon: const Icon(Icons.add),
-                    tooltip: 'Add Timer Entry',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SchoolTimerHistory(schoolId: widget.schoolId),
-          ],
-        ),
+              ),
+              if (isAdmin)
+                IconButton(
+                  onPressed: () => _showAddTimerDialog(),
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add Timer Entry',
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SchoolTimerHistory(schoolId: widget.schoolId, readOnly: !isVisit),
+        ],
       ),
     );
   }
@@ -135,71 +136,60 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   Widget _buildSchoolInfoCard(School school) {
     final isAdmin = ref.watch(isAdminProvider);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.school, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'School Information',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.school, tone: AppTone.blue),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'School Information',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
-                if (isAdmin)
-                  IconButton(
-                    onPressed: () => _showEditSchoolDialog(school),
-                    icon: const Icon(Icons.edit),
-                    tooltip: 'Edit School',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildInfoRow(
-              icon: Icons.label,
-              label: 'School Name',
-              value: school.name,
-            ),
-            if (school.address?.isNotEmpty == true) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow(
-                icon: Icons.location_on,
-                label: 'Address',
-                value: school.address!,
               ),
+              if (isAdmin)
+                IconButton(
+                  onPressed: () => _showEditSchoolDialog(school),
+                  icon: const Icon(Icons.edit),
+                  tooltip: 'Edit School',
+                ),
             ],
+          ),
+          const SizedBox(height: 16),
+          _buildInfoRow(
+            icon: Icons.label,
+            label: 'School Name',
+            value: school.name,
+          ),
+          const SizedBox(height: 12),
+          _buildInfoRow(
+            icon: Icons.calendar_today,
+            label: 'Added',
+            value: _formatDate(school.createdAt),
+          ),
+          if (school.isSignedOff && school.lastSignOffDate != null) ...[
             const SizedBox(height: 12),
             _buildInfoRow(
-              icon: Icons.calendar_today,
-              label: 'Added',
-              value: _formatDate(school.createdAt),
+              icon: Icons.check_circle,
+              label: 'Earlier school sign-off',
+              value: _formatDate(school.lastSignOffDate!),
+              valueColor: AppTone.green.inkFor(context),
             ),
-            if (school.isSignedOff && school.lastSignOffDate != null) ...[
+            if (school.signedBy?.isNotEmpty == true) ...[
               const SizedBox(height: 12),
               _buildInfoRow(
-                icon: Icons.check_circle,
-                label: 'Last Sign-off',
-                value: _formatDate(school.lastSignOffDate!),
-                valueColor: Colors.green,
+                icon: Icons.person,
+                label: 'Signed by',
+                value: school.signedBy!,
               ),
-              if (school.signedBy?.isNotEmpty == true) ...[
-                const SizedBox(height: 12),
-                _buildInfoRow(
-                  icon: Icons.person,
-                  label: 'Signed by',
-                  value: school.signedBy!,
-                ),
-              ],
             ],
           ],
-        ),
+        ],
       ),
     );
   }
@@ -213,7 +203,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: Colors.grey[600]),
+        AppIconTile(icon: icon, tone: AppTone.neutral, size: 32),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -222,8 +212,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
+                  fontSize: 14,
+                  color: AppPalette.of(context).muted,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -243,724 +233,345 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   }
 
   Widget _buildSchoolMapCard(School school) {
-    final isAdmin = ref.watch(isAdminProvider);
-    final isManager = ref.watch(isManagerProvider);
-    final canEdit = isAdmin || isManager;
+    final canEdit = ref.watch(canEditSchoolDataProvider);
+    final visit = ref.watch(activeDeliveryVisitProvider);
+    final reference = school.schoolMapStoragePath ?? school.schoolMapUrl;
+    final asset = reference == null
+        ? null
+        : OfflineMediaAsset.schoolMap(
+            bucket: ref.watch(offlineMediaBucketProvider),
+            schoolId: school.id,
+            reference: reference,
+            visit: visit,
+          );
+    final owner = ref.watch(offlineMediaOwnerProvider(school.id));
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.map_outlined, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'School Map',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-                if (canEdit && school.schoolMapUrl != null)
-                  IconButton(
-                    onPressed: () => _showDeleteMapConfirmation(school),
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: 'Delete Map',
-                    color: Colors.red,
-                  ),
-                if (canEdit)
-                  IconButton(
-                    onPressed: () => _handleUploadSchoolMap(school),
-                    icon: Icon(school.schoolMapUrl == null ? Icons.add : Icons.edit),
-                    tooltip: school.schoolMapUrl == null ? 'Upload Map' : 'Replace Map',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (school.schoolMapUrl == null)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    children: [
-                      Icon(Icons.map_outlined, size: 48, color: Colors.grey[400]),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No school map uploaded',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                      if (canEdit) ...[
-                        const SizedBox(height: 16),
-                        ElevatedButton.icon(
-                          onPressed: () => _handleUploadSchoolMap(school),
-                          icon: const Icon(Icons.cloud_upload),
-                          label: const Text('Upload Map'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              )
-            else ...[
-              // Check if it's a PDF by looking at the storage path (more reliable than URL)
-              Builder(
-                builder: (context) {
-                  final isPdf = school.schoolMapStoragePath?.toLowerCase().endsWith('.pdf') ??
-                                school.schoolMapUrl!.toLowerCase().contains('.pdf');
-
-                  if (isPdf) {
-                    // For PDFs, get fresh URL and show preview using SfPdfViewer with zoom controls
-                    if (school.schoolMapStoragePath != null) {
-                      final storageRepository = ref.read(storageRepositoryProvider);
-                      return FutureBuilder<String>(
-                        future: storageRepository.getDownloadUrl(school.schoolMapStoragePath!).then(
-                          (result) => result.dataOrNull ?? school.schoolMapUrl!,
-                        ),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return Container(
-                              height: 200,
-                              color: Colors.grey[200],
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          }
-
-                          final pdfUrl = snapshot.data ?? school.schoolMapUrl!;
-                          return _buildPdfViewer(pdfUrl);
-                        },
-                      );
-                    }
-
-                    // Fallback for PDF without storage path
-                    return _buildPdfViewer(school.schoolMapUrl!);
-                  }
-
-                  // For images, use FutureBuilder to get fresh URL from storage path
-                  if (school.schoolMapStoragePath != null) {
-                    final storageRepository = ref.read(storageRepositoryProvider);
-                    return FutureBuilder<String>(
-                      future: storageRepository.getDownloadUrl(school.schoolMapStoragePath!).then(
-                        (result) => result.dataOrNull ?? school.schoolMapUrl!,
-                      ),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return Container(
-                            height: 300,
-                            color: Colors.grey[200],
-                            child: const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                          );
-                        }
-
-                        final imageUrl = snapshot.data ?? school.schoolMapUrl!;
-                        return _buildImageViewer(imageUrl);
-                      },
-                    );
-                  }
-
-                  // Fallback: use stored URL directly
-                  return _buildImageViewer(school.schoolMapUrl!);
-                },
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.map_outlined, tone: AppTone.blue),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('School map',
+                    style: Theme.of(context).textTheme.titleLarge),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _viewSchoolMap(school.schoolMapUrl!),
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('Open in Browser'),
+              if (canEdit && reference != null)
+                IconButton(
+                  onPressed: () => _showDeleteMapConfirmation(school),
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete map',
                 ),
-              ),
+              if (canEdit)
+                IconButton(
+                  onPressed: () => _handleUploadSchoolMap(school),
+                  icon: Icon(reference == null ? Icons.add : Icons.edit),
+                  tooltip: reference == null ? 'Upload map' : 'Replace map',
+                ),
             ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Builds PDF viewer with zoom controls
-  Widget _buildPdfViewer(String pdfUrl) {
-    return StatefulBuilder(
-      builder: (context, setLocalState) {
-        final pdfController = PdfViewerController();
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            height: 300,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Stack(
-              children: [
-                SfPdfViewer.network(
-                  pdfUrl,
-                  controller: pdfController,
-                  canShowScrollHead: true,
-                  canShowScrollStatus: true,
-                  enableDoubleTapZooming: true,
-                  enableTextSelection: false,
-                  canShowPaginationDialog: true,
-                  pageLayoutMode: PdfPageLayoutMode.continuous,
-                  scrollDirection: PdfScrollDirection.vertical,
-                  interactionMode: PdfInteractionMode.pan,
-                ),
-                // PDF badge
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.picture_as_pdf, color: Colors.white, size: 16),
-                        SizedBox(width: 4),
-                        Text(
-                          'PDF',
-                          style: TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Zoom controls
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.zoom_out, color: Colors.white, size: 20),
-                          onPressed: () {
-                            final newZoom = (pdfController.zoomLevel - 0.5).clamp(1.0, 4.0);
-                            pdfController.zoomLevel = newZoom;
-                          },
-                          tooltip: 'Zoom out',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.fit_screen, color: Colors.white, size: 20),
-                          onPressed: () {
-                            pdfController.zoomLevel = 1.0;
-                          },
-                          tooltip: 'Reset zoom',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.zoom_in, color: Colors.white, size: 20),
-                          onPressed: () {
-                            final newZoom = (pdfController.zoomLevel + 0.5).clamp(1.0, 4.0);
-                            pdfController.zoomLevel = newZoom;
-                          },
-                          tooltip: 'Zoom in',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Hint text
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.touch_app, color: Colors.white, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          'Double-tap to zoom',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
-        );
-      },
-    );
-  }
-
-  /// Builds image viewer with zoom controls and double-tap to reset
-  Widget _buildImageViewer(String imageUrl) {
-    return StatefulBuilder(
-      builder: (context, setLocalState) {
-        final transformController = TransformationController();
-        var isZoomed = false;
-
-        void resetZoom() {
-          transformController.value = Matrix4.identity();
-          setLocalState(() {
-            isZoomed = false;
-          });
-        }
-
-        void zoomIn() {
-          final currentScale = transformController.value.getMaxScaleOnAxis();
-          final newScale = (currentScale * 1.5).clamp(1.0, 4.0);
-          transformController.value = Matrix4.diagonal3Values(newScale, newScale, 1);
-          setLocalState(() {
-            isZoomed = newScale > 1.0;
-          });
-        }
-
-        void zoomOut() {
-          final currentScale = transformController.value.getMaxScaleOnAxis();
-          final newScale = (currentScale / 1.5).clamp(1.0, 4.0);
-          if (newScale <= 1.0) {
-            resetZoom();
-          } else {
-            transformController.value = Matrix4.diagonal3Values(newScale, newScale, 1);
-            setLocalState(() {
-              isZoomed = true;
-            });
-          }
-        }
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            height: 300,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[300]!),
-              borderRadius: BorderRadius.circular(8),
+          if (reference == null)
+            const Text('No school map uploaded')
+          else if (asset == null)
+            const Text(
+                'This school map cannot be opened from its saved reference')
+          else ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+              child: SizedBox(
+                width: double.infinity,
+                height: 250,
+                child: OfflineMediaPreview(asset: asset),
+              ),
             ),
-            child: Stack(
+            if (visit != null) OfflineMediaDownloadStatus(asset: asset),
+            Wrap(
+              spacing: 8,
               children: [
-                GestureDetector(
-                  onDoubleTap: () {
-                    if (isZoomed) {
-                      resetZoom();
-                    } else {
-                      // Zoom to 2x on double-tap
-                      transformController.value = Matrix4.diagonal3Values(2.0, 2.0, 1);
-                      setLocalState(() {
-                        isZoomed = true;
-                      });
-                    }
-                  },
-                  child: InteractiveViewer(
-                    transformationController: transformController,
-                    minScale: 1.0,
-                    maxScale: 4.0,
-                    panEnabled: true,
-                    scaleEnabled: true,
-                    onInteractionEnd: (_) {
-                      setLocalState(() {
-                        isZoomed = transformController.value.getMaxScaleOnAxis() > 1.0;
-                      });
-                    },
-                    child: CachedNetworkImage(
-                      imageUrl: imageUrl,
-                      height: 300,
-                      width: double.infinity,
-                      fit: BoxFit.contain,
-                      placeholder: (context, url) => Container(
-                        height: 300,
-                        color: Colors.grey[200],
-                        child: const Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                      errorWidget: (context, url, error) => Container(
-                        height: 300,
-                        color: Colors.grey[200],
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.broken_image, size: 48, color: Colors.grey[400]),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Failed to load map',
-                              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                TextButton.icon(
+                  onPressed: owner == null
+                      ? null
+                      : () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (_) => OfflineMediaScreen(
+                                asset: asset,
+                                ownerUid: owner,
+                                title: 'School map',
+                              ),
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                          ),
+                  icon: const Icon(Icons.open_in_full_outlined),
+                  label: const Text('Open map'),
                 ),
-                // Zoom controls
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.zoom_out, color: Colors.white, size: 20),
-                          onPressed: zoomOut,
-                          tooltip: 'Zoom out',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.fit_screen, color: Colors.white, size: 20),
-                          onPressed: resetZoom,
-                          tooltip: 'Reset zoom',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.zoom_in, color: Colors.white, size: 20),
-                          onPressed: zoomIn,
-                          tooltip: 'Zoom in',
-                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Hint text
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.touch_app, color: Colors.white, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          'Double-tap to zoom',
-                          style: TextStyle(color: Colors.white, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                if (visit != null)
+                  OfflineMediaDownloadButton(asset: asset, compact: false),
               ],
             ),
-          ),
-        );
-      },
+          ],
+          if (visit != null)
+            OfflineEarlierMapButton(visit: visit, currentMap: asset),
+        ],
+      ),
     );
   }
 
   Widget _buildBulkImportCard(School school) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.upload_file, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Bulk Import',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
-              style: TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () {
-                context.push(
-                  '/schools/${school.id}/bulk-import?schoolName=${Uri.encodeComponent(school.name)}',
-                );
-              },
-              icon: const Icon(Icons.cloud_upload),
-              label: const Text('Import Classrooms'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMapCard(School school) {
-    // Using a hardcoded location for Beaumaris (you can add geocoding later)
-    // This is approximately where Beaumaris, VIC 3193 is located
-    const LatLng beaumaris = LatLng(-37.9833, 145.0333);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.map, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  'Location',
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.upload_file, tone: AppTone.green),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Bulk Import',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                height: 200,
-                child: GoogleMap(
-                  initialCameraPosition: const CameraPosition(
-                    target: beaumaris,
-                    zoom: 15,
-                  ),
-                  markers: {
-                    Marker(
-                      markerId: const MarkerId('school_location'),
-                      position: beaumaris,
-                      infoWindow: InfoWindow(
-                        title: school.name,
-                        snippet: school.address,
-                      ),
-                    ),
-                  },
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapToolbarEnabled: false,
-                  onMapCreated: (GoogleMapController controller) {
-                    _mapController = controller;
-                  },
-                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
+            style: TextStyle(color: AppPalette.of(context).muted),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () {
+              context.push(
+                '/schools/${school.id}/bulk-import?schoolName=${Uri.encodeComponent(school.name)}',
+              );
+            },
+            icon: const Icon(Icons.cloud_upload),
+            label: const Text('Import Classrooms'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => _openInMaps(school.address ?? ''),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Open in Maps'),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildContactsCard(AsyncValue<List<Contact>> contactsAsync) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+  Widget _buildLocationCard(String? savedAddress) {
+    final address = savedAddress?.trim() ?? '';
+
+    return AppPanel(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AppIconTile(icon: Icons.location_on_outlined),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.contacts, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Contacts',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
+                Text(
+                  'Location',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  address.isEmpty ? 'No address saved' : address,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                if (address.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: () => _openInMaps(address),
+                    icon: const Icon(Icons.open_in_new_outlined),
+                    label: const Text('Open in Maps'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContactsCard(
+    AsyncValue<List<Contact>> contactsAsync, {
+    required bool canEdit,
+  }) {
+    return AppPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppIconTile(icon: Icons.contacts, tone: AppTone.pink),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Contacts',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+              if (canEdit)
                 IconButton(
                   onPressed: _showAddContactDialog,
                   icon: const Icon(Icons.add),
                   tooltip: 'Add Contact',
                 ),
-              ],
+            ],
+          ),
+          const SizedBox(height: 16),
+          contactsAsync.when(
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
             ),
-            const SizedBox(height: 16),
-            contactsAsync.when(
-              loading: () => const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
-                ),
-              ),
-              error: (error, _) => Center(
-                child: Text('Error loading contacts: $error'),
-              ),
-              data: (contacts) {
-                if (contacts.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          Icon(Icons.person_off,
-                              size: 48, color: Colors.grey[400]),
-                          const SizedBox(height: 8),
-                          Text(
-                            'No contacts added yet',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
+            error: (_, __) => const Text('Couldn’t load contacts'),
+            data: (contacts) {
+              if (contacts.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        Icon(Icons.person_off,
+                            size: 48, color: AppPalette.of(context).muted),
+                        const SizedBox(height: 8),
+                        Text(
+                          'No contacts added yet',
+                          style: TextStyle(color: AppPalette.of(context).muted),
+                        ),
+                      ],
                     ),
-                  );
-                }
-
-                return Column(
-                  children: contacts.map((contact) {
-                    return _buildContactTile(contact);
-                  }).toList(),
+                  ),
                 );
-              },
-            ),
-          ],
-        ),
+              }
+
+              return AppGroupedList(
+                children: contacts.map((contact) {
+                  return _buildContactTile(contact, canEdit: canEdit);
+                }).toList(),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildContactTile(Contact contact) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          child: Text(contact.name[0].toUpperCase()),
-        ),
-        title: Text(
-          contact.name,
-          style: const TextStyle(fontWeight: FontWeight.w500),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (contact.phone?.isNotEmpty == true)
-              Row(
-                children: [
-                  const Icon(Icons.phone, size: 14),
-                  const SizedBox(width: 4),
-                  Text(contact.phone!),
-                ],
-              ),
-            if (contact.email?.isNotEmpty == true)
-              Row(
-                children: [
-                  const Icon(Icons.email, size: 14),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      contact.email!,
-                      overflow: TextOverflow.ellipsis,
+  Widget _buildContactTile(Contact contact, {required bool canEdit}) {
+    final hasPhone = contact.phone?.isNotEmpty == true;
+    final hasEmail = contact.email?.isNotEmpty == true;
+    return ListTile(
+      leading: const AppIconTile(
+          icon: Icons.person_outline, tone: AppTone.pink, size: 32),
+      title: Text(
+        contact.name,
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasPhone)
+            Row(
+              children: [
+                const Icon(Icons.phone, size: 14),
+                const SizedBox(width: 4),
+                Expanded(child: Text(contact.phone!)),
+              ],
+            ),
+          if (hasEmail)
+            Row(
+              children: [
+                const Icon(Icons.email, size: 14),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(contact.email!),
+                ),
+              ],
+            ),
+        ],
+      ),
+      trailing: canEdit || hasPhone || hasEmail
+          ? PopupMenuButton<String>(
+              itemBuilder: (context) => [
+                if (hasPhone)
+                  const PopupMenuItem(
+                    value: 'call',
+                    child: Row(
+                      children: [
+                        Icon(Icons.phone),
+                        SizedBox(width: 8),
+                        Text('Call'),
+                      ],
                     ),
                   ),
-                ],
-              ),
-          ],
-        ),
-        trailing: PopupMenuButton(
-          itemBuilder: (context) => [
-            if (contact.phone?.isNotEmpty == true)
-              const PopupMenuItem(
-                value: 'call',
-                child: Row(
-                  children: [
-                    Icon(Icons.phone),
-                    SizedBox(width: 8),
-                    Text('Call'),
-                  ],
-                ),
-              ),
-            if (contact.email?.isNotEmpty == true)
-              const PopupMenuItem(
-                value: 'email',
-                child: Row(
-                  children: [
-                    Icon(Icons.email),
-                    SizedBox(width: 8),
-                    Text('Email'),
-                  ],
-                ),
-              ),
-            const PopupMenuItem(
-              value: 'edit',
-              child: Row(
-                children: [
-                  Icon(Icons.edit),
-                  SizedBox(width: 8),
-                  Text('Edit'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'delete',
-              child: Row(
-                children: [
-                  Icon(Icons.delete, color: Colors.red),
-                  SizedBox(width: 8),
-                  Text('Delete', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
-          onSelected: (value) {
-            switch (value) {
-              case 'call':
-                _callContact(contact.phone!);
-                break;
-              case 'email':
-                _emailContact(contact.email!);
-                break;
-              case 'edit':
-                _showEditContactDialog(contact);
-                break;
-              case 'delete':
-                _showDeleteContactConfirmation(contact);
-                break;
-            }
-          },
-        ),
-      ),
+                if (hasEmail)
+                  const PopupMenuItem(
+                    value: 'email',
+                    child: Row(
+                      children: [
+                        Icon(Icons.email),
+                        SizedBox(width: 8),
+                        Text('Email'),
+                      ],
+                    ),
+                  ),
+                if (canEdit)
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit),
+                        SizedBox(width: 8),
+                        Text('Edit'),
+                      ],
+                    ),
+                  ),
+                if (canEdit)
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete,
+                            color: Theme.of(context).colorScheme.error),
+                        const SizedBox(width: 8),
+                        Text('Delete',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error)),
+                      ],
+                    ),
+                  ),
+              ],
+              onSelected: (value) {
+                switch (value) {
+                  case 'call':
+                    _callContact(contact.phone!);
+                    break;
+                  case 'email':
+                    _emailContact(contact.email!);
+                    break;
+                  case 'edit':
+                    if (ref.read(canEditSchoolDataProvider)) {
+                      _showEditContactDialog(contact);
+                    }
+                    break;
+                  case 'delete':
+                    if (ref.read(canEditSchoolDataProvider)) {
+                      _showDeleteContactConfirmation(contact);
+                    }
+                    break;
+                }
+              },
+            )
+          : null,
     );
   }
 
@@ -1089,7 +700,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           ),
           FilledButton(
             onPressed: () => _deleteContact(contact.id),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError),
             child: const Text('Delete'),
           ),
         ],
@@ -1102,7 +715,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a contact name'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -1135,14 +747,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact added successfully'),
-            backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to add contact'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -1155,7 +765,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a contact name'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -1186,14 +795,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact updated successfully'),
-            backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to update contact'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -1211,14 +818,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact deleted successfully'),
-            backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to delete contact'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -1236,7 +841,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not open maps: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -1252,7 +856,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not make call: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -1268,7 +871,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not open email: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -1332,7 +934,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a school name'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -1360,14 +961,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('School updated successfully'),
-          backgroundColor: Colors.green,
         ),
       );
     } else {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to update school'),
-          backgroundColor: Colors.red,
         ),
       );
     }
@@ -1379,25 +978,28 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     final storageRepository = ref.read(storageRepositoryProvider);
     final messenger = ScaffoldMessenger.of(context);
 
+    final indicatorColor = AppPalette.of(context).canvas;
+
     // Pick file (image or PDF)
     final file = await photoService.pickSchoolMapFile(context);
     if (file == null) return;
 
     // Show uploading indicator
     messenger.showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Row(
           children: [
             SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: indicatorColor),
             ),
-            SizedBox(width: 16),
-            Text('Uploading school map...'),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Uploading school map...')),
           ],
         ),
-        duration: Duration(seconds: 30),
+        duration: const Duration(seconds: 30),
       ),
     );
 
@@ -1418,8 +1020,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     if (!uploadResult.isSuccess) {
       messenger.showSnackBar(
         SnackBar(
-          content: Text(uploadResult.errorOrNull ?? 'Failed to upload school map'),
-          backgroundColor: Colors.red,
+          content:
+              Text(uploadResult.errorOrNull ?? 'Failed to upload school map'),
         ),
       );
       return;
@@ -1431,7 +1033,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to get download URL'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -1451,32 +1052,14 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('School map uploaded successfully'),
-          backgroundColor: Colors.green,
         ),
       );
     } else {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to save school map'),
-          backgroundColor: Colors.red,
         ),
       );
-    }
-  }
-
-  void _viewSchoolMap(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not open map: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
   }
 
@@ -1485,7 +1068,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete School Map'),
-        content: const Text('Are you sure you want to delete the school map? This action cannot be undone.'),
+        content: const Text(
+            'Are you sure you want to delete the school map? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
@@ -1493,7 +1077,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           ),
           FilledButton(
             onPressed: () => _deleteSchoolMap(dialogContext, school),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError),
             child: const Text('Delete'),
           ),
         ],
@@ -1501,7 +1087,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     );
   }
 
-  Future<void> _deleteSchoolMap(BuildContext dialogContext, School school) async {
+  Future<void> _deleteSchoolMap(
+      BuildContext dialogContext, School school) async {
     Navigator.of(dialogContext).pop(); // Close dialog
 
     final storageRepository = ref.read(storageRepositoryProvider);
@@ -1521,7 +1108,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               deleteResult.errorOrNull ??
                   'Failed to delete school map from storage',
             ),
-            backgroundColor: Colors.red,
           ),
         );
         return;
@@ -1542,14 +1128,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('School map deleted successfully'),
-          backgroundColor: Colors.green,
         ),
       );
     } else {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to delete school map'),
-          backgroundColor: Colors.red,
         ),
       );
     }

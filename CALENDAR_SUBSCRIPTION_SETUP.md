@@ -1,3 +1,5 @@
+> **Legacy documentation:** This describes the earlier calendar subscription implementation. For the refresh branch, use the protected token flow and coordinated rollout in [REFRESH_PLAN.md](REFRESH_PLAN.md). Do not run the legacy token migration or copy these old access-rule examples into the refreshed deployment. Users must generate replacement subscriptions after the reviewed access migration.
+
 # Calendar Subscription Setup Guide
 
 This guide walks you through setting up the automatic calendar subscription feature for the BTS Delivery App.

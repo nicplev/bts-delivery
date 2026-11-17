@@ -1,8 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../models/staff.dart';
-import '../../models/user.dart';
-import '../../repositories/auth_repository.dart';
+import '../models/staff.dart';
+import '../models/user.dart';
+import '../repositories/auth_repository.dart';
 import 'repository_providers.dart';
 
 final authStateProvider = StreamProvider<User?>((ref) {
@@ -21,9 +21,11 @@ final currentUserProvider = StreamProvider<AppUser?>((ref) {
 });
 
 final isAdminProvider = Provider<bool>((ref) {
-  final userAsync = ref.watch(currentUserProvider);
-  return userAsync.when(
-    data: (user) => user?.isAdmin ?? false,
+  final staffAsync = ref.watch(currentStaffProvider);
+  return staffAsync.when(
+    data: (staff) =>
+        staff?.uid == ref.watch(authStateProvider).valueOrNull?.uid &&
+        (staff?.isAdmin ?? false),
     loading: () => false,
     error: (_, __) => false,
   );
@@ -32,7 +34,9 @@ final isAdminProvider = Provider<bool>((ref) {
 final isManagerProvider = Provider<bool>((ref) {
   final staffAsync = ref.watch(currentStaffProvider);
   return staffAsync.when(
-    data: (staff) => staff?.hasManagerAccess ?? false,
+    data: (staff) =>
+        staff?.uid == ref.watch(authStateProvider).valueOrNull?.uid &&
+        (staff?.isManager ?? false),
     loading: () => false,
     error: (_, __) => false,
   );
@@ -85,8 +89,9 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<bool> signIn(String email, String password) async {
     state = const AsyncValue.loading();
-    final result = await _authRepository.signInWithEmailAndPassword(email, password);
-    
+    final result =
+        await _authRepository.signInWithEmailAndPassword(email, password);
+
     return result.when(
       success: (_) {
         state = const AsyncValue.data(null);
@@ -101,8 +106,9 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<bool> signUp(String email, String password) async {
     state = const AsyncValue.loading();
-    final result = await _authRepository.createUserWithEmailAndPassword(email, password);
-    
+    final result =
+        await _authRepository.createUserWithEmailAndPassword(email, password);
+
     return result.when(
       success: (_) {
         state = const AsyncValue.data(null);
@@ -115,10 +121,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> linkToStaff(String staffId) async {
+  Future<bool> linkToStaff(String code) async {
     state = const AsyncValue.loading();
-    final result = await _authRepository.linkToStaff(staffId);
-    
+    final result = await _authRepository.linkToStaff(code);
+
     return result.when(
       success: (_) {
         state = const AsyncValue.data(null);
@@ -136,7 +142,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
   }
 }
 
-final authNotifierProvider = StateNotifierProvider<AuthNotifier, AsyncValue<void>>((ref) {
+final authNotifierProvider =
+    StateNotifierProvider<AuthNotifier, AsyncValue<void>>((ref) {
   final authRepository = ref.watch(authRepositoryProvider);
   return AuthNotifier(authRepository);
 });

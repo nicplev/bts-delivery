@@ -1,344 +1,228 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/offline_delivery_providers.dart';
-import '../services/offline/sync_queue_manager.dart';
-import '../app/theme/brand_colors.dart';
+import 'package:share_plus/share_plus.dart';
 
-/// Bottom sheet showing detailed sync status
+import '../models/offline/evidence_upload.dart';
+import '../providers/auth_providers.dart';
+import '../providers/offline_delivery_providers.dart';
+import '../services/offline/connectivity_service.dart';
+import '../services/offline/offline_storage_service.dart';
+import 'design/design.dart';
+
 class SyncStatusDetailSheet extends ConsumerWidget {
   const SyncStatusDetailSheet({super.key});
 
   static void show(BuildContext context) {
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => const SyncStatusDetailSheet(),
+      builder: (_) => const SyncStatusDetailSheet(),
     );
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final syncStatsAsync = ref.watch(syncStatsProvider);
-    final pendingCompletionsAsync = ref.watch(pendingDeliveryCompletionsProvider);
-    final storageSizeAsync = ref.watch(pendingStorageSizeProvider);
+    final uploads = ref.watch(evidenceUploadsProvider);
+    final connectivity = ref.watch(connectivityStatusProvider).valueOrNull;
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  const Icon(Icons.sync, size: 24, color: BrandColors.kakaBlue),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Sync Status',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Sync Stats
-              syncStatsAsync.when(
-                data: (stats) {
-                  final pendingItems = stats['pendingItems'] as int? ?? 0;
-                  final isSyncing = stats['isSyncing'] as bool? ?? false;
-                  final lastSyncTime = stats['lastSyncTime'] as DateTime?;
-
-                  return Column(
-                    children: [
-                      _buildStatCard(
-                        icon: Icons.pending_actions,
-                        title: 'Pending Items',
-                        value: '$pendingItems',
-                        color: pendingItems > 0 ? BrandColors.kakaBlue : Colors.green,
-                      ),
-                      const SizedBox(height: 12),
-                      if (lastSyncTime != null)
-                        _buildInfoRow(
-                          icon: Icons.update,
-                          label: 'Last Sync',
-                          value: _formatDateTime(lastSyncTime),
-                        ),
-                      if (isSyncing)
-                        _buildInfoRow(
-                          icon: Icons.sync,
-                          label: 'Status',
-                          value: 'Syncing...',
-                        ),
-                    ],
-                  );
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.65,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+              AppTokens.gutter, 0, AppTokens.gutter, AppTokens.sectionGap),
+          children: [
+            const AppSectionHeading(title: 'Evidence uploads'),
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: AppStatusPill(
+                label: switch (connectivity) {
+                  ConnectivityStatus.online => 'Network connection detected',
+                  ConnectivityStatus.offline =>
+                    'Waiting for a network connection',
+                  _ => 'Checking network connection',
                 },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (_, __) => const Text('Error loading sync stats'),
+                icon: connectivity == ConnectivityStatus.offline
+                    ? Icons.cloud_off_outlined
+                    : Icons.wifi_outlined,
+                tone: connectivity == ConnectivityStatus.offline
+                    ? AppTone.yellow
+                    : AppTone.neutral,
               ),
-
-              const SizedBox(height: 20),
-
-              // Pending Deliveries
-              pendingCompletionsAsync.when(
-                data: (completions) {
-                  if (completions.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Pending Delivery Completions',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ...completions.take(5).map((completion) {
-                        return _buildPendingCompletionCard(completion);
-                      }),
-                      if (completions.length > 5)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'And ${completions.length - 5} more...',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Storage Size
-              storageSizeAsync.when(
-                data: (size) => _buildInfoRow(
-                  icon: Icons.storage,
-                  label: 'Pending Storage',
-                  value: size,
+            ),
+            const SizedBox(height: 12),
+            ...uploads.when(
+              loading: () => [
+                const Center(child: CircularProgressIndicator()),
+              ],
+              error: (_, __) => [
+                const Text('Could not open saved evidence.'),
+                TextButton(
+                  onPressed: () => ref.invalidate(evidenceUploadWorkerProvider),
+                  child: const Text('Retry'),
                 ),
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Sync Button
-              syncStatsAsync.when(
-                data: (stats) {
-                  final pendingItems = stats['pendingItems'] as int? ?? 0;
-                  final isSyncing = stats['isSyncing'] as bool? ?? false;
-
-                  if (pendingItems == 0) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: isSyncing
-                          ? null
-                          : () async {
-                              final manager = await ref.read(syncQueueManagerProvider.future);
-                              await manager.triggerManualSync();
-                              if (context.mounted) {
-                                Navigator.pop(context);
-                              }
-                            },
-                      icon: isSyncing
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.sync),
-                      label: Text(isSyncing ? 'Syncing...' : 'Sync Now'),
+              ],
+              data: (status) => [
+                if (status.items.isEmpty && !status.localError)
+                  const Text('No photos or signatures waiting to upload.'),
+                if (status.localError)
+                  const Text(
+                      'Could not update the upload queue on this device.'),
+                if (status.legacyReviewCount > 0)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.warning_amber_rounded),
+                    title: Text(
+                        '${status.legacyReviewCount} items from an earlier app version'),
+                    subtitle: const Text(
+                      'Kept on this device for review. Contact your administrator for recovery.',
                     ),
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-            ],
-          ),
+                  ),
+                if (status.legacyReviewCount > 0 && ref.watch(isAdminProvider))
+                  const _LegacyPhotoRecovery(),
+                for (final item in status.items)
+                  AppPanel(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: EdgeInsets.zero,
+                    child: ListTile(
+                      leading: AppIconTile(
+                        icon: item.kind == EvidenceKind.photo
+                            ? Icons.photo_outlined
+                            : Icons.draw_outlined,
+                        tone:
+                            item.needsAttention ? AppTone.yellow : AppTone.blue,
+                      ),
+                      title: Text(item.kind == EvidenceKind.photo
+                          ? 'Classroom photo'
+                          : 'Delivery signature'),
+                      subtitle: Text(item.id == status.activeId
+                          ? 'Syncing'
+                          : item.statusText),
+                      trailing: item.id == status.activeId
+                          ? null
+                          : EvidenceUploadActions(item: item),
+                    ),
+                  ),
+                if (status.localError ||
+                    status.items
+                        .any((item) => !item.paused && item.error != null))
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => _update(context, () async {
+                        final worker =
+                            await ref.read(evidenceUploadWorkerProvider.future);
+                        await worker.retryAll();
+                      }),
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Retry uploads'),
+                    ),
+                  ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildStatCard({
-    required IconData icon,
-    required String title,
-    required String value,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 32, color: color),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[600],
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+class EvidenceUploadActions extends ConsumerWidget {
+  const EvidenceUploadActions({super.key, required this.item});
+
+  final EvidenceUpload item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return PopupMenuButton<bool>(
+      tooltip: 'Upload actions',
+      onSelected: (retry) => _update(context, () async {
+        final worker = await ref.read(evidenceUploadWorkerProvider.future);
+        if (retry) {
+          await worker.retry(item.id);
+        } else {
+          await worker.pause(item.id);
+        }
+      }),
+      itemBuilder: (_) => [
+        if (item.paused || item.error != null)
+          PopupMenuItem(
+              value: true, child: Text(item.paused ? 'Resume' : 'Retry')),
+        if (!item.paused)
+          const PopupMenuItem(value: false, child: Text('Pause')),
+      ],
     );
   }
+}
 
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: Colors.grey[600]),
-          const SizedBox(width: 12),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+Future<void> _update(
+    BuildContext context, Future<void> Function() action) async {
+  try {
+    await action();
+  } catch (_) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not update the upload. Try again.')),
     );
   }
+}
 
-  Widget _buildPendingCompletionCard(completion) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.local_shipping,
-            size: 20,
-            color: Colors.grey[600],
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Delivery ${completion.deliveryId.substring(0, 8)}...',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    if (completion.signatureLocalPath != null)
-                      const Icon(Icons.edit, size: 14),
-                    if (completion.signatureLocalPath != null)
-                      const SizedBox(width: 4),
-                    if (completion.photoLocalPaths.isNotEmpty) ...[
-                      const Icon(Icons.photo_camera, size: 14),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${completion.photoLocalPaths.length}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
+class _LegacyPhotoRecovery extends ConsumerWidget {
+  const _LegacyPhotoRecovery();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final store = ref.watch(offlineStorageServiceProvider);
+    final photos = store.legacyPhotosForRecovery;
+    if (photos.isEmpty) return const SizedBox.shrink();
+
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: const Text('Recover older classroom photos'),
+      subtitle: const Text('Export a local copy for review.'),
+      children: [
+        for (final photo in photos)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.photo_outlined),
+            title: Text(MaterialLocalizations.of(context)
+                .formatCompactDate(photo.createdAt.toLocal())),
+            trailing: TextButton(
+              onPressed: () async {
+                final box = context.findRenderObject() as RenderBox?;
+                final origin = box == null
+                    ? null
+                    : box.localToGlobal(Offset.zero) & box.size;
+                final file = await store.legacyPhotoFile(photo);
+                if (!context.mounted || !ref.read(isAdminProvider)) return;
+                if (file == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('The original photo file is missing.')),
+                  );
+                  return;
+                }
+                try {
+                  await Share.shareXFiles(
+                    [XFile(file.path, mimeType: 'image/jpeg')],
+                    sharePositionOrigin: origin,
+                  );
+                } catch (_) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Could not export this photo.')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Export'),
             ),
           ),
-          const Icon(
-            Icons.cloud_upload,
-            size: 20,
-            color: BrandColors.kakaBlue,
-          ),
-        ],
-      ),
+      ],
     );
-  }
-
-  String _formatDateTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${difference.inDays}d ago';
-    }
   }
 }

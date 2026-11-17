@@ -6,11 +6,11 @@ import 'repository_providers.dart';
 
 /// Watches the active timer for a school.
 /// Uses autoDispose to stop listening when user leaves the page.
-final activeSchoolTimerProvider = StreamProvider.autoDispose
-    .family<SchoolTimer?, String>((ref, schoolId) {
+final activeSchoolTimerProvider =
+    StreamProvider.autoDispose.family<SchoolTimer?, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchActiveTimer(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
 /// Watches timer history for a school.
 /// Uses autoDispose to stop listening when user leaves the page.
@@ -18,7 +18,7 @@ final schoolTimerHistoryProvider = StreamProvider.autoDispose
     .family<List<SchoolTimer>, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchTimerHistory(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
 /// Provider for checking if user can control timers (managers/admins only)
 final canControlTimerProvider = Provider<bool>((ref) {
@@ -80,7 +80,7 @@ class SchoolTimerNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> stopTimer(String schoolId) async {
+  Future<bool> stopTimer(String schoolId, String timerId) async {
     final canControl = _ref.read(canControlTimerProvider);
     if (!canControl) {
       state = AsyncValue.error(
@@ -105,7 +105,7 @@ class SchoolTimerNotifier extends StateNotifier<AsyncValue<void>> {
     final repository = _ref.read(schoolsRepositoryProvider);
     final result = await repository.stopTimer(
       schoolId,
-      'active',
+      timerId,
       staff.id,
       staff.name,
     );
@@ -200,7 +200,8 @@ class SchoolTimerNotifier extends StateNotifier<AsyncValue<void>> {
     );
 
     final repository = _ref.read(schoolsRepositoryProvider);
-    final result = await repository.updateTimerHistoryEntry(schoolId, updatedTimer);
+    final result =
+        await repository.updateTimerHistoryEntry(schoolId, updatedTimer);
 
     return result.when(
       success: (_) {
@@ -245,4 +246,4 @@ class SchoolTimerNotifier extends StateNotifier<AsyncValue<void>> {
 final schoolTimerNotifierProvider =
     StateNotifierProvider<SchoolTimerNotifier, AsyncValue<void>>((ref) {
   return SchoolTimerNotifier(ref);
-});
+}, dependencies: [schoolsRepositoryProvider]);

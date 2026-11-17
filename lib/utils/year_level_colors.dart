@@ -1,59 +1,37 @@
 import 'package:flutter/material.dart';
 
-/// Utility class for year level color coding
+import '../app/theme/app_tokens.dart';
+
 class YearLevelColors {
-  /// Get color based on year level name
-  ///
-  /// Color scheme:
-  /// - Prep/Foundation: White
-  /// - Year 1: Red
-  /// - Year 2: Blue
-  /// - Year 3: Green
-  /// - Year 4: Purple
-  /// - Year 5: Yellow
-  /// - Year 6: Orange
-  /// - Specialists: Grey
-  static Color getBackgroundColor(String label) {
-    final lowerLabel = label.toLowerCase();
-
-    if (lowerLabel.contains('prep') || lowerLabel.contains('foundation')) {
-      return Colors.white; // White for Prep
-    } else if (lowerLabel.contains('year 1') || lowerLabel.contains('year1') || lowerLabel.contains('grade 1')) {
-      return Colors.red; // Red for Year 1
-    } else if (lowerLabel.contains('year 2') || lowerLabel.contains('year2') || lowerLabel.contains('grade 2')) {
-      return Colors.blue; // Blue for Year 2
-    } else if (lowerLabel.contains('year 3') || lowerLabel.contains('year3') || lowerLabel.contains('grade 3')) {
-      return Colors.green; // Green for Year 3
-    } else if (lowerLabel.contains('year 4') || lowerLabel.contains('year4') || lowerLabel.contains('grade 4')) {
-      return Colors.purple; // Purple for Year 4
-    } else if (lowerLabel.contains('year 5') || lowerLabel.contains('year5') || lowerLabel.contains('grade 5')) {
-      return Colors.yellow; // Yellow for Year 5
-    } else if (lowerLabel.contains('year 6') || lowerLabel.contains('year6') || lowerLabel.contains('grade 6')) {
-      return Colors.orange; // Orange for Year 6
-    } else if (lowerLabel.contains('specialist')) {
-      return Colors.grey; // Grey for Specialists
-    }
-
-    return const Color(0xFF4CAF50); // Default green color
+  static Color getBackgroundColor(BuildContext context, String label) {
+    final colors = AppPalette.of(context);
+    final name = label.toLowerCase();
+    if (needsBorder(name)) return colors.surface;
+    if (name.contains('specialist')) return colors.surfaceQuiet;
+    return _tone(name).tintOn(colors);
   }
 
-  /// Get icon color based on background color
-  /// Uses black for white/yellow backgrounds for better visibility
-  static Color getIconColor(String label) {
-    final lowerLabel = label.toLowerCase();
-
-    // Use black icon for white/yellow backgrounds (for visibility)
-    if (lowerLabel.contains('prep') || lowerLabel.contains('foundation') ||
-        lowerLabel.contains('year 5') || lowerLabel.contains('year5') || lowerLabel.contains('grade 5')) {
-      return Colors.black;
-    }
-
-    return Colors.white; // White icon for all other colors
+  static Color getIconColor(BuildContext context, String label) {
+    final colors = AppPalette.of(context);
+    final name = label.toLowerCase();
+    if (needsBorder(name) || name.contains('specialist')) return colors.ink;
+    return _tone(name).inkOn(colors);
   }
 
-  /// Check if year level needs a border (for white backgrounds)
+  static AppTone _tone(String name) => switch (_yearNumber(name)) {
+        1 || 4 => AppTone.pink,
+        2 => AppTone.blue,
+        5 || 6 => AppTone.yellow,
+        _ => AppTone.green,
+      };
+
+  static int? _yearNumber(String name) {
+    final match = RegExp(r'\b(?:year|grade)\s*([1-6])\b').firstMatch(name);
+    return match == null ? null : int.tryParse(match.group(1)!);
+  }
+
   static bool needsBorder(String label) {
-    final lowerLabel = label.toLowerCase();
-    return lowerLabel.contains('prep') || lowerLabel.contains('foundation');
+    final name = label.toLowerCase();
+    return name.contains('prep') || name.contains('foundation');
   }
 }

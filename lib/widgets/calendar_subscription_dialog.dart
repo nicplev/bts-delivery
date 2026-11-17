@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/staff.dart';
 import '../providers/calendar_sync_providers.dart';
-import '../providers/staff_providers.dart';
+import '../app/theme/app_tokens.dart';
 
 /// Dialog for subscribing to calendar via webcal:// URL
 class CalendarSubscriptionDialog extends ConsumerStatefulWidget {
@@ -42,54 +42,17 @@ class _CalendarSubscriptionDialogState
     try {
       final service = ref.read(calendarSubscriptionServiceProvider);
 
-      // Check if service is configured
-      if (!service.isConfigured()) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage =
-              'Calendar subscription is not yet configured. Please contact your administrator.';
-        });
-        return;
-      }
-
-      // DEBUG: Log initial staff state
-      debugPrint('[CalendarDialog] Initial staff ID: ${widget.staff.id}');
-      debugPrint('[CalendarDialog] Initial staff hasToken: ${widget.staff.hasCalendarToken}');
-      debugPrint('[CalendarDialog] Initial staff token: ${widget.staff.calendarToken ?? "null"}');
-
-      // Get subscription URL (this may generate a new token)
-      final urlResult = await service.getSubscriptionUrl(widget.staff);
-      if (urlResult.isFailure) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = urlResult.errorOrNull ?? 'Failed to generate URL';
-        });
-        return;
-      }
-
-      debugPrint('[CalendarDialog] URL result: ${urlResult.dataOrNull}');
-
-      // IMPORTANT: After token generation, refetch the staff from Firestore
-      // to get the latest token that was just saved
-      final repository = ref.read(staffRepositoryProvider);
-      final freshStaffResult = await repository.getStaffById(widget.staff.id);
-      final freshStaff = freshStaffResult.isSuccess
-          ? freshStaffResult.dataOrNull ?? widget.staff
-          : widget.staff;
-
-      debugPrint('[CalendarDialog] Fresh staff hasToken: ${freshStaff.hasCalendarToken}');
-      debugPrint('[CalendarDialog] Fresh staff token: ${freshStaff.calendarToken ?? "null"}');
-
-      // Get HTTPS URL using the fresh staff object with updated token
-      final httpsResult = await service.getHttpsUrl(freshStaff);
-      final httpsUrl = httpsResult.dataOrNull;
-
+      final result = await service.getSubscriptionUrl(widget.staff);
+      if (!mounted) return;
+      final url = result.dataOrNull;
       setState(() {
         _isLoading = false;
-        _subscriptionUrl = urlResult.dataOrNull;
-        _httpsUrl = httpsUrl;
+        _errorMessage = result.errorOrNull;
+        _subscriptionUrl = url;
+        _httpsUrl = url?.replaceFirst('webcals://', 'https://');
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'An error occurred: $e';
@@ -106,15 +69,8 @@ class _CalendarSubscriptionDialogState
     });
 
     try {
-      // Refetch staff to ensure we have the latest token
-      final repository = ref.read(staffRepositoryProvider);
-      final freshStaffResult = await repository.getStaffById(widget.staff.id);
-      final freshStaff = freshStaffResult.isSuccess
-          ? freshStaffResult.dataOrNull ?? widget.staff
-          : widget.staff;
-
       final service = ref.read(calendarSubscriptionServiceProvider);
-      final result = await service.openSubscriptionInCalendar(freshStaff);
+      final result = await service.openSubscriptionInCalendar(widget.staff);
 
       if (result.isFailure && mounted) {
         setState(() {
@@ -134,20 +90,20 @@ class _CalendarSubscriptionDialogState
           const SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.white),
+                Icon(Icons.check_circle),
                 SizedBox(width: 12),
                 Expanded(
                   child: Text('Calendar subscription opened in Calendar app'),
                 ),
               ],
             ),
-            backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
         );
         Navigator.of(context).pop();
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to open calendar: $e';
@@ -186,8 +142,8 @@ class _CalendarSubscriptionDialogState
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.orange,
-            ),
+                backgroundColor: AppTone.yellow.accent,
+                foregroundColor: AppPalette.of(context).actionInk),
             child: const Text('Regenerate'),
           ),
         ],
@@ -220,12 +176,12 @@ class _CalendarSubscriptionDialogState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Calendar link regenerated successfully'),
-            backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to regenerate token: $e';
@@ -263,19 +219,23 @@ class _CalendarSubscriptionDialogState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    Icon(Icons.error_outline,
+                        color: Theme.of(context).colorScheme.onErrorContainer),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         _errorMessage!,
-                        style: TextStyle(color: Colors.red.shade700),
+                        style: TextStyle(
+                            color:
+                                Theme.of(context).colorScheme.onErrorContainer),
                       ),
                     ),
                   ],
@@ -298,22 +258,23 @@ class _CalendarSubscriptionDialogState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: AppTone.blue.tintFor(context),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade200),
+                  border: Border.all(color: AppPalette.of(context).outline),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                        Icon(Icons.info_outline,
+                            color: AppTone.blue.inkFor(context), size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Auto-updates every hour',
                             style: TextStyle(
-                              color: Colors.blue.shade700,
+                              color: AppTone.blue.inkFor(context),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -325,7 +286,7 @@ class _CalendarSubscriptionDialogState
                       'Your calendar will automatically update when deliveries are added or changed.',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Colors.blue.shade700,
+                        color: AppTone.blue.inkFor(context),
                       ),
                     ),
                   ],
@@ -393,9 +354,9 @@ class _CalendarSubscriptionDialogState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: AppPalette.of(context).surfaceQuiet,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: AppPalette.of(context).outline),
                   ),
                   child: Row(
                     children: [
@@ -427,7 +388,7 @@ class _CalendarSubscriptionDialogState
                   icon: const Icon(Icons.refresh, size: 18),
                   label: const Text('Regenerate link'),
                   style: TextButton.styleFrom(
-                    foregroundColor: Colors.orange,
+                    foregroundColor: AppTone.yellow.inkFor(context),
                   ),
                 ),
               ],
@@ -464,14 +425,14 @@ class _CalendarSubscriptionDialogState
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: Theme.of(context).primaryColor,
+            color: AppTone.blue.tintFor(context),
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: AppTone.blue.inkFor(context),
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),

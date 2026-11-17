@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_providers.dart';
+import '../../widgets/design/design.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -32,13 +33,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     // Validate verification code for sign up
-    if (_isSignUp && _verificationCodeController.text.trim() != _validVerificationCode) {
+    if (_isSignUp &&
+        _verificationCodeController.text.trim() != _validVerificationCode) {
       // Show error for invalid verification code
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Invalid verification code. Please contact an administrator.'),
-            backgroundColor: Colors.red,
+            content: Text(
+                'Invalid verification code. Please contact an administrator.'),
             duration: Duration(seconds: 4),
           ),
         );
@@ -62,184 +64,173 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final authState = ref.watch(authNotifierProvider);
     final isLoading = authState.isLoading;
 
+    final text = Theme.of(context).textTheme;
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 60),
-
-              // Logo/Title
-              Icon(
-                Icons.local_shipping,
-                size: 80,
-                color: Theme.of(context).primaryColor,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'BTS Delivery',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Back-to-School Delivery Management',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.grey[600],
-                    ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 48),
-
-              // Form
-              Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: Icon(Icons.email),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        }
-                        if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
-                          return 'Please enter a valid email address';
-                        }
-                        return null;
-                      },
-                      enabled: !isLoading,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      textInputAction: _isSignUp ? TextInputAction.next : TextInputAction.done,
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscurePassword
-                              ? Icons.visibility
-                              : Icons.visibility_off),
-                          onPressed: () {
-                            setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            });
-                          },
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your password';
-                        }
-                        if (_isSignUp && value.length < 6) {
-                          return 'Password must be at least 6 characters';
-                        }
-                        return null;
-                      },
-                      onFieldSubmitted: (_) => _isSignUp ? null : _handleAuth(),
-                      enabled: !isLoading,
-                    ),
-
-                    // Verification Code (only for sign up)
-                    if (_isSignUp) ...[
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _verificationCodeController,
-                        textInputAction: TextInputAction.done,
-                        textCapitalization: TextCapitalization.characters,
-                        decoration: InputDecoration(
-                          labelText: 'Verification Code',
-                          hintText: 'Enter code provided by administrator',
-                          prefixIcon: const Icon(Icons.verified_user),
-                          helperText: 'Contact your administrator for the verification code',
-                          helperMaxLines: 2,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: Theme.of(context).primaryColor,
-                              width: 2,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppTokens.gutter),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AppIconTile(
+                    icon: Icons.local_shipping_outlined,
+                    size: 62,
+                  ),
+                  const SizedBox(height: 14),
+                  Text('BTS Delivery', style: text.displaySmall),
+                  const SizedBox(height: 6),
+                  Text(
+                    _isSignUp
+                        ? 'Create your delivery account'
+                        : 'Sign in to manage school deliveries',
+                    style: text.bodySmall,
+                  ),
+                  const SizedBox(height: 24),
+                  AppPanel(
+                    padding: const EdgeInsets.all(20),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextFormField(
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.mail_outline_rounded),
                             ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: Theme.of(context).primaryColor,
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Please enter the verification code';
-                          }
-                          return null;
-                        },
-                        onFieldSubmitted: (_) => _handleAuth(),
-                        enabled: !isLoading,
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: isLoading ? null : _handleAuth,
-                      child: isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(_isSignUp ? 'Sign Up' : 'Sign In'),
-                    ),
-                    const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: isLoading
-                          ? null
-                          : () {
-                              setState(() {
-                                _isSignUp = !_isSignUp;
-                                // Clear verification code when switching modes
-                                _verificationCodeController.clear();
-                              });
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter your email';
+                              }
+                              if (!RegExp(r'^[^@]+@[^@]+\.[^@]+')
+                                  .hasMatch(value)) {
+                                return 'Please enter a valid email address';
+                              }
+                              return null;
                             },
-                      child: Text(_isSignUp
-                          ? 'Already have an account? Sign In'
-                          : 'Don\'t have an account? Sign Up'),
-                    ),
-                  ],
-                ),
-              ),
+                            enabled: !isLoading,
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            textInputAction: _isSignUp
+                                ? TextInputAction.next
+                                : TextInputAction.done,
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon:
+                                  const Icon(Icons.lock_outline_rounded),
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscurePassword
+                                    ? Icons.visibility
+                                    : Icons.visibility_off),
+                                tooltip: _obscurePassword
+                                    ? 'Show password'
+                                    : 'Hide password',
+                                onPressed: () {
+                                  setState(() {
+                                    _obscurePassword = !_obscurePassword;
+                                  });
+                                },
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter your password';
+                              }
+                              if (_isSignUp && value.length < 6) {
+                                return 'Password must be at least 6 characters';
+                              }
+                              return null;
+                            },
+                            onFieldSubmitted: (_) =>
+                                _isSignUp ? null : _handleAuth(),
+                            enabled: !isLoading,
+                          ),
 
-              // Error message
-              if (authState.hasError) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    authState.error.toString(),
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onErrorContainer,
+                          // Verification Code (only for sign up)
+                          if (_isSignUp) ...[
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _verificationCodeController,
+                              textInputAction: TextInputAction.done,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: const InputDecoration(
+                                labelText: 'Verification Code',
+                                hintText:
+                                    'Enter code provided by administrator',
+                                prefixIcon: Icon(Icons.verified_user_outlined),
+                                helperText:
+                                    'Contact your administrator for the verification code',
+                                helperMaxLines: 2,
+                              ),
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Please enter the verification code';
+                                }
+                                return null;
+                              },
+                              onFieldSubmitted: (_) => _handleAuth(),
+                              enabled: !isLoading,
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          FilledButton(
+                            onPressed: isLoading ? null : _handleAuth,
+                            child: isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : Text(_isSignUp ? 'Sign Up' : 'Sign In'),
+                          ),
+                          if (authState.hasError) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: AppTone.pink.tintFor(context),
+                                borderRadius: BorderRadius.circular(
+                                    AppTokens.controlRadius),
+                              ),
+                              child: Text(
+                                authState.error.toString(),
+                                style: text.bodySmall?.copyWith(
+                                    color: AppTone.pink.inkFor(context)),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: isLoading
+                                ? null
+                                : () {
+                                    setState(() {
+                                      _isSignUp = !_isSignUp;
+                                      // Clear verification code when switching modes
+                                      _verificationCodeController.clear();
+                                    });
+                                  },
+                            child: Text(_isSignUp
+                                ? 'Already have an account? Sign In'
+                                : 'Don\'t have an account? Sign Up'),
+                          ),
+                        ],
+                      ),
                     ),
-                    textAlign: TextAlign.center,
                   ),
-                ),
-              ],
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

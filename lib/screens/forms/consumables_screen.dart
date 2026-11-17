@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/schools_providers.dart';
 import '../../models/school.dart';
-import '../../app/theme/brand_colors.dart';
+import '../../widgets/design/design.dart';
+import '../../widgets/delivery_day_list.dart';
 import '../../utils/notification_utils.dart';
 
 class ConsumablesScreen extends ConsumerWidget {
@@ -20,56 +21,42 @@ class ConsumablesScreen extends ConsumerWidget {
       ),
       body: consumablesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
-              Text('Error: $error'),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => ref.invalidate(consumablesProvider(schoolId)),
-                child: const Text('Retry'),
-              ),
-            ],
+        error: (_, __) => Center(
+          child: DeliveryMessage(
+            icon: Icons.error_outline,
+            title: 'Couldn’t load consumables',
+            action: TextButton(
+              onPressed: () => ref.invalidate(consumablesProvider(schoolId)),
+              child: const Text('Retry'),
+            ),
           ),
         ),
         data: (consumables) {
           if (consumables.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.inventory_outlined,
-                      size: 64, color: Colors.grey.shade400),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No consumables recorded',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Tap + to add school-wide supplies and materials',
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
-                ],
+            return const Center(
+              child: DeliveryMessage(
+                icon: Icons.inventory_2_outlined,
+                title: 'No consumables recorded',
+                description: 'Tap + to add school-wide supplies and materials.',
               ),
             );
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(
+              AppTokens.gutter,
+              12,
+              AppTokens.gutter,
+              MediaQuery.paddingOf(context).bottom + 80,
+            ),
             itemCount: consumables.length,
             itemBuilder: (context, index) {
               final consumable = consumables[index];
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
+              return AppPanel(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: BrandColors.kakaBlue,
-                    child: Icon(Icons.inventory, color: BrandColors.gray1),
-                  ),
+                  leading: const AppIconTile(icon: Icons.inventory_2_outlined),
                   title: Text(consumable.itemName),
                   subtitle: Text('${consumable.quantity} ${consumable.unit}'),
                   trailing: PopupMenuButton<String>(
@@ -92,12 +79,14 @@ class ConsumablesScreen extends ConsumerWidget {
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'delete',
                         child: ListTile(
-                          leading: Icon(Icons.delete, color: Colors.red),
+                          leading: Icon(Icons.delete,
+                              color: Theme.of(context).colorScheme.error),
                           title: Text('Delete',
-                              style: TextStyle(color: Colors.red)),
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error)),
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
@@ -111,6 +100,7 @@ class ConsumablesScreen extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddConsumableDialog(context, ref),
+        tooltip: 'Add Consumable',
         child: const Icon(Icons.add),
       ),
     );
@@ -237,7 +227,6 @@ class ConsumablesScreen extends ConsumerWidget {
                       content: Text(isEditing
                           ? 'Consumable updated successfully'
                           : 'Consumable added successfully'),
-                      backgroundColor: Colors.green,
                     ),
                   );
 
@@ -253,7 +242,6 @@ class ConsumablesScreen extends ConsumerWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(errorMessage),
-                      backgroundColor: Colors.red,
                       duration: const Duration(seconds: 4),
                     ),
                   );
@@ -282,8 +270,8 @@ class ConsumablesScreen extends ConsumerWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () async {
               final success = await ref

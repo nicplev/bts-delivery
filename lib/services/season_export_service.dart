@@ -6,14 +6,17 @@ import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import '../models/season_export_models.dart';
 import '../models/school.dart';
+import '../models/signoff_snapshot.dart';
 
 /// Service for generating end-of-season Excel reports
 class SeasonExportService {
   /// Generate comprehensive season report Excel file
   static Future<String?> generateSeasonReport(
     SeasonData data,
-    SeasonExportOptions options,
-  ) async {
+    SeasonExportOptions options, {
+    List<SignedEvidence> visitEvidence = const [],
+    List<({String deliveryId, TimerDetail timer})> visitTimers = const [],
+  }) async {
     try {
       final Workbook workbook = Workbook();
 
@@ -44,6 +47,12 @@ class SeasonExportService {
       if (options.includeDeliveries) {
         final sheet = getOrAddSheet('Deliveries');
         _addDeliveriesSheet(sheet, data);
+        _addVisitSignaturesSheet(
+            getOrAddSheet('Visit signatures'), visitEvidence, data);
+        if (data.signedSummaries.isNotEmpty) {
+          _addEarlierSummariesSheet(
+              getOrAddSheet('Earlier school summaries'), data);
+        }
       }
 
       if (options.includeStaff) {
@@ -54,11 +63,15 @@ class SeasonExportService {
       if (options.includeClassrooms) {
         final sheet = getOrAddSheet('Classroom Details');
         _addClassroomDetailsSheet(sheet, data);
+        _addVisitClassroomsSheet(
+            getOrAddSheet('Visit classrooms'), visitEvidence);
       }
 
       if (options.includeConsumables) {
         final sheet = getOrAddSheet('Consumables');
         _addConsumablesSheet(sheet, data);
+        _addVisitConsumablesSheet(
+            getOrAddSheet('Visit consumables'), visitEvidence);
       }
 
       if (options.includeTimerAggregate) {
@@ -69,6 +82,7 @@ class SeasonExportService {
       if (options.includeTimerDetails) {
         final sheet = getOrAddSheet('Timer Details');
         _addTimerDetailsSheet(sheet, data);
+        _addVisitTimersSheet(getOrAddSheet('Visit timer details'), visitTimers);
       }
 
       // Save the file
@@ -76,7 +90,8 @@ class SeasonExportService {
       workbook.dispose();
 
       final directory = await getApplicationDocumentsDirectory();
-      final fileName = 'Season_Report_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
+      final fileName =
+          'Season_Report_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
       final filePath = '${directory.path}/$fileName';
 
       final file = File(filePath);
@@ -95,7 +110,8 @@ class SeasonExportService {
     try {
       final file = XFile(
         filePath,
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         name: filePath.split('/').last,
       );
 
@@ -111,6 +127,192 @@ class SeasonExportService {
   }
 
   // === SHEET BUILDERS ===
+
+  static void _addVisitSignaturesSheet(
+    Worksheet sheet,
+    List<SignedEvidence> evidence,
+    SeasonData data,
+  ) {
+    final dates = {for (final visit in data.deliveries) visit.id: visit.date};
+    const headers = [
+      'School',
+      'Visit ID',
+      'Visit date',
+      'Evidence ID',
+      'Signed by',
+      'Captured at',
+      'Data read at',
+      'Review status',
+      'Signature object',
+    ];
+    _addTableHeader(sheet, 1, headers);
+    final format = DateFormat('yyyy-MM-dd HH:mm');
+    var row = 2;
+    for (final entry in evidence) {
+      final visitDate = dates[entry.deliveryId];
+      final values = [
+        entry.snapshot.summary['schoolName'] as String,
+        entry.deliveryId ?? '',
+        visitDate == null ? '' : format.format(visitDate.toLocal()),
+        entry.id,
+        entry.typedName,
+        format.format(entry.capturedAt.toLocal()),
+        format.format(entry.snapshot.sourceReadAt.toLocal()),
+        entry.snapshot.serverReviewed
+            ? 'Server data reviewed'
+            : 'Review required',
+        entry.signaturePath,
+      ];
+      for (var index = 0; index < values.length; index++) {
+        sheet.getRangeByIndex(row, index + 1).setText(values[index]);
+      }
+      row++;
+    }
+    for (var column = 1; column <= headers.length; column++) {
+      sheet.autoFitColumn(column);
+    }
+  }
+
+  static void _addVisitClassroomsSheet(
+      Worksheet sheet, List<SignedEvidence> evidence) {
+    _addTableHeader(sheet, 1, [
+      'Visit ID',
+      'Evidence ID',
+      'Year level',
+      'Classroom',
+      'Expected packs',
+      'Recorded packs',
+      'Status',
+    ]);
+    var row = 2;
+    for (final entry
+        in evidence.where((entry) => entry.snapshot.serverReviewed)) {
+      for (final details in entry.snapshot.classrooms) {
+        sheet.getRangeByIndex(row, 1).setText(entry.deliveryId ?? '');
+        sheet.getRangeByIndex(row, 2).setText(entry.id);
+        sheet.getRangeByIndex(row, 3).setText(details['yearLevel'] as String);
+        sheet
+            .getRangeByIndex(row, 4)
+            .setText(details['classroomName'] as String);
+        sheet
+            .getRangeByIndex(row, 5)
+            .setNumber((details['expectedPacks'] as num).toDouble());
+        final recorded = details['actualPacksDelivered'] as num?;
+        if (recorded != null) {
+          sheet.getRangeByIndex(row, 6).setNumber(recorded.toDouble());
+        }
+        sheet.getRangeByIndex(row, 7).setText(details['status'] as String);
+        row++;
+      }
+    }
+    for (var column = 1; column <= 7; column++) {
+      sheet.autoFitColumn(column);
+    }
+  }
+
+  static void _addVisitConsumablesSheet(
+    Worksheet sheet,
+    List<SignedEvidence> evidence,
+  ) {
+    const headers = [
+      'Visit ID',
+      'Evidence ID',
+      'Year level',
+      'Classroom',
+      'Consumable',
+      'Expected quantity',
+      'Recorded quantity',
+      'Unit',
+    ];
+    _addTableHeader(sheet, 1, headers);
+    var row = 2;
+    for (final entry
+        in evidence.where((entry) => entry.snapshot.serverReviewed)) {
+      for (final details in entry.snapshot.classrooms) {
+        for (final item in (details['consumables'] as Map).values) {
+          sheet.getRangeByIndex(row, 1).setText(entry.deliveryId ?? '');
+          sheet.getRangeByIndex(row, 2).setText(entry.id);
+          sheet.getRangeByIndex(row, 3).setText(details['yearLevel'] as String);
+          sheet
+              .getRangeByIndex(row, 4)
+              .setText(details['classroomName'] as String);
+          sheet.getRangeByIndex(row, 5).setText(item['itemName'] as String);
+          sheet
+              .getRangeByIndex(row, 6)
+              .setNumber((item['expectedQuantity'] as num).toDouble());
+          final recorded = item['actualQuantityDelivered'] as num?;
+          if (recorded != null) {
+            sheet.getRangeByIndex(row, 7).setNumber(recorded.toDouble());
+          }
+          sheet.getRangeByIndex(row, 8).setText(item['unit'] as String);
+          row++;
+        }
+      }
+    }
+    for (var column = 1; column <= headers.length; column++) {
+      sheet.autoFitColumn(column);
+    }
+  }
+
+  static void _addVisitTimersSheet(
+    Worksheet sheet,
+    List<({String deliveryId, TimerDetail timer})> timers,
+  ) {
+    const headers = [
+      'Visit ID',
+      'School',
+      'Visit date',
+      'Started',
+      'Stopped',
+      'Duration',
+      'Started by',
+      'Stopped by',
+    ];
+    _addTableHeader(sheet, 1, headers);
+    final format = DateFormat('yyyy-MM-dd HH:mm');
+    var row = 2;
+    for (final entry in timers) {
+      final timer = entry.timer;
+      final end = timer.endTime;
+      final values = [
+        entry.deliveryId,
+        timer.schoolName,
+        format.format(timer.visitDate.toLocal()),
+        format.format(timer.startTime.toLocal()),
+        end == null ? '' : format.format(end.toLocal()),
+        timer.formattedDuration,
+        timer.startedBy,
+        timer.stoppedBy ?? '',
+      ];
+      for (var column = 0; column < values.length; column++) {
+        sheet.getRangeByIndex(row, column + 1).setText(values[column]);
+      }
+      row++;
+    }
+    for (var column = 1; column <= headers.length; column++) {
+      sheet.autoFitColumn(column);
+    }
+  }
+
+  static void _addEarlierSummariesSheet(Worksheet sheet, SeasonData data) {
+    _addTableHeader(sheet, 1, ['School', 'Signed by', 'Signed date', 'Scope']);
+    final format = DateFormat('yyyy-MM-dd HH:mm');
+    var row = 2;
+    for (final entry in data.signedSummaries) {
+      sheet.getRangeByIndex(row, 1).setText(entry.schoolName);
+      sheet.getRangeByIndex(row, 2).setText(entry.signedBy);
+      sheet
+          .getRangeByIndex(row, 3)
+          .setText(format.format(entry.signedDate.toLocal()));
+      sheet
+          .getRangeByIndex(row, 4)
+          .setText('School-level record with no linked visit');
+      row++;
+    }
+    for (var column = 1; column <= 4; column++) {
+      sheet.autoFitColumn(column);
+    }
+  }
 
   static void _addOverviewSheet(Worksheet sheet, SeasonData data) {
     int row = 1;
@@ -129,21 +331,29 @@ class SeasonExportService {
     row += 2;
 
     // Date range
-    _addKeyValue(sheet, row++, 'Report Generated:', DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()));
-    if (overview.firstDeliveryDate != null && overview.lastDeliveryDate != null) {
-      _addKeyValue(sheet, row++, 'Delivery Period:', overview.deliveryDateRange);
+    _addKeyValue(sheet, row++, 'Report Generated:',
+        DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()));
+    if (overview.firstDeliveryDate != null &&
+        overview.lastDeliveryDate != null) {
+      _addKeyValue(
+          sheet, row++, 'Delivery Period:', overview.deliveryDateRange);
     }
+    _addKeyValue(
+        sheet, row++, 'School metrics', 'Earlier school-level records');
     row++;
 
     // Key metrics section
     _addSectionHeader(sheet, row++, 'KEY METRICS', '#4CAF50');
 
     final metrics = [
-      ['Total Schools Serviced', overview.totalSchools.toString()],
+      ['Schools in directory', overview.totalSchools.toString()],
       ['Total Deliveries Made', overview.totalDeliveries.toString()],
       ['Total Packs Delivered', overview.totalPacksDelivered.toString()],
       ['Total Staff Involved', overview.totalStaffInvolved.toString()],
-      ['Schools Signed Off', '${overview.schoolsSignedOff} / ${overview.totalSchools}'],
+      [
+        'Schools Signed Off',
+        '${overview.schoolsSignedOff} / ${overview.totalSchools}'
+      ],
     ];
 
     for (final metric in metrics) {
@@ -158,12 +368,16 @@ class SeasonExportService {
     final complete = overview.classroomsComplete;
     final incomplete = overview.classroomsIncomplete;
     final notAttended = overview.classroomsNotAttended;
-    final rate = total > 0 ? (complete / total * 100).toStringAsFixed(1) : '0.0';
+    final rate =
+        total > 0 ? (complete / total * 100).toStringAsFixed(1) : '0.0';
 
     _addKeyValue(sheet, row++, 'Total Classrooms', total.toString());
-    _addKeyValue(sheet, row++, 'Complete', '$complete (${_percent(complete, total)})');
-    _addKeyValue(sheet, row++, 'Incomplete', '$incomplete (${_percent(incomplete, total)})');
-    _addKeyValue(sheet, row++, 'Not Attended', '$notAttended (${_percent(notAttended, total)})');
+    _addKeyValue(
+        sheet, row++, 'Complete', '$complete (${_percent(complete, total)})');
+    _addKeyValue(sheet, row++, 'Incomplete',
+        '$incomplete (${_percent(incomplete, total)})');
+    _addKeyValue(sheet, row++, 'Not Attended',
+        '$notAttended (${_percent(notAttended, total)})');
     _addKeyValue(sheet, row++, 'Completion Rate', '$rate%', isBold: true);
     row++;
 
@@ -191,9 +405,20 @@ class SeasonExportService {
 
     // Headers
     final headers = [
-      'School Name', 'Address', 'Total Packs', 'Year Levels', 'Classrooms',
-      'Total Time', 'Visits', 'Avg Time/Visit', 'Complete', 'Incomplete',
-      'Not Attended', 'Signed Off', 'Sign-off Date', 'Notes'
+      'School Name',
+      'Address',
+      'Total Packs',
+      'Year Levels',
+      'Classrooms',
+      'Total Time',
+      'Visits',
+      'Avg Time/Visit',
+      'Complete',
+      'Incomplete',
+      'Not Attended',
+      'Signed Off',
+      'Sign-off Date',
+      'Notes'
     ];
     _addTableHeader(sheet, row++, headers);
 
@@ -203,20 +428,32 @@ class SeasonExportService {
       sheet.getRangeByIndex(row, col++).setText(school.school.name);
       sheet.getRangeByIndex(row, col++).setText(school.school.address ?? '-');
       sheet.getRangeByIndex(row, col++).setNumber(school.totalPacks.toDouble());
-      sheet.getRangeByIndex(row, col++).setNumber(school.yearLevelCount.toDouble());
-      sheet.getRangeByIndex(row, col++).setNumber(school.classroomCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(school.yearLevelCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(school.classroomCount.toDouble());
       sheet.getRangeByIndex(row, col++).setText(school.formattedTotalTime);
       sheet.getRangeByIndex(row, col++).setNumber(school.visitCount.toDouble());
       sheet.getRangeByIndex(row, col++).setText(school.formattedAverageTime);
-      sheet.getRangeByIndex(row, col++).setNumber(school.completeCount.toDouble());
-      sheet.getRangeByIndex(row, col++).setNumber(school.incompleteCount.toDouble());
-      sheet.getRangeByIndex(row, col++).setNumber(school.notAttendedCount.toDouble());
-      sheet.getRangeByIndex(row, col++).setText(school.isSignedOff ? 'Yes' : 'No');
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(school.completeCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(school.incompleteCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(school.notAttendedCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setText(school.isSignedOff ? 'Yes' : 'No');
       sheet.getRangeByIndex(row, col++).setText(
-        school.signOffDate != null
-            ? DateFormat('dd/MM/yyyy').format(school.signOffDate!)
-            : '-',
-      );
+            school.signOffDate != null
+                ? DateFormat('dd/MM/yyyy').format(school.signOffDate!)
+                : '-',
+          );
       sheet.getRangeByIndex(row, col++).setNumber(school.notesCount.toDouble());
 
       // Styling
@@ -240,32 +477,40 @@ class SeasonExportService {
     row++;
 
     final headers = [
-      'Date', 'Day', 'Time', 'School', 'Staff Assigned',
-      'Vehicles', 'Pallets', 'Notes'
+      'Date',
+      'Day',
+      'Time',
+      'School',
+      'Staff Assigned',
+      'Vehicles',
+      'Pallets',
+      'Notes'
     ];
     _addTableHeader(sheet, row++, headers);
 
     for (final delivery in data.deliveries) {
       int col = 1;
       sheet.getRangeByIndex(row, col++).setText(
-        DateFormat('dd/MM/yyyy').format(delivery.date),
-      );
+            DateFormat('dd/MM/yyyy').format(delivery.date),
+          );
       sheet.getRangeByIndex(row, col++).setText(_getDayOfWeek(delivery.date));
       sheet.getRangeByIndex(row, col++).setText(
-        delivery.time != null
-            ? DateFormat('HH:mm').format(delivery.time!)
-            : '-',
-      );
+            delivery.time != null
+                ? DateFormat('HH:mm').format(delivery.time!)
+                : '-',
+          );
       sheet.getRangeByIndex(row, col++).setText(delivery.schoolName);
       sheet.getRangeByIndex(row, col++).setText(
-        delivery.staffNames.isNotEmpty ? delivery.staffNames.join(', ') : '-',
-      );
+            delivery.staffNames.isNotEmpty
+                ? delivery.staffNames.join(', ')
+                : '-',
+          );
       sheet.getRangeByIndex(row, col++).setText(
-        delivery.vehicleCount?.toString() ?? '-',
-      );
+            delivery.vehicleCount?.toString() ?? '-',
+          );
       sheet.getRangeByIndex(row, col++).setText(
-        delivery.palletCount?.toString() ?? '-',
-      );
+            delivery.palletCount?.toString() ?? '-',
+          );
       sheet.getRangeByIndex(row, col++).setText(delivery.notes ?? '-');
 
       _addAlternatingRowColor(sheet, row, headers.length);
@@ -284,8 +529,13 @@ class SeasonExportService {
     row++;
 
     final headers = [
-      'Staff Name', 'Role', 'Assigned Schools', 'Deliveries Participated',
-      'Total Time', 'Schools Completed', 'Schools Serviced'
+      'Staff Name',
+      'Role',
+      'Assigned Schools',
+      'Deliveries Participated',
+      'Total Time',
+      'Schools Completed',
+      'Schools Serviced'
     ];
     _addTableHeader(sheet, row++, headers);
 
@@ -293,13 +543,21 @@ class SeasonExportService {
       int col = 1;
       sheet.getRangeByIndex(row, col++).setText(staff.staff.name);
       sheet.getRangeByIndex(row, col++).setText(
-        staff.staff.hasManagerAccess ? 'Manager' : 'Staff',
-      );
-      sheet.getRangeByIndex(row, col++).setNumber(staff.assignedSchoolsCount.toDouble());
-      sheet.getRangeByIndex(row, col++).setNumber(staff.deliveriesParticipated.toDouble());
+            staff.staff.hasManagerAccess ? 'Manager' : 'Staff',
+          );
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(staff.assignedSchoolsCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(staff.deliveriesParticipated.toDouble());
       sheet.getRangeByIndex(row, col++).setText(staff.formattedTotalTime);
-      sheet.getRangeByIndex(row, col++).setNumber(staff.schoolsCompleted.toDouble());
-      sheet.getRangeByIndex(row, col++).setText(staff.schoolNamesServiced.join(', '));
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(staff.schoolsCompleted.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setText(staff.schoolNamesServiced.join(', '));
 
       _addAlternatingRowColor(sheet, row, headers.length);
       row++;
@@ -317,8 +575,14 @@ class SeasonExportService {
     row++;
 
     final headers = [
-      'School', 'Year Level', 'Classroom', 'Status',
-      'Expected Packs', 'Actual Packs', 'Pack Variance', 'Has Discrepancy'
+      'School',
+      'Year Level',
+      'Classroom',
+      'Status',
+      'Expected Packs',
+      'Actual Packs',
+      'Pack Variance',
+      'Has Discrepancy'
     ];
     _addTableHeader(sheet, row++, headers);
 
@@ -329,7 +593,8 @@ class SeasonExportService {
       // Year level with color coding
       final yearLevelCell = sheet.getRangeByIndex(row, col++);
       yearLevelCell.setText(classroom.yearLevel);
-      yearLevelCell.cellStyle.backColor = _getYearLevelColor(classroom.yearLevel);
+      yearLevelCell.cellStyle.backColor =
+          _getYearLevelColor(classroom.yearLevel);
 
       sheet.getRangeByIndex(row, col++).setText(classroom.classroomName);
 
@@ -339,10 +604,12 @@ class SeasonExportService {
       statusCell.cellStyle.backColor = _getStatusColor(classroom.status);
       statusCell.cellStyle.bold = true;
 
-      sheet.getRangeByIndex(row, col++).setNumber(classroom.expectedPacks.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(classroom.expectedPacks.toDouble());
       sheet.getRangeByIndex(row, col++).setNumber(
-        (classroom.actualPacks ?? classroom.expectedPacks).toDouble(),
-      );
+            (classroom.actualPacks ?? classroom.expectedPacks).toDouble(),
+          );
 
       // Variance with conditional coloring
       final varianceCell = sheet.getRangeByIndex(row, col++);
@@ -380,8 +647,12 @@ class SeasonExportService {
     row++;
 
     final headers = [
-      'Item Name', 'Unit', 'Total Quantity', 'Schools Using',
-      'Avg per School', 'Max at Single School'
+      'Item Name',
+      'Unit',
+      'Total Quantity',
+      'Schools Using',
+      'Avg per School',
+      'Max at Single School'
     ];
     _addTableHeader(sheet, row++, headers);
 
@@ -389,10 +660,16 @@ class SeasonExportService {
       int col = 1;
       sheet.getRangeByIndex(row, col++).setText(consumable.itemName);
       sheet.getRangeByIndex(row, col++).setText(consumable.unit);
-      sheet.getRangeByIndex(row, col++).setNumber(consumable.totalQuantity.toDouble());
-      sheet.getRangeByIndex(row, col++).setNumber(consumable.schoolsUsingCount.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(consumable.totalQuantity.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(consumable.schoolsUsingCount.toDouble());
       sheet.getRangeByIndex(row, col++).setNumber(consumable.averagePerSchool);
-      sheet.getRangeByIndex(row, col++).setNumber(consumable.maxAtSingleSchool.toDouble());
+      sheet
+          .getRangeByIndex(row, col++)
+          .setNumber(consumable.maxAtSingleSchool.toDouble());
 
       _addAlternatingRowColor(sheet, row, headers.length);
       row++;
@@ -410,8 +687,12 @@ class SeasonExportService {
     row++;
 
     final headers = [
-      'School', 'Total Visits', 'Total Time', 'Avg per Visit',
-      'Min Duration', 'Max Duration'
+      'School',
+      'Total Visits',
+      'Total Time',
+      'Avg per Visit',
+      'Min Duration',
+      'Max Duration'
     ];
     _addTableHeader(sheet, row++, headers);
 
@@ -440,8 +721,14 @@ class SeasonExportService {
     row++;
 
     final headers = [
-      'School', 'Date', 'Day', 'Start Time', 'End Time',
-      'Duration', 'Started By', 'Stopped By'
+      'School',
+      'Date',
+      'Day',
+      'Start Time',
+      'End Time',
+      'Duration',
+      'Started By',
+      'Stopped By'
     ];
     _addTableHeader(sheet, row++, headers);
 
@@ -449,17 +736,17 @@ class SeasonExportService {
       int col = 1;
       sheet.getRangeByIndex(row, col++).setText(timer.schoolName);
       sheet.getRangeByIndex(row, col++).setText(
-        DateFormat('dd/MM/yyyy').format(timer.visitDate),
-      );
+            DateFormat('dd/MM/yyyy').format(timer.visitDate),
+          );
       sheet.getRangeByIndex(row, col++).setText(timer.dayOfWeek);
       sheet.getRangeByIndex(row, col++).setText(
-        DateFormat('HH:mm').format(timer.startTime),
-      );
+            DateFormat('HH:mm').format(timer.startTime),
+          );
       sheet.getRangeByIndex(row, col++).setText(
-        timer.endTime != null
-            ? DateFormat('HH:mm').format(timer.endTime!)
-            : '-',
-      );
+            timer.endTime != null
+                ? DateFormat('HH:mm').format(timer.endTime!)
+                : '-',
+          );
       sheet.getRangeByIndex(row, col++).setText(timer.formattedDuration);
       sheet.getRangeByIndex(row, col++).setText(timer.startedBy);
       sheet.getRangeByIndex(row, col++).setText(timer.stoppedBy ?? '-');
@@ -487,7 +774,8 @@ class SeasonExportService {
     titleRange.rowHeight = 30;
   }
 
-  static void _addSectionHeader(Worksheet sheet, int row, String title, String color) {
+  static void _addSectionHeader(
+      Worksheet sheet, int row, String title, String color) {
     final headerRange = sheet.getRangeByIndex(row, 1, row, 4);
     headerRange.merge();
     headerRange.setText(title);
@@ -510,7 +798,8 @@ class SeasonExportService {
     }
   }
 
-  static void _addKeyValue(Worksheet sheet, int row, String key, String value, {bool isBold = false}) {
+  static void _addKeyValue(Worksheet sheet, int row, String key, String value,
+      {bool isBold = false}) {
     final keyCell = sheet.getRangeByIndex(row, 1);
     keyCell.setText(key);
     keyCell.cellStyle.bold = true;
@@ -523,14 +812,16 @@ class SeasonExportService {
     }
   }
 
-  static void _addAlternatingRowColor(Worksheet sheet, int row, int columnCount) {
+  static void _addAlternatingRowColor(
+      Worksheet sheet, int row, int columnCount) {
     if (row % 2 == 0) {
       for (int col = 1; col <= columnCount; col++) {
         sheet.getRangeByIndex(row, col).cellStyle.backColor = '#F9F9F9';
       }
     }
     for (int col = 1; col <= columnCount; col++) {
-      sheet.getRangeByIndex(row, col).cellStyle.borders.all.lineStyle = LineStyle.thin;
+      sheet.getRangeByIndex(row, col).cellStyle.borders.all.lineStyle =
+          LineStyle.thin;
       sheet.getRangeByIndex(row, col).cellStyle.borders.all.color = '#E0E0E0';
     }
   }
@@ -562,7 +853,8 @@ class SeasonExportService {
       }
     }
 
-    if (yearLevelLower.contains('prep') || yearLevelLower.contains('foundation')) {
+    if (yearLevelLower.contains('prep') ||
+        yearLevelLower.contains('foundation')) {
       return '#FFFFFF';
     }
 

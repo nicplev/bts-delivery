@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../theme/brand_colors.dart';
+import '../../widgets/saved_edits_review.dart';
+import '../../widgets/design/design.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key, required this.child});
@@ -14,66 +15,82 @@ class AppShell extends ConsumerWidget {
 
     return Scaffold(
       body: child,
-      bottomNavigationBar: NavigationBar(
-        onDestinationSelected: (index) {
-          switch (index) {
-            case 0:
-              context.go('/home');
-              break;
-            case 1:
-              context.go('/schools');
-              break;
-            case 2:
-              context.go('/profile');
-              break;
-          }
-        },
-        selectedIndex: currentIndex,
-        destinations: [
-          _buildNavDestination(
-            index: 0,
-            currentIndex: currentIndex,
-            icon: Icons.local_shipping_outlined,
-            selectedIcon: Icons.local_shipping,
-            label: 'Deliveries',
-            color: BrandColors.kakaBlue,
-          ),
-          _buildNavDestination(
-            index: 1,
-            currentIndex: currentIndex,
-            icon: Icons.school_outlined,
-            selectedIcon: Icons.school,
-            label: 'Schools',
-            color: BrandColors.kakaGreen,
-          ),
-          _buildNavDestination(
-            index: 2,
-            currentIndex: currentIndex,
-            icon: Icons.person_outlined,
-            selectedIcon: Icons.person,
-            label: 'Profile',
-            color: BrandColors.kakaPink,
-          ),
-        ],
+      bottomNavigationBar: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SavedEditsBanner(),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppPalette.of(context).surface,
+                borderRadius: BorderRadius.circular(32),
+                border: Border.all(color: AppPalette.of(context).outline),
+                boxShadow: AppTokens.panelShadow,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: NavigationBar(
+                  onDestinationSelected: (index) {
+                    switch (index) {
+                      case 0:
+                        context.go('/home');
+                        break;
+                      case 1:
+                        context.go('/schools');
+                        break;
+                      case 2:
+                        context.go('/profile');
+                        break;
+                    }
+                  },
+                  selectedIndex: currentIndex,
+                  animationDuration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : null,
+                  destinations: [
+                    _destination(
+                      context,
+                      icon: Icons.local_shipping_outlined,
+                      selectedIcon: Icons.local_shipping,
+                      label: 'Deliveries',
+                      tone: AppTone.blue,
+                    ),
+                    _destination(
+                      context,
+                      icon: Icons.school_outlined,
+                      selectedIcon: Icons.school,
+                      label: 'Schools',
+                      tone: AppTone.green,
+                    ),
+                    _destination(
+                      context,
+                      icon: Icons.person_outline_rounded,
+                      selectedIcon: Icons.person_rounded,
+                      label: 'Profile',
+                      tone: AppTone.pink,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  NavigationDestination _buildNavDestination({
-    required int index,
-    required int currentIndex,
+  NavigationDestination _destination(
+    BuildContext context, {
     required IconData icon,
     required IconData selectedIcon,
     required String label,
-    required Color color,
+    required AppTone tone,
   }) {
-    final isSelected = index == currentIndex;
     return NavigationDestination(
-      icon: Icon(
-        icon,
-        color: isSelected ? color : BrandColors.textTertiary,
-      ),
-      selectedIcon: Icon(selectedIcon, color: color),
+      icon: Icon(icon, color: AppPalette.of(context).muted),
+      selectedIcon: Icon(selectedIcon, color: tone.inkFor(context)),
       label: label,
     );
   }
@@ -86,6 +103,6 @@ class AppShell extends ConsumerWidget {
     if (location.startsWith('/profile')) {
       return 2;
     }
-    return 0; // Default to deliveries
+    return 0;
   }
 }

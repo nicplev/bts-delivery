@@ -1,0 +1,23 @@
+{
+  "typedName": "Example Visitor",
+  "snapshot": {
+    "sourceReadAt": "2025-01-01T00:00:00.000Z",
+    "serverReviewed": false,
+    "summary": {
+      "schoolName": "school",
+      "totalPacks": 10,
+      "packTotalsByYearLevel": {},
+      "packTotalsByClassroom": {},
+      "consumablesTotals": {},
+      "consumablesByYearLevel": {},
+      "consumablesByClassroom": {},
+      "classroomDeliveryDetails": [],
+      "photoUrls": [],
+      "notesByClassroom": {},
+      "notes": "Use the west entrance.",
+      "reviewChecklist": [
+        {"id": "checked-packs", "title": "Packs checked"}
+      ]
+    }
+  }
+}

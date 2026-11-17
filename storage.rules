@@ -1,34 +1,57 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
+    function staffCanAccess(schoolId, staffId, managementRequired) {
+      let staff = firestore.get(/databases/(default)/documents/staff/$(staffId)).data;
+      return staff != null && staff.get('uid', null) == request.auth.uid &&
+        (staff.role in ['admin', 'manager'] || (!managementRequired && staff.role == 'staff' &&
+          staff.get('assignedSchoolIds', []) is list &&
+          schoolId in staff.get('assignedSchoolIds', [])));
     }
 
-    // School-related storage paths - simplified to allow all authenticated users
-    match /schools/{schoolId}/{allPaths=**} {
-      allow read, write: if isAuthenticated();
+    function linkedSchoolAccess(schoolId, managementRequired) {
+      let mapping = firestore.get(/databases/(default)/documents/staff_access/$(request.auth.uid)).data;
+      return mapping != null && staffCanAccess(schoolId, mapping.staffId, managementRequired);
     }
 
-    // Classroom photos
-    match /schools/{schoolId}/classrooms/{classroomId}/{fileName} {
-      allow read, write: if isAuthenticated();
+    function canAccess(schoolId, managementRequired) {
+      return request.auth != null && linkedSchoolAccess(schoolId, managementRequired);
     }
 
-    // School sign-offs
+    function ownedImage(contentType) {
+      return resource == null &&
+        request.resource.metadata.get('uploadedBy', null) == request.auth.uid &&
+        request.resource.metadata.get('sha256', '').matches('^[a-f0-9]{64}$') &&
+        request.resource.size > 0 && request.resource.size <= 10 * 1024 * 1024 &&
+        request.resource.contentType == contentType;
+    }
+
+    match /schools/{schoolId}/{path=**} {
+      allow read: if canAccess(schoolId, false);
+    }
+
+    match /schools/{schoolId}/yearLevels/{yearLevelId}/classrooms/{classroomId}/photos/{fileName} {
+      allow create: if canAccess(schoolId, false) && ownedImage('image/jpeg') &&
+        fileName.matches('^[a-f0-9-]{36}[.]jpg$');
+    }
+
+    match /deliveries/{deliveryId}/workspace/{schoolId}/yearLevels/{yearLevelId}/classrooms/{classroomId}/photos/{fileName} {
+      allow read: if canAccess(schoolId, false);
+      allow create: if canAccess(schoolId, false) && ownedImage('image/jpeg') &&
+        fileName.matches('^[a-f0-9-]{36}[.]jpg$');
+    }
+
     match /schools/{schoolId}/signoffs/{fileName} {
-      allow read, write: if isAuthenticated();
+      allow create: if canAccess(schoolId, false) && ownedImage('image/png') &&
+        fileName.matches('^[a-f0-9-]{36}[.]png$');
     }
-    
-    // Maps and documents
+
+    match /schools/{schoolId}/map/{fileName} {
+      allow write: if canAccess(schoolId, true);
+    }
+
     match /schools/{schoolId}/maps/{fileName} {
-      allow read, write: if isAuthenticated();
-    }
-    
-    // Deny all other access
-    match /{allPaths=**} {
-      allow read, write: if false;
+      allow write: if canAccess(schoolId, true);
     }
   }
 }

@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../providers/season_export_providers.dart';
 import '../../models/season_export_models.dart';
-import '../../app/theme/brand_colors.dart';
+import '../../widgets/design/design.dart';
 
 class SeasonExportScreen extends ConsumerStatefulWidget {
   const SeasonExportScreen({super.key});
@@ -41,56 +41,24 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
         title: const Text('Season Report'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(
+            AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.summarize,
-                            size: 32, color: BrandColors.kakaBlue),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'End of Season Report',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Export comprehensive season data for analysis and planning',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: Colors.grey[600],
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+            const AppPanel(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppIconTile(icon: Icons.summarize_outlined),
+                  SizedBox(width: 12),
+                  Expanded(
+                      child: Text(
+                          'Export deliveries, signed records and timer history.')),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-
+            const SizedBox(height: 12),
             // Date Range Section
             _buildSection(
               title: 'Date Range',
@@ -151,7 +119,7 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
                 error: (error, _) => Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text('Error: $error',
-                      style: const TextStyle(color: Colors.red)),
+                      style: TextStyle(color: AppTone.pink.inkFor(context))),
                 ),
                 data: (preview) => Padding(
                   padding: const EdgeInsets.all(16),
@@ -163,7 +131,7 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
                           'Deliveries', preview.deliveryCount.toString()),
                       _buildPreviewRow(
                           'Staff Members', preview.staffCount.toString()),
-                      _buildPreviewRow('Signed Summaries',
+                      _buildPreviewRow('Signed snapshots and earlier summaries',
                           preview.signedSummaryCount.toString()),
                       _buildPreviewRow(
                           'Timer Entries', preview.timerEntryCount.toString()),
@@ -209,128 +177,82 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Export Progress/Button
-            if (exportState.isExporting) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      LinearProgressIndicator(value: exportState.progress),
-                      const SizedBox(height: 12),
-                      Text(
-                        exportState.progressMessage ?? 'Exporting...',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      Text(
-                        '${(exportState.progress * 100).toInt()}%',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.grey[600],
-                            ),
-                      ),
-                    ],
-                  ),
+            if (exportState.isExporting)
+              AppPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(exportState.progressMessage ?? 'Exporting...'),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(value: exportState.progress),
+                    const SizedBox(height: 8),
+                    Text('${(exportState.progress * 100).toInt()}%'),
+                  ],
                 ),
-              ),
-            ] else if (exportState.filePath != null) ...[
-              Card(
-                color: Colors.green[50],
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      const Icon(Icons.check_circle,
-                          color: Colors.green, size: 48),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Report Generated Successfully',
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: () {
-                                ref
-                                    .read(seasonExportNotifierProvider.notifier)
-                                    .shareFile();
-                              },
-                              icon: const Icon(Icons.share),
-                              label: const Text('Share'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                ref
-                                    .read(seasonExportNotifierProvider.notifier)
-                                    .reset();
-                              },
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('New Export'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ] else if (exportState.error != null) ...[
-              Card(
-                color: Colors.red[50],
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      const Icon(Icons.error, color: Colors.red, size: 48),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Export Failed',
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red,
-                                ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        exportState.error!,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        onPressed: () {
-                          ref
+              )
+            else if (exportState.filePath != null)
+              AppPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const AppStatusPill(
+                      label: 'Report ready',
+                      icon: Icons.check_circle_outline,
+                      tone: AppTone.green,
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: () => ref
                               .read(seasonExportNotifierProvider.notifier)
-                              .reset();
-                        },
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Try Again'),
-                      ),
-                    ],
-                  ),
+                              .shareFile(),
+                          icon: const Icon(Icons.share_outlined),
+                          label: const Text('Share'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => ref
+                              .read(seasonExportNotifierProvider.notifier)
+                              .reset(),
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('New Export'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ),
-            ] else ...[
+              )
+            else if (exportState.error != null)
+              AppPanel(
+                tone: AppTone.pink,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const AppSectionHeading(title: 'Export Failed'),
+                    const SizedBox(height: 8),
+                    Text(exportState.error!),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: () => ref
+                          .read(seasonExportNotifierProvider.notifier)
+                          .reset(),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              )
+            else
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: _startExport,
-                  icon: const Icon(Icons.download),
+                  icon: const Icon(Icons.download_outlined),
                   label: const Text('Generate Report'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
                 ),
               ),
-            ],
             const SizedBox(height: 32),
           ],
         ),
@@ -343,7 +265,8 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
     required IconData icon,
     required Widget child,
   }) {
-    return Card(
+    return AppPanel(
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -351,14 +274,9 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                Icon(icon, color: BrandColors.kakaBlue),
+                AppIconTile(icon: icon),
                 const SizedBox(width: 12),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
+                Expanded(child: AppSectionHeading(title: title)),
               ],
             ),
           ),
@@ -371,14 +289,20 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
 
   Widget _buildPreviewRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+          Expanded(
+              child: Text(label,
+                  style: TextStyle(color: AppPalette.of(context).muted))),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
           ),
         ],
       ),
@@ -391,7 +315,6 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
       title: Text(title),
       value: value,
       onChanged: (v) => onChanged(v ?? false),
-      dense: true,
     );
   }
 

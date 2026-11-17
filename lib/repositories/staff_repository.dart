@@ -1,44 +1,41 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
-import 'package:uuid/uuid.dart';
-import '../services/result.dart';
-import '../models/staff.dart';
+import 'package:firebase_core/firebase_core.dart';
 
-/// Repository for managing staff members and their calendar subscriptions
+import '../models/staff.dart';
+import '../services/result.dart';
+import '../services/staff_access_api.dart';
+
 abstract class StaffRepository {
   Future<Result<Staff>> getStaffById(String staffId);
   Future<Result<List<Staff>>> getAllStaff();
+  Future<Result<Staff>> createStaff(Staff staff);
   Future<Result<Staff>> updateStaff(Staff staff);
+  Future<Result<void>> deleteStaff(String staffId);
+  Future<Result<void>> setSchoolAssignments(
+    String schoolId,
+    Map<String, bool> changes,
+  );
+  Future<Result<String>> issueInvite(String staffId);
   Future<Result<String>> generateCalendarToken(String staffId);
   Future<Result<String>> regenerateCalendarToken(String staffId);
-  Future<Result<Staff?>> getStaffByCalendarToken(String token);
   Future<Result<String>> getCalendarSubscriptionUrl(String staffId);
-  Future<Result<String>> getCalendarHttpsUrl(String staffId);
+  Future<Result<String?>> getExistingCalendarHttpsUrl(String staffId);
 }
 
 class FirebaseStaffRepository implements StaffRepository {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final Uuid _uuid = const Uuid();
+  final _firestore = FirebaseFirestore.instance;
+
+  CollectionReference<Map<String, dynamic>> get _staff =>
+      _firestore.collection('staff');
 
   @override
   Future<Result<Staff>> getStaffById(String staffId) async {
     try {
-      final doc = await _firestore.collection('staff').doc(staffId).get();
-
-      if (!doc.exists) {
-        return const Result.failure('Staff member not found');
-      }
-
-      final staff = Staff.fromJson({
-        'id': doc.id,
-        ...doc.data()!,
-      });
-
-      return Result.success(staff);
+      final doc = await _staff.doc(staffId).get();
+      final data = doc.data();
+      if (data == null) return const Result.failure('Staff member not found');
+      return Result.success(Staff.fromJson({...data, 'id': doc.id}));
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error getting staff by ID: $e');
-      }
       return Result.failure('Failed to get staff: $e');
     }
   }
@@ -46,244 +43,150 @@ class FirebaseStaffRepository implements StaffRepository {
   @override
   Future<Result<List<Staff>>> getAllStaff() async {
     try {
-      final snapshot = await _firestore
-          .collection('staff')
-          .orderBy('name')
-          .get();
-
-      final staffList = snapshot.docs.map((doc) {
-        return Staff.fromJson({
-          'id': doc.id,
-          ...doc.data(),
-        });
+      final result = await callStaffAccess('listStaffDirectory', {});
+      final staff = (result['staff'] as List).map((entry) {
+        final data = Map<String, dynamic>.from(entry as Map);
+        data['createdAt'] = Timestamp.fromMillisecondsSinceEpoch(
+          (data['createdAt'] as num).toInt(),
+        );
+        return Staff.fromJson(data);
       }).toList();
-
-      return Result.success(staffList);
+      return Result.success(staff);
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error getting all staff: $e');
-      }
-      return Result.failure('Failed to get staff list: $e');
+      return Result.failure('Failed to get the staff directory: $e');
+    }
+  }
+
+  @override
+  Future<Result<Staff>> createStaff(Staff staff) async {
+    try {
+      final doc = await _staff.add({
+        'name': staff.name,
+        'role': staff.role,
+        'assignedSchoolIds': staff.assignedSchoolIds,
+        'createdAt': Timestamp.fromDate(staff.createdAt),
+      });
+      return Result.success(staff.copyWith(id: doc.id));
+    } catch (e) {
+      return Result.failure('Failed to add staff: $e');
     }
   }
 
   @override
   Future<Result<Staff>> updateStaff(Staff staff) async {
     try {
-      final data = staff.toJson();
-      data.remove('id'); // Don't store ID in the document
-
-      await _firestore.collection('staff').doc(staff.id).update(data);
-
-      // Sync role to users collection if staff is linked to a user account
-      if (staff.uid != null) {
-        try {
-          await _firestore.collection('users').doc(staff.uid).update({
-            'role': staff.role,
-          });
-          if (kDebugMode) {
-            debugPrint('Synced role to users collection for staff ${staff.id}');
-          }
-        } catch (e) {
-          // Log but don't fail the update if user sync fails
-          if (kDebugMode) {
-            debugPrint('Warning: Failed to sync role to users collection: $e');
-          }
-        }
-      }
-
+      await _staff.doc(staff.id).update({
+        'name': staff.name,
+        'role': staff.role,
+      });
       return Result.success(staff);
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error updating staff: $e');
-      }
       return Result.failure('Failed to update staff: $e');
     }
   }
 
   @override
-  Future<Result<String>> generateCalendarToken(String staffId) async {
+  Future<Result<void>> setSchoolAssignments(
+    String schoolId,
+    Map<String, bool> changes,
+  ) async {
     try {
-      final staffDoc = await _firestore.collection('staff').doc(staffId).get();
-
-      if (!staffDoc.exists) {
-        return const Result.failure('Staff member not found');
-      }
-
-      final staff = Staff.fromJson({
-        'id': staffDoc.id,
-        ...staffDoc.data()!,
-      });
-
-      // If staff already has a token, return it
-      if (staff.hasCalendarToken) {
-        return Result.success(staff.calendarToken!);
-      }
-
-      // Generate new token
-      final token = _uuid.v4();
-
-      await _firestore.collection('staff').doc(staffId).update({
-        'calendarToken': token,
-      });
-
-      if (kDebugMode) {
-        debugPrint('Generated calendar token for staff $staffId');
-      }
-
-      return Result.success(token);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error generating calendar token: $e');
-      }
-      return Result.failure('Failed to generate calendar token: $e');
-    }
-  }
-
-  @override
-  Future<Result<String>> regenerateCalendarToken(String staffId) async {
-    try {
-      final staffDoc = await _firestore.collection('staff').doc(staffId).get();
-
-      if (!staffDoc.exists) {
-        return const Result.failure('Staff member not found');
-      }
-
-      // Generate new token (this will revoke the old one)
-      final token = _uuid.v4();
-
-      await _firestore.collection('staff').doc(staffId).update({
-        'calendarToken': token,
-      });
-
-      // Also delete the old calendar metadata
-      await _firestore.collection('calendar_metadata').doc(staffId).delete();
-
-      if (kDebugMode) {
-        debugPrint('Regenerated calendar token for staff $staffId');
-      }
-
-      return Result.success(token);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error regenerating calendar token: $e');
-      }
-      return Result.failure('Failed to regenerate calendar token: $e');
-    }
-  }
-
-  @override
-  Future<Result<Staff?>> getStaffByCalendarToken(String token) async {
-    try {
-      final query = await _firestore
-          .collection('staff')
-          .where('calendarToken', isEqualTo: token)
-          .limit(1)
-          .get();
-
-      if (query.docs.isEmpty) {
-        return const Result.success(null);
-      }
-
-      final doc = query.docs.first;
-      final staff = Staff.fromJson({
-        'id': doc.id,
-        ...doc.data(),
-      });
-
-      return Result.success(staff);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error getting staff by calendar token: $e');
-      }
-      return Result.failure('Failed to get staff by token: $e');
-    }
-  }
-
-  /// Generate calendar tokens for all staff members who don't have one
-  /// This is useful for migrating existing staff to the new calendar system
-  Future<Result<int>> generateTokensForAllStaff() async {
-    try {
-      // Get all staff without calendar tokens
-      final snapshot = await _firestore.collection('staff').get();
-
-      int count = 0;
+      if (changes.isEmpty) return const Result.success(null);
       final batch = _firestore.batch();
-
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        if (!data.containsKey('calendarToken') || data['calendarToken'] == null) {
-          final token = _uuid.v4();
-          batch.update(doc.reference, {'calendarToken': token});
-          count++;
-        }
-      }
-
+      changes.forEach((staffId, isAssigned) {
+        batch.update(_staff.doc(staffId), {
+          'assignedSchoolIds': isAssigned
+              ? FieldValue.arrayUnion([schoolId])
+              : FieldValue.arrayRemove([schoolId]),
+        });
+      });
       await batch.commit();
-
-      if (kDebugMode) {
-        debugPrint('Generated calendar tokens for $count staff members');
-      }
-
-      return Result.success(count);
+      return const Result.success(null);
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error generating tokens for all staff: $e');
-      }
-      return Result.failure('Failed to generate tokens: $e');
+      return Result.failure('Failed to save staff assignments: $e');
     }
   }
 
-  /// Get calendar subscription URL for a staff member
-  /// Returns webcal:// URL that can be subscribed to
+  @override
+  Future<Result<void>> deleteStaff(String staffId) async {
+    try {
+      await _staff.doc(staffId).delete();
+      return const Result.success(null);
+    } catch (e) {
+      return Result.failure('Failed to delete staff: $e');
+    }
+  }
+
+  @override
+  Future<Result<String>> issueInvite(String staffId) async {
+    try {
+      final data =
+          await callStaffAccess('issueStaffInvite', {'staffId': staffId});
+      return Result.success(data['code'] as String);
+    } catch (e) {
+      return Result.failure('Failed to issue an invitation: $e');
+    }
+  }
+
+  @override
+  Future<Result<String>> generateCalendarToken(String staffId) =>
+      _calendarToken(staffId, rotate: false);
+
+  @override
+  Future<Result<String>> regenerateCalendarToken(String staffId) =>
+      _calendarToken(staffId, rotate: true);
+
+  Future<Result<String>> _calendarToken(
+    String staffId, {
+    required bool rotate,
+  }) async {
+    try {
+      final result = await callStaffAccess('calendarSubscriptionToken', {
+        'staffId': staffId,
+        'rotate': rotate,
+      });
+      return Result.success(result['token'] as String);
+    } catch (e) {
+      return Result.failure('Failed to get a calendar link: $e');
+    }
+  }
+
   @override
   Future<Result<String>> getCalendarSubscriptionUrl(String staffId) async {
-    try {
-      final staffDoc = await _firestore.collection('staff').doc(staffId).get();
-
-      if (!staffDoc.exists) {
-        return const Result.failure('Staff member not found');
-      }
-
-      final staff = Staff.fromJson({
-        'id': staffDoc.id,
-        ...staffDoc.data()!,
-      });
-
-      if (!staff.hasCalendarToken) {
-        // Generate token if doesn't exist
-        final tokenResult = await generateCalendarToken(staffId);
-        if (tokenResult.isFailure) {
-          return Result.failure(tokenResult.errorOrNull ?? 'Failed to generate token');
-        }
-
-        final token = tokenResult.dataOrNull!;
-        const baseUrl = 'https://us-central1-bts-delivery-app.cloudfunctions.net/calendar';
-        return Result.success('webcals://${baseUrl.replaceFirst('https://', '')}/$token.ics');
-      }
-
-      const baseUrl = 'https://us-central1-bts-delivery-app.cloudfunctions.net/calendar';
-      final webcalUrl = 'webcals://${baseUrl.replaceFirst('https://', '')}/${staff.calendarToken}.ics';
-
-      return Result.success(webcalUrl);
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('Error getting calendar subscription URL: $e');
-      }
-      return Result.failure('Failed to get subscription URL: $e');
-    }
+    return (await generateCalendarToken(staffId)).when(
+      success: (token) => Result.success(calendarUrl(token, scheme: 'webcals')),
+      failure: (message, error) => Result.failure(message, error),
+    );
   }
 
-  /// Get HTTPS version of calendar subscription URL
   @override
-  Future<Result<String>> getCalendarHttpsUrl(String staffId) async {
-    final webcalResult = await getCalendarSubscriptionUrl(staffId);
-
-    if (webcalResult.isFailure) {
-      return webcalResult;
+  Future<Result<String?>> getExistingCalendarHttpsUrl(String staffId) async {
+    try {
+      final result = await callStaffAccess('calendarSubscriptionToken', {
+        'staffId': staffId,
+        'existingOnly': true,
+      });
+      final token = result['token'] as String?;
+      return Result.success(token == null ? null : calendarUrl(token));
+    } catch (e) {
+      return Result.failure('Failed to check the calendar link: $e');
     }
-
-    final httpsUrl = webcalResult.dataOrNull!.replaceFirst('webcals://', 'https://');
-    return Result.success(httpsUrl);
   }
+}
+
+String calendarUrl(String token, {String scheme = 'https'}) {
+  if (firebaseEmulatorHost.isNotEmpty) {
+    return Uri(
+      scheme: 'http',
+      host: firebaseEmulatorHost,
+      port: 5001,
+      path: '/$firebaseDemoProject/us-central1/calendar/$token.ics',
+    ).toString();
+  }
+  final projectId = Firebase.app().options.projectId;
+  return Uri(
+    scheme: scheme,
+    host: 'us-central1-$projectId.cloudfunctions.net',
+    path: '/calendar/$token.ics',
+  ).toString();
 }

@@ -1,249 +1,451 @@
 rules_version = '2';
+// users holds self-owned account metadata. staff supplies name, role and
+// assignedSchoolIds after a server-owned staff_access/{uid} link is verified.
+// schools holds templates and permanent school information. Each prepared
+// deliveries/{deliveryId}/workspace/{schoolId} holds operational visit records.
+// Signoff evidence, active pointers and timer sessions have separate schemas.
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isAuthenticated() {
+    function signedIn() {
       return request.auth != null;
     }
-    
-    function getCurrentUser() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    
-    function isAdmin() {
-      return isAuthenticated() &&
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+
+    // Server-owned access documents were introduced separately from legacy
+    // user profiles, which are never consulted for authorization.
+    function link() {
+      return get(/databases/$(database)/documents/staff_access/$(request.auth.uid)).data;
     }
 
-    function isManager() {
-      return isAuthenticated() &&
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+    function staff() {
+      return get(/databases/$(database)/documents/staff/$(link().staffId)).data;
+    }
+
+    function validRole(role) {
+      return role in ['admin', 'manager', 'staff'];
+    }
+
+    function isLinked() {
+      return signedIn() && link() != null && link().staffId is string &&
+        staff() != null && staff().get('uid', null) == request.auth.uid &&
+        validRole(staff().get('role', null));
+    }
+
+    function isAdmin() {
+      return isLinked() && staff().role == 'admin';
     }
 
     function canManageDeliveries() {
-      return isAuthenticated() && (isAdmin() || isManager());
-    }
-    
-    function isAssignedToDelivery(deliveryData) {
-      return request.auth.uid in deliveryData.staffIds;
-    }
-
-    function getUserStaff() {
-      // Find staff document by querying for uid field
-      // Since we can't query in rules, we need to check if any staff doc matches
-      // For now, we'll allow access if user is authenticated and linked
-      // The app-level filtering handles the actual school assignments
-      return exists(/databases/$(database)/documents/staff/$(request.auth.uid));
-    }
-
-    function isAssignedToSchool(schoolId) {
-      // For staff, we can't easily query by uid in security rules
-      // So we rely on app-level filtering and allow read if authenticated
-      // Admins and managers bypass this anyway
-      return isAuthenticated();
+      return isLinked() && staff().role in ['admin', 'manager'];
     }
 
     function canAccessSchool(schoolId) {
-      // Admins and managers can access all schools
-      // Regular staff can only access assigned schools
-      return isAdmin() || isManager() || isAssignedToSchool(schoolId);
+      return isLinked() && (staff().role in ['admin', 'manager'] ||
+        (staff().get('assignedSchoolIds', []) is list &&
+          schoolId in staff().get('assignedSchoolIds', [])));
     }
 
-    // Users collection - users can read and write their own document
-    // Admins can update any user document (for role sync)
+    function ownStaffRecord(staffId) {
+      return signedIn() && link() != null && link().staffId == staffId;
+    }
+
+    function staffFieldsValid(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+        validRole(data.role) && data.assignedSchoolIds is list && data.createdAt is timestamp;
+    }
+
     match /users/{userId} {
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow delete: if false; // Only allow deletes through admin console
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn() && request.auth.uid == userId &&
+        request.resource.data.keys().hasOnly(['uid', 'email', 'createdAt', 'lastLoginAt']) &&
+        request.resource.data.uid == userId &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.lastLoginAt == request.time;
+      allow update: if signedIn() && request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLoginAt']) &&
+        request.resource.data.lastLoginAt == request.time;
     }
 
-    // Staff collection - only authenticated users can read
-    // Admins can create, update, and delete staff
-    // Users can link to their own staff document (update uid field only)
-    // Staff can update their own calendarToken (for regeneration)
+    match /staff_access/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+    }
+
+    // staff_invites and calendar_tokens are server-only.
     match /staff/{staffId} {
-      allow read: if isAuthenticated();
-      allow create: if isAdmin();
-      allow update: if isAdmin() ||
-        (isAuthenticated() &&
-         (resource == null || resource.data.uid == null || resource.data.uid == request.auth.uid) &&
-         request.resource.data.uid == request.auth.uid) ||
-        (isAuthenticated() &&
-         resource.data.uid == request.auth.uid &&
-         request.resource.data.keys().hasOnly(['calendarToken']));
+      allow get: if isAdmin() || (ownStaffRecord(staffId) &&
+        (resource == null || resource.data.get('uid', null) == request.auth.uid));
+      allow create: if isAdmin() && staffFieldsValid(request.resource.data) &&
+        request.resource.data.keys().hasOnly(['name', 'role', 'assignedSchoolIds', 'createdAt']);
+      allow update: if isAdmin() && staffFieldsValid(request.resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'role', 'assignedSchoolIds']);
       allow delete: if isAdmin();
     }
 
-    // Schools collection - read access for all authenticated users
-    // App-level filtering handles school assignments
-    match /schools/{schoolId} {
-      allow read: if isAuthenticated();
-      allow create: if isAdmin();
-      allow update, delete: if isAdmin() || isManager();
-
-      // Year levels subcollection
-      match /yearLevels/{yearLevelId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin() || isManager();
-
-        // Classrooms subcollection
-        match /classrooms/{classroomId} {
-          allow read: if isAuthenticated();
-          allow write: if isAuthenticated();
-
-          // Photos subcollection
-          match /photos/{photoId} {
-            allow read: if isAuthenticated();
-            allow create: if isAuthenticated();
-            allow update: if isAuthenticated();
-            allow delete: if isAuthenticated() && (
-              isAdmin() ||
-              isManager() ||
-              // Staff can delete their own photos (if uploadedBy field exists and matches)
-              (('uploadedBy' in resource.data) && resource.data.uploadedBy == request.auth.uid)
-            );
-          }
-
-          // Pack totals subcollection
-          match /packTotals/{packTotalId} {
-            allow read: if isAuthenticated();
-            allow write: if isAuthenticated();
-          }
-
-          // Classroom consumables subcollection
-          match /consumables/{consumableId} {
-            allow read: if isAuthenticated();
-            allow write: if isAuthenticated();
-          }
-
-          // Classroom notes subcollection
-          match /notes/{noteId} {
-            allow read: if isAuthenticated();
-            allow write: if isAuthenticated();
-          }
-
-          // Year level breakdowns subcollection (for composite classes)
-          match /yearLevelBreakdowns/{breakdownId} {
-            allow read: if isAuthenticated();
-            allow write: if isAuthenticated();
-          }
-        }
-      }
-
-      // Consumables subcollection
-      match /consumables/{consumableId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin() || isManager();
-      }
-
-      // Meta collection for school-level data
-      match /meta/{document} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated();
-      }
-
-      // Contacts subcollection
-      match /contacts/{contactId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin() || isManager();
-      }
-
-      // Maps subcollection
-      match /maps/{mapId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated();
-      }
-
-      // Notes subcollection
-      match /notes/{noteId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated();
-      }
-
-      // Signoffs subcollection
-      match /signoffs/{signoffId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated();
-      }
-
-      // Timers subcollection - for school delivery timing
-      // All authenticated users can read (to see the timer)
-      // Only managers/admins can write (to start/stop timers)
-      match /timers/{timerId} {
-        allow read: if isAuthenticated();
-        allow write: if canManageDeliveries();
-
-        // Timer history subcollection
-        // Only admins can create/update/delete history entries
-        match /history/{historyId} {
-          allow read: if isAuthenticated();
-          allow write: if isAdmin();
-        }
-      }
+    function validTimer(data, schoolId) {
+      return data.schoolId == schoolId && data.isActive is bool &&
+        data.startedAt is timestamp && data.createdAt is timestamp &&
+        data.startedByUid is string && data.startedByName is string &&
+        (data.isActive || (data.stoppedAt is timestamp && data.stoppedAt >= data.startedAt &&
+          data.stoppedByUid is string && data.stoppedByName is string));
     }
 
-    // Deliveries collection - read access for all authenticated users
-    // App-level filtering handles delivery visibility based on assignments
-    match /deliveries/{deliveryId} {
-      allow read: if isAuthenticated();
-      allow create: if canManageDeliveries();
-      allow update: if canManageDeliveries() || (
-        isAuthenticated() &&
-        request.auth.uid in resource.data.staffIds
-      );
+    function validStart(schoolId, historyPath) {
+      let data = request.resource.data;
+      let session = data.get('sessionId', '');
+      return validTimer(data, schoolId) && data.isActive &&
+        data.startedAt == request.time && data.createdAt == request.time &&
+        data.startedByUid == link().staffId && session is string &&
+        session.matches('^[a-f0-9-]{36}$') &&
+        data.get('stoppedAt', null) == null &&
+        data.get('stoppedByUid', null) == null &&
+        data.get('stoppedByName', null) == null &&
+        !exists(historyPath);
+    }
+
+    function validStop(schoolId, historyPath) {
+      let data = request.resource.data;
+      let session = data.get('sessionId', '');
+      return validTimer(data, schoolId) && !data.isActive &&
+        data.stoppedAt == request.time && data.stoppedByUid == link().staffId && session is string &&
+        (session == resource.data.get('sessionId', '') ||
+          (!('sessionId' in resource.data) && session.matches('^legacy-[0-9]+-[0-9]+$'))) &&
+        data.diff(resource.data).affectedKeys()
+          .hasOnly(['isActive', 'stoppedAt', 'stoppedByUid', 'stoppedByName', 'sessionId']) &&
+        !exists(historyPath) &&
+        getAfter(historyPath).data == data;
+    }
+
+    function timerStopHistory(path, historyId) {
+      return get(path).data.isActive == true &&
+        getAfter(path).data.isActive == false &&
+        getAfter(path).data.sessionId == historyId &&
+        getAfter(path).data == request.resource.data;
+    }
+
+    function boundedText(value, max) {
+      return value is string && value.size() > 0 && value.size() <= max;
+    }
+
+    function optionalText(value, max) {
+      return value == null || (value is string && value.size() <= max);
+    }
+
+    function count(value) {
+      return value is int && value >= 0 && value <= 1000000;
+    }
+
+    function optionalCount(value) {
+      return value == null || count(value);
+    }
+
+    function classroomValid(data) {
+      return boundedText(data.name, 200) && data.createdAt is timestamp &&
+        data.get('completionStatus', 'notAttended') in ['notAttended', 'incomplete', 'complete'] &&
+        optionalCount(data.get('actualPacksDelivered', null)) &&
+        optionalText(data.get('lastUpdatedBy', null), 320) &&
+        optionalText(data.get('lastEditId', null), 64) &&
+        (data.get('lastUpdatedAt', null) == null || data.lastUpdatedAt is timestamp) &&
+        data.get('yearLevelBreakdowns', []) is list &&
+        data.get('yearLevelBreakdowns', []).size() <= 100;
+    }
+
+    function classroomCreate() {
+      return request.resource.data.keys().hasOnly([
+          'name', 'createdAt', 'completionStatus', 'actualPacksDelivered',
+          'lastUpdatedBy', 'lastUpdatedAt', 'yearLevelBreakdowns']) &&
+        classroomValid(request.resource.data);
+    }
+
+    function classroomUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'completionStatus', 'actualPacksDelivered',
+          'lastUpdatedBy', 'lastUpdatedAt', 'lastEditId']) &&
+        classroomValid(request.resource.data);
+    }
+
+    function workDataValid(collectionName, data) {
+      return data.createdAt is timestamp &&
+        ((collectionName == 'packTotals' &&
+            data.keys().hasOnly(['id', 'total', 'createdAt']) && count(data.total)) ||
+          (collectionName == 'consumables' &&
+            data.keys().hasOnly(['id', 'itemName', 'quantity', 'unit', 'createdAt', 'actualQuantityDelivered']) &&
+            boundedText(data.itemName, 200) && boundedText(data.unit, 80) &&
+            count(data.quantity) && optionalCount(data.get('actualQuantityDelivered', null))) ||
+          (collectionName == 'notes' &&
+            data.keys().hasOnly(['id', 'content', 'author', 'createdAt']) &&
+            boundedText(data.content, 20000) && optionalText(data.get('author', null), 320)) ||
+          (collectionName == 'yearLevelBreakdowns' &&
+            data.keys().hasOnly(['id', 'yearLevelId', 'yearLevelLabel', 'studentCount', 'packAllocation', 'createdAt']) &&
+            boundedText(data.yearLevelId, 200) && boundedText(data.yearLevelLabel, 200) &&
+            count(data.studentCount) && optionalCount(data.get('packAllocation', null))));
+    }
+
+    function yearLevelValid(data) {
+      return data.createdAt is timestamp && boundedText(data.get('label', data.get('name', null)), 200);
+    }
+
+    function isWorkCollection(collectionName) {
+      return collectionName in ['packTotals', 'consumables', 'notes', 'yearLevelBreakdowns'];
+    }
+
+    function photoValid(schoolPath, yearLevelId, classroomId, photoId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['id', 'storagePath', 'uploadedBy', 'uploadedAt']) &&
+        data.get('id', photoId) == photoId && data.uploadedAt is timestamp &&
+        data.uploadedBy == request.auth.uid &&
+        data.storagePath == schoolPath + '/yearLevels/' + yearLevelId +
+          '/classrooms/' + classroomId + '/photos/' + photoId + '.jpg';
+    }
+
+    function mayDeletePhoto() {
+      return canManageDeliveries() || resource.data.get('uploadedBy', null) == request.auth.uid;
+    }
+
+    function validSnapshot(snapshot, reviewStatus) {
+      let summary = snapshot.summary;
+      let reviewChecklist = summary.get('reviewChecklist', []);
+      return snapshot.keys().hasOnly(['sourceReadAt', 'serverReviewed', 'summary']) &&
+        boundedText(snapshot.sourceReadAt, 40) && snapshot.serverReviewed is bool &&
+        reviewStatus == (snapshot.serverReviewed ? 'serverReviewed' : 'cached') &&
+        summary is map && summary.keys().hasOnly([
+          'schoolName', 'schoolAddress', 'totalPacks', 'packTotalsByYearLevel',
+          'packTotalsByClassroom', 'consumablesTotals', 'consumablesByYearLevel',
+          'consumablesByClassroom', 'classroomDeliveryDetails', 'photoUrls', 'notes',
+          'notesByClassroom', 'reviewChecklist']) &&
+        boundedText(summary.schoolName, 200) && optionalText(summary.get('schoolAddress', null), 1000) &&
+        count(summary.totalPacks) && optionalText(summary.get('notes', null), 100000) &&
+        summary.packTotalsByYearLevel is map && summary.packTotalsByClassroom is map &&
+        summary.consumablesTotals is map && summary.consumablesByYearLevel is map &&
+        summary.consumablesByClassroom is map && summary.notesByClassroom is map &&
+        summary.classroomDeliveryDetails is list && summary.classroomDeliveryDetails.size() <= 500 &&
+        (!snapshot.serverReviewed || summary.classroomDeliveryDetails.size() > 0) &&
+        summary.photoUrls is list && summary.photoUrls.size() <= 1000 &&
+        reviewChecklist is list && reviewChecklist.size() <= 500;
+    }
+
+    function validSignoffEvidence(schoolId, evidenceId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['id', 'schoolId', 'deliveryId', 'ownerUid',
+          'signaturePath', 'capturedAt', 'reviewStatus', 'typedName', 'snapshot']) &&
+        data.id == evidenceId && data.schoolId == schoolId &&
+        data.ownerUid == request.auth.uid &&
+        data.signaturePath == 'schools/' + schoolId + '/signoffs/' + evidenceId + '.png' &&
+        data.capturedAt is timestamp && data.capturedAt <= request.time + duration.value(5, 'm') &&
+        data.typedName is string && data.typedName.size() > 0 && data.typedName.size() <= 200 &&
+        data.snapshot is map && validSnapshot(data.snapshot, data.reviewStatus) &&
+        (data.deliveryId == null ||
+          (data.deliveryId is string &&
+            get(/databases/$(database)/documents/deliveries/$(data.deliveryId)).data.schoolId == schoolId &&
+            get(/databases/$(database)/documents/deliveries/$(data.deliveryId)/workspace/$(schoolId)).data.status == 'ready'));
+
+    }
+
+    function validSignoffPointer(schoolId, scopeKey) {
+      let data = request.resource.data;
+      let evidence = getAfter(/databases/$(database)/documents/schools/$(schoolId)/signoffs/$(data.evidenceId)).data;
+      return data.keys().hasOnly(['evidenceId', 'deliveryId', 'capturedAt']) &&
+        data.capturedAt is timestamp && evidence != null &&
+        evidence.ownerUid == request.auth.uid &&
+        evidence.deliveryId == data.deliveryId && evidence.capturedAt == data.capturedAt &&
+        ((data.deliveryId == null && scopeKey == 'school-only') ||
+          (data.deliveryId is string && scopeKey == 'visit-' + data.deliveryId));
+    }
+
+    match /schools/{schoolId} {
+      allow read: if canAccessSchool(schoolId);
+      allow create: if isAdmin();
+      allow update: if canManageDeliveries();
       allow delete: if canManageDeliveries();
 
-      // Pre-delivery checklist completions subcollection
-      // All authenticated users can read and write (to complete checklist items)
-      match /preDeliveryChecklist/{completionId} {
-        allow read, write: if isAuthenticated();
+      match /yearLevels/{yearLevelId} {
+        allow read: if canAccessSchool(schoolId);
+        allow create, update: if canManageDeliveries() && yearLevelValid(request.resource.data);
+        allow delete: if canManageDeliveries();
+
+        match /classrooms/{classroomId} {
+          allow read: if canAccessSchool(schoolId);
+          allow delete: if canManageDeliveries();
+          allow create: if canManageDeliveries() && classroomCreate();
+          allow update: if canAccessSchool(schoolId) && classroomUpdate() &&
+            (canManageDeliveries() ||
+              (request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['lastUpdatedAt', 'lastUpdatedBy']) &&
+                request.resource.data.lastUpdatedAt == request.time));
+
+          match /photos/{photoId} {
+            allow read: if canAccessSchool(schoolId);
+            allow create: if canAccessSchool(schoolId) &&
+              photoValid('schools/' + schoolId, yearLevelId, classroomId, photoId);
+            allow delete: if canAccessSchool(schoolId) && mayDeletePhoto();
+          }
+
+          match /{workCollection}/{workId} {
+            allow read: if canAccessSchool(schoolId) && isWorkCollection(workCollection);
+            allow delete: if canManageDeliveries() && isWorkCollection(workCollection);
+            allow create, update: if canManageDeliveries() &&
+              workDataValid(workCollection, request.resource.data);
+          }
+        }
+      }
+
+      match /{schoolCollection}/{itemId} {
+        allow read: if canAccessSchool(schoolId) &&
+          schoolCollection in ['consumables', 'meta', 'contacts', 'maps', 'notes'];
+        allow write: if canManageDeliveries() &&
+          ((schoolCollection == 'meta' && itemId != 'signoff') ||
+            schoolCollection in ['maps', 'notes', 'consumables', 'contacts']);
+      }
+
+      match /signoffs/{evidenceId} {
+        allow read: if canAccessSchool(schoolId);
+        allow create: if canAccessSchool(schoolId) && validSignoffEvidence(schoolId, evidenceId);
+      }
+
+      match /signoffPointers/{scopeKey} {
+        allow read: if canAccessSchool(schoolId);
+        allow create: if canAccessSchool(schoolId) && validSignoffPointer(schoolId, scopeKey);
+        allow update: if canAccessSchool(schoolId) && validSignoffPointer(schoolId, scopeKey) &&
+          request.resource.data.capturedAt >= resource.data.capturedAt;
+      }
+
+      match /timers/active {
+        allow read: if canAccessSchool(schoolId);
+        allow create: if canManageDeliveries() && validStart(schoolId, newHistory());
+        allow update: if canManageDeliveries() &&
+          (resource.data.isActive == true ? validStop(schoolId, newHistory()) : validStart(schoolId, newHistory()));
+
+        function newHistory() {
+          let id = request.resource.data.sessionId;
+          return /databases/$(database)/documents/schools/$(schoolId)/timers/active/history/$(id);
+        }
+
+        match /history/{historyId} {
+          allow read: if canAccessSchool(schoolId);
+          allow create: if validTimer(request.resource.data, schoolId) &&
+            request.resource.data.isActive == false &&
+            (isAdmin() || (canManageDeliveries() && timerStopHistory(
+              /databases/$(database)/documents/schools/$(schoolId)/timers/active, historyId)));
+          allow update: if isAdmin() && validTimer(request.resource.data, schoolId) &&
+            request.resource.data.isActive == false;
+          allow delete: if isAdmin();
+        }
       }
     }
 
-    // Signed School Summaries collection
-    match /signed_school_summaries/{summaryId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAuthenticated();
+    match /deliveries/{deliveryId} {
+      function canChangeSchool() {
+        let originalSchool = resource.data.schoolId;
+        return !exists(/databases/$(database)/documents/deliveries/$(deliveryId)/workspace/$(originalSchool));
+      }
+
+      allow read: if canAccessSchool(resource.data.schoolId);
+      allow create: if canManageDeliveries() && request.resource.data.schoolId is string;
+      allow update: if canManageDeliveries() && request.resource.data.schoolId is string &&
+        (request.resource.data.schoolId == resource.data.schoolId || canChangeSchool());
+      allow delete: if isAdmin() && canChangeSchool();
+
+      match /preDeliveryChecklist/{completionId} {
+        function canAccessDelivery() {
+          return canAccessSchool(
+            get(/databases/$(database)/documents/deliveries/$(deliveryId)).data.schoolId);
+        }
+        function validCompletion() {
+          let data = request.resource.data;
+          return data.keys().hasOnly(['isCompleted', 'completedBy', 'completedAt']) &&
+            data.isCompleted is bool &&
+            (data.isCompleted
+              ? data.completedBy == request.auth.token.email && data.completedAt is timestamp
+              : data.completedBy == null && data.completedAt == null);
+        }
+        allow read: if canAccessDelivery();
+        allow create, update: if canAccessDelivery() && validCompletion();
+      }
+
+      match /workspace/{schoolId} {
+        function authorized() {
+          return canAccessSchool(schoolId) &&
+            get(/databases/$(database)/documents/deliveries/$(deliveryId)).data.schoolId == schoolId;
+        }
+
+        function ready() {
+          return authorized() &&
+            get(/databases/$(database)/documents/deliveries/$(deliveryId)/workspace/$(schoolId)).data.status == 'ready';
+        }
+
+        allow get: if authorized();
+
+        match /yearLevels/{yearLevelId} {
+          allow read: if ready();
+          allow create, update: if ready() && canManageDeliveries() && yearLevelValid(request.resource.data);
+          allow delete: if ready() && canManageDeliveries();
+
+          match /classrooms/{classroomId} {
+            allow read, delete: if ready();
+            allow create: if ready() && classroomCreate();
+            allow update: if ready() && classroomUpdate();
+
+            match /photos/{photoId} {
+              allow read: if ready();
+              allow create: if ready() && photoValid('deliveries/' + deliveryId +
+                '/workspace/' + schoolId, yearLevelId, classroomId, photoId);
+              allow delete: if ready() && mayDeletePhoto();
+            }
+
+            match /{workCollection}/{workId} {
+              allow read, delete: if ready() && isWorkCollection(workCollection);
+              allow create, update: if ready() && workDataValid(workCollection, request.resource.data);
+            }
+          }
+        }
+
+        match /{workCollection}/{workId} {
+          allow read, delete: if ready() && workCollection in ['consumables', 'notes'];
+          allow create, update: if ready() && workCollection in ['consumables', 'notes'] &&
+            workDataValid(workCollection, request.resource.data);
+        }
+
+        match /timers/active {
+          allow read: if ready();
+          allow create: if ready() && canManageDeliveries() && validStart(schoolId, newHistory());
+          allow update: if ready() && canManageDeliveries() &&
+            (resource.data.isActive == true
+              ? validStop(schoolId, newHistory())
+              : validStart(schoolId, newHistory()));
+
+          function newHistory() {
+            let id = request.resource.data.sessionId;
+            return /databases/$(database)/documents/deliveries/$(deliveryId)/workspace/$(schoolId)/timers/active/history/$(id);
+          }
+
+          match /history/{historyId} {
+            allow read: if ready();
+            allow create: if ready() && validTimer(request.resource.data, schoolId) &&
+              request.resource.data.isActive == false &&
+              (isAdmin() || (canManageDeliveries() && timerStopHistory(
+                /databases/$(database)/documents/deliveries/$(deliveryId)/workspace/$(schoolId)/timers/active, historyId)));
+            allow update: if ready() && isAdmin() && validTimer(request.resource.data, schoolId) &&
+              request.resource.data.isActive == false;
+            allow delete: if ready() && isAdmin();
+          }
+        }
+      }
     }
 
-    // Checklist items collection - for pre-signoff checklist
-    // All authenticated users can read (to see the checklist during signoff)
-    // Only admins can create, update, or delete checklist items
-    match /checklist_items/{itemId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAdmin();
+    // Legacy summaries are keyed by school ID.
+    match /signed_school_summaries/{schoolId} {
+      allow read: if canAccessSchool(schoolId);
     }
 
-    // Pre-delivery checklist items collection - for van loading checklist
-    // All authenticated users can read (to see the checklist when preparing deliveries)
-    // Only admins can create, update, or delete checklist items
-    match /pre_delivery_checklist_items/{itemId} {
-      allow read: if isAuthenticated();
-      allow create, update, delete: if isAdmin();
+    match /{collection}/{itemId} {
+      allow read: if isLinked() &&
+        collection in ['checklist_items', 'pre_delivery_checklist_items', 'system_metadata'];
+      allow write: if isAdmin() &&
+        collection in ['checklist_items', 'pre_delivery_checklist_items'];
     }
 
-    // Calendar metadata collection - tracks calendar subscription access
-    // Staff can read their own metadata
-    // Admins can delete any metadata, staff can delete their own (for token regeneration)
-    // Cloud Functions can create/update metadata (authenticated via service account)
     match /calendar_metadata/{staffId} {
-      allow read: if isAuthenticated();
-      allow create, update: if false; // Only Cloud Functions can create/update
-      allow delete: if isAdmin() ||
-        (isAuthenticated() &&
-         exists(/databases/$(database)/documents/staff/$(staffId)) &&
-         get(/databases/$(database)/documents/staff/$(staffId)).data.uid == request.auth.uid);
-    }
-
-    // System metadata collection - tracks global system state like last calendar update
-    // All authenticated users can read
-    // Cloud Functions can write (authenticated via service account)
-    match /system_metadata/{documentId} {
-      allow read: if isAuthenticated();
-      allow write: if false; // Only Cloud Functions can write (service account)
+      allow get: if isAdmin() || (isLinked() && ownStaffRecord(staffId));
     }
   }
 }

@@ -1,25 +1,33 @@
 import 'package:flutter/material.dart';
 
+import '../app/theme/app_tokens.dart';
+
 class NotificationUtils {
   /// Show a toast-style notification (SnackBar)
-  static void showToast(BuildContext context, String message, {
+  static void showToast(
+    BuildContext context,
+    String message, {
     bool isError = false,
     Duration duration = const Duration(seconds: 3),
   }) {
     final messenger = ScaffoldMessenger.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final foreground =
+        isError ? scheme.onErrorContainer : AppTone.yellow.inkFor(context);
 
     // Clear any existing snackbars
     messenger.clearSnackBars();
 
     messenger.showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Colors.red : Colors.orange,
+        content: Text(message, style: TextStyle(color: foreground)),
+        backgroundColor:
+            isError ? scheme.errorContainer : AppTone.yellow.tintFor(context),
         duration: duration,
         behavior: SnackBarBehavior.floating,
         action: SnackBarAction(
           label: 'Dismiss',
-          textColor: Colors.white,
+          textColor: foreground,
           onPressed: () {
             messenger.hideCurrentSnackBar();
           },
@@ -45,8 +53,9 @@ class NotificationUtils {
 
     messenger.showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
+        content: Text(message,
+            style: TextStyle(color: AppTone.green.inkFor(context))),
+        backgroundColor: AppTone.green.tintFor(context),
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
       ),

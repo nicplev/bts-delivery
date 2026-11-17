@@ -1,77 +1,98 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../models/school.dart';
-import '../../repositories/schools_repository.dart';
+import '../models/school.dart';
+import '../repositories/schools_repository.dart';
+import '../repositories/classroom_edit.dart';
+import '../services/result.dart';
 import 'repository_providers.dart';
+import 'delivery_visit_provider.dart';
 import 'auth_providers.dart';
 
-final schoolsProvider = StreamProvider<List<School>>((ref) {
+final schoolsProvider = StreamProvider.autoDispose<List<School>>((ref) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
-  final currentStaffAsync = ref.watch(currentStaffProvider);
-  final isAdmin = ref.watch(isAdminProvider);
+  if (ref.watch(isAdminProvider)) return schoolsRepository.watchSchools();
 
-  return currentStaffAsync.when(
-    loading: () => const Stream.empty(),
-    error: (error, _) => Stream.error(error),
-    data: (currentStaff) {
-      // Admins and Managers can see all schools
-      if (isAdmin || (currentStaff?.hasManagerAccess ?? false)) {
-        return schoolsRepository.watchSchools();
-      }
+  return ref.watch(currentStaffProvider).when(
+        loading: () => const Stream.empty(),
+        error: Stream.error,
+        data: (staff) {
+          if (staff == null) return Stream.value(const <School>[]);
+          return schoolsRepository.watchSchools(
+            schoolIds: staff.hasManagerAccess ? null : staff.assignedSchoolIds,
+          );
+        },
+      );
+}, dependencies: [schoolsRepositoryProvider]);
 
-      // If user is not linked to staff, return empty
-      if (currentStaff == null) {
-        return Stream.value(<School>[]);
-      }
+final schoolByIdProvider = StreamProvider.autoDispose.family<School?, String>(
+  (ref, schoolId) {
+    final repository = ref.watch(schoolsRepositoryProvider);
+    Stream<School?> watchSchool() => repository.watchSchools(
+        schoolIds: [schoolId]).map((schools) => schools.firstOrNull);
 
-      // Regular staff only see their assigned schools
-      if (currentStaff.assignedSchoolIds.isEmpty) {
-        return Stream.value(<School>[]);
-      }
+    if (ref.watch(isAdminProvider)) return watchSchool();
 
-      // Filter schools by assigned IDs
-      return schoolsRepository.watchSchools().map((schools) {
-        return schools.where((school) =>
-          currentStaff.assignedSchoolIds.contains(school.id)
-        ).toList();
-      });
-    },
-  );
-});
+    return ref.watch(currentStaffProvider).when(
+          loading: () => const Stream.empty(),
+          error: Stream.error,
+          data: (staff) {
+            final canAccess = staff != null &&
+                (staff.hasManagerAccess ||
+                    staff.assignedSchoolIds.contains(schoolId));
+            return canAccess ? watchSchool() : Stream.value(null);
+          },
+        );
+  },
+  dependencies: [schoolsRepositoryProvider],
+);
 
 final yearLevelsProvider =
-    StreamProvider.family<List<YearLevel>, String>((ref, schoolId) {
+    StreamProvider.autoDispose.family<List<YearLevel>, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchYearLevels(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-final classroomsProvider = StreamProvider.family<List<Classroom>,
-    ({String schoolId, String yearLevelId})>((ref, params) {
+final classroomsProvider = StreamProvider.autoDispose
+    .family<List<Classroom>, ({String schoolId, String yearLevelId})>(
+        (ref, params) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchClassrooms(params.schoolId, params.yearLevelId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-final classroomPhotosProvider = StreamProvider.family<List<Photo>,
-    ({String schoolId, String yearLevelId, String classroomId})>((ref, params) {
-  final schoolsRepository = ref.watch(schoolsRepositoryProvider);
-  return schoolsRepository.watchClassroomPhotos(
-      params.schoolId, params.yearLevelId, params.classroomId);
-});
+final classroomPhotosProvider = StreamProvider.autoDispose.family<
+    List<Photo>,
+    ({
+      String schoolId,
+      String yearLevelId,
+      String classroomId,
+      String? deliveryId
+    })>(
+  (ref, params) {
+    final schoolsRepository = ref.watch(baseSchoolsRepositoryProvider);
+    return schoolsRepository.watchClassroomPhotos(
+      params.schoolId,
+      params.yearLevelId,
+      params.classroomId,
+      deliveryId: params.deliveryId,
+    );
+  },
+  dependencies: [schoolsRepositoryProvider],
+);
 
-final packTotalProvider = StreamProvider.family<PackTotal?,
+final packTotalProvider = StreamProvider.autoDispose.family<PackTotal?,
     ({String schoolId, String yearLevelId, String classroomId})>((ref, params) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchLatestPackTotal(
       params.schoolId, params.yearLevelId, params.classroomId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-final consumablesProvider =
-    StreamProvider.family<List<Consumable>, String>((ref, schoolId) {
+final consumablesProvider = StreamProvider.autoDispose
+    .family<List<Consumable>, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchConsumables(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-final classroomConsumablesProvider = StreamProvider.family<List<Consumable>,
+final classroomConsumablesProvider = StreamProvider.autoDispose.family<
+    List<Consumable>,
     ({String schoolId, String yearLevelId, String classroomId})>((ref, params) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchClassroomConsumables(
@@ -79,33 +100,33 @@ final classroomConsumablesProvider = StreamProvider.family<List<Consumable>,
     params.yearLevelId,
     params.classroomId,
   );
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
 final signOffProvider =
-    StreamProvider.family<SignOff?, String>((ref, schoolId) {
+    StreamProvider.autoDispose.family<SignOff?, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchSignOff(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
 final contactsProvider =
-    StreamProvider.family<List<Contact>, String>((ref, schoolId) {
+    StreamProvider.autoDispose.family<List<Contact>, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchContacts(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
 final mapAssetsProvider =
-    StreamProvider.family<List<MapAsset>, String>((ref, schoolId) {
+    StreamProvider.autoDispose.family<List<MapAsset>, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchMapAssets(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
 final notesProvider =
-    StreamProvider.family<List<Note>, String>((ref, schoolId) {
+    StreamProvider.autoDispose.family<List<Note>, String>((ref, schoolId) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchNotes(schoolId);
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-final classroomNotesProvider = StreamProvider.family<List<Note>,
+final classroomNotesProvider = StreamProvider.autoDispose.family<List<Note>,
     ({String schoolId, String yearLevelId, String classroomId})>((ref, params) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchClassroomNotes(
@@ -113,9 +134,10 @@ final classroomNotesProvider = StreamProvider.family<List<Note>,
     params.yearLevelId,
     params.classroomId,
   );
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-final yearLevelBreakdownsProvider = StreamProvider.family<List<YearLevelBreakdown>,
+final yearLevelBreakdownsProvider = StreamProvider.autoDispose.family<
+    List<YearLevelBreakdown>,
     ({String schoolId, String yearLevelId, String classroomId})>((ref, params) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
   return schoolsRepository.watchYearLevelBreakdowns(
@@ -123,149 +145,113 @@ final yearLevelBreakdownsProvider = StreamProvider.family<List<YearLevelBreakdow
     params.yearLevelId,
     params.classroomId,
   );
-});
+}, dependencies: [schoolsRepositoryProvider]);
 
-// Provider for aggregated classroom totals
 final classroomTotalsProvider =
-    FutureProvider.family<Map<String, int>, String>((ref, schoolId) async {
-  // Get all year levels for this school
-  final yearLevelsAsync = await ref.watch(yearLevelsProvider(schoolId).future);
+    FutureProvider.autoDispose.family<Map<String, int>, String>(
+  (ref, schoolId) async {
+    final yearLevels = await ref.watch(yearLevelsProvider(schoolId).future);
+    final totals = await Future.wait([
+      for (final level in yearLevels)
+        ref.watch(_yearLevelPackTotalProvider(
+            (schoolId: schoolId, yearLevelId: level.id)).future),
+    ], eagerError: true);
+    return {
+      for (var index = 0; index < yearLevels.length; index++)
+        yearLevels[index].id: totals[index],
+    };
+  },
+  dependencies: [yearLevelsProvider, _yearLevelPackTotalProvider],
+);
 
-  Map<String, int> totals = {};
+final _yearLevelPackTotalProvider = FutureProvider.autoDispose
+    .family<int, ({String schoolId, String yearLevelId})>((ref, params) async {
+  final classrooms = await ref.watch(classroomsProvider(params).future);
+  final packTotals = await Future.wait([
+    for (final classroom in classrooms)
+      ref.watch(packTotalProvider((
+        schoolId: params.schoolId,
+        yearLevelId: params.yearLevelId,
+        classroomId: classroom.id,
+      )).future),
+  ], eagerError: true);
+  return packTotals.fold<int>(
+      0, (sum, packTotal) => sum + (packTotal?.total ?? 0));
+}, dependencies: [classroomsProvider, packTotalProvider]);
 
-  // For each year level, get classrooms and their pack totals
-  for (final yearLevel in yearLevelsAsync) {
-    final classroomsAsync = await ref.watch(
-        classroomsProvider((schoolId: schoolId, yearLevelId: yearLevel.id))
-            .future);
-
-    int yearLevelTotal = 0;
-    for (final classroom in classroomsAsync) {
-      try {
-        final packTotal = await ref.watch(packTotalProvider((
-          schoolId: schoolId,
-          yearLevelId: yearLevel.id,
-          classroomId: classroom.id
-        )).future);
-        yearLevelTotal += packTotal?.total ?? 0;
-      } catch (e) {
-        // If pack total fails, just continue
-        continue;
-      }
-    }
-
-    totals[yearLevel.id] = yearLevelTotal;
-  }
-
-  return totals;
-});
-
-// Provider for school-wide total
 final schoolTotalProvider =
-    FutureProvider.family<int, String>((ref, schoolId) async {
+    FutureProvider.autoDispose.family<int, String>((ref, schoolId) async {
   final totals = await ref.watch(classroomTotalsProvider(schoolId).future);
   return totals.values.fold<int>(0, (sum, value) => sum + value);
-});
+}, dependencies: [classroomTotalsProvider]);
 
-// Provider for year level consumables totals
-// Returns a map of item names to their total quantities
-final yearLevelConsumablesTotalsProvider = FutureProvider.family<
+final yearLevelConsumablesTotalsProvider = FutureProvider.autoDispose.family<
     Map<String, ({int quantity, String unit})>,
     ({String schoolId, String yearLevelId})>((ref, params) async {
+  final classrooms = await ref.watch(classroomsProvider(params).future);
+  final classroomConsumables = await Future.wait([
+    for (final classroom in classrooms)
+      ref.watch(classroomConsumablesProvider((
+        schoolId: params.schoolId,
+        yearLevelId: params.yearLevelId,
+        classroomId: classroom.id,
+      )).future),
+  ], eagerError: true);
+  return _sumConsumables([
+    for (final items in classroomConsumables)
+      for (final item in items)
+        (name: item.itemName, quantity: item.quantity, unit: item.unit),
+  ]);
+}, dependencies: [classroomsProvider, classroomConsumablesProvider]);
 
-  // Get all classrooms for this year level
-  final classrooms = await ref.watch(
-    classroomsProvider((
-      schoolId: params.schoolId,
-      yearLevelId: params.yearLevelId,
-    )).future,
-  );
-
-  Map<String, ({int quantity, String unit})> totals = {};
-
-  // For each classroom, get its consumables and aggregate
-  for (final classroom in classrooms) {
-    try {
-      final consumables = await ref.watch(
-        classroomConsumablesProvider((
-          schoolId: params.schoolId,
-          yearLevelId: params.yearLevelId,
-          classroomId: classroom.id,
-        )).future,
-      );
-
-      for (final consumable in consumables) {
-        final existing = totals[consumable.itemName];
-        if (existing != null) {
-          // If item already exists, add to quantity (assuming same unit)
-          totals[consumable.itemName] = (
-            quantity: existing.quantity + consumable.quantity,
-            unit: consumable.unit,
-          );
-        } else {
-          totals[consumable.itemName] = (
-            quantity: consumable.quantity,
-            unit: consumable.unit,
-          );
-        }
-      }
-    } catch (e) {
-      // If loading consumables fails, just continue
-      continue;
-    }
-  }
-
-  return totals;
-});
-
-// Provider for school-wide consumables totals
-// Returns a map of item names to their total quantities
-final schoolConsumablesTotalsProvider = FutureProvider.family<
-    Map<String, ({int quantity, String unit})>,
-    String>((ref, schoolId) async {
-
-  // Get all year levels for this school
+final schoolConsumablesTotalsProvider = FutureProvider.autoDispose
+    .family<Map<String, ({int quantity, String unit})>, String>(
+        (ref, schoolId) async {
   final yearLevels = await ref.watch(yearLevelsProvider(schoolId).future);
-
-  Map<String, ({int quantity, String unit})> totals = {};
-
-  // For each year level, get its consumables totals and aggregate
-  for (final yearLevel in yearLevels) {
-    try {
-      final yearLevelTotals = await ref.watch(
+  final levelTotals = await Future.wait([
+    for (final level in yearLevels)
+      ref.watch(
         yearLevelConsumablesTotalsProvider((
           schoolId: schoolId,
-          yearLevelId: yearLevel.id,
+          yearLevelId: level.id,
         )).future,
-      );
+      ),
+  ], eagerError: true);
+  return _sumConsumables([
+    for (final totals in levelTotals)
+      for (final entry in totals.entries)
+        (
+          name: entry.key,
+          quantity: entry.value.quantity,
+          unit: entry.value.unit
+        ),
+  ]);
+}, dependencies: [yearLevelsProvider, yearLevelConsumablesTotalsProvider]);
 
-      for (final entry in yearLevelTotals.entries) {
-        final itemName = entry.key;
-        final itemData = entry.value;
-
-        final existing = totals[itemName];
-        if (existing != null) {
-          totals[itemName] = (
-            quantity: existing.quantity + itemData.quantity,
-            unit: itemData.unit,
-          );
-        } else {
-          totals[itemName] = itemData;
-        }
-      }
-    } catch (e) {
-      // If loading year level totals fails, just continue
-      continue;
+Map<String, ({int quantity, String unit})> _sumConsumables(
+  Iterable<({String name, int quantity, String unit})> items,
+) {
+  final totals = <String, ({int quantity, String unit})>{};
+  for (final item in items) {
+    final existing = totals[item.name];
+    if (existing != null &&
+        existing.unit.trim().toLowerCase() != item.unit.trim().toLowerCase()) {
+      throw StateError('Consumable "${item.name}" uses incompatible units');
     }
+    totals[item.name] = (
+      quantity: (existing?.quantity ?? 0) + item.quantity,
+      unit: item.unit,
+    );
   }
-
   return totals;
-});
+}
 
 class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
-  SchoolsNotifier(this._schoolsRepository) : super(const AsyncValue.data(null));
+  SchoolsNotifier(this._schoolsRepository, this._ref)
+      : super(const AsyncValue.data(null));
 
   final SchoolsRepository _schoolsRepository;
+  final Ref _ref;
 
   Future<bool> updateSchool(School school) async {
     state = const AsyncValue.loading();
@@ -352,21 +338,65 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> updateClassroom(
-      String schoolId, String yearLevelId, Classroom classroom) async {
-    state = const AsyncValue.loading();
-    final result = await _schoolsRepository.updateClassroom(
-        schoolId, yearLevelId, classroom);
+  Future<Result<ClassroomEditStatus>> updateClassroomName(
+    String schoolId,
+    String yearLevelId,
+    String classroomId, {
+    required String name,
+    String? editId,
+  }) => _saveClassroomEdit((updatedBy) => _schoolsRepository.updateClassroomName(
+    schoolId, yearLevelId, classroomId, name: name, updatedBy: updatedBy, editId: editId,
+  ));
 
-    return result.when(
-      success: (_) {
-        state = const AsyncValue.data(null);
-        return true;
-      },
-      failure: (message, exception) {
-        state = AsyncValue.error(message, StackTrace.current);
-        return false;
-      },
+  Future<Result<ClassroomEditStatus>> updateClassroomStatus(
+    String schoolId,
+    String yearLevelId,
+    String classroomId, {
+    required ClassroomCompletionStatus status,
+    required int? actualPacksDelivered,
+    String? editId,
+  }) => _saveClassroomEdit((updatedBy) => _schoolsRepository.updateClassroomStatus(
+    schoolId, yearLevelId, classroomId, status: status,
+    actualPacksDelivered: actualPacksDelivered, updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomNote(
+    String schoolId, String yearLevelId, String classroomId, Note note, {String? editId}
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomNote(
+    schoolId, yearLevelId, classroomId, note, updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomNoteDeletion(
+    String schoolId, String yearLevelId, String classroomId, Note note,
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomNoteDeletion(
+    schoolId, yearLevelId, classroomId, note, updatedBy: updatedBy,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomActualQuantity(
+    String schoolId, String yearLevelId, String classroomId, String consumableId, int? quantity,
+    {String? editId}
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomActualQuantity(
+    schoolId, yearLevelId, classroomId, consumableId, quantity,
+    updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> saveClassroomPackTotal(
+    String schoolId, String yearLevelId, String classroomId, int total, {String? editId}
+  ) => _saveClassroomEdit((updatedBy) => _schoolsRepository.saveClassroomPackTotal(
+    schoolId, yearLevelId, classroomId, total, updatedBy: updatedBy, editId: editId,
+  ));
+
+  Future<Result<ClassroomEditStatus>> _saveClassroomEdit(
+    Future<Result<ClassroomEditReceipt>> Function(String updatedBy) submit,
+  ) async {
+    final staff = _ref.read(currentStaffProvider).valueOrNull;
+    final user = _ref.read(authRepositoryProvider).currentUser;
+    if (staff == null || user == null || staff.uid != user.uid) {
+      return const Result.failure('Link your staff account before editing.');
+    }
+    return (await submit(staff.name)).when(
+      success: (receipt) => Result.success(receipt.status),
+      failure: Result<ClassroomEditStatus>.failure,
     );
   }
 
@@ -388,29 +418,13 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> addClassroomPhoto(String schoolId, String yearLevelId,
-      String classroomId, Photo photo) async {
-    state = const AsyncValue.loading();
-    final result = await _schoolsRepository.addClassroomPhoto(
-        schoolId, yearLevelId, classroomId, photo);
-
-    return result.when(
-      success: (_) {
-        state = const AsyncValue.data(null);
-        return true;
-      },
-      failure: (message, exception) {
-        state = AsyncValue.error(message, StackTrace.current);
-        return false;
-      },
-    );
-  }
-
-  Future<bool> deleteClassroomPhoto(String schoolId, String yearLevelId,
-      String classroomId, String photoId) async {
+  Future<bool> deleteClassroomPhoto(
+      String schoolId, String yearLevelId, String classroomId, String photoId,
+      {String? deliveryId}) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.deleteClassroomPhoto(
-        schoolId, yearLevelId, classroomId, photoId);
+        schoolId, yearLevelId, classroomId, photoId,
+        deliveryId: deliveryId);
 
     return result.when(
       success: (_) {
@@ -431,9 +445,7 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
         schoolId, yearLevelId, classroomId, packTotal);
 
     return result.when(
-      success: (_) async {
-        // Clear sign-off when pack totals change
-        await _schoolsRepository.clearSignOff(schoolId);
+      success: (_) {
         state = const AsyncValue.data(null);
         return true;
       },
@@ -495,15 +507,14 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> createClassroomConsumable(String schoolId, String yearLevelId, String classroomId, Consumable consumable) async {
+  Future<bool> createClassroomConsumable(String schoolId, String yearLevelId,
+      String classroomId, Consumable consumable) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.createClassroomConsumable(
         schoolId, yearLevelId, classroomId, consumable);
 
     return result.when(
-      success: (_) async {
-        // Clear sign-off when consumables change
-        await _schoolsRepository.clearSignOff(schoolId);
+      success: (_) {
         state = const AsyncValue.data(null);
         return true;
       },
@@ -514,15 +525,14 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> updateClassroomConsumable(String schoolId, String yearLevelId, String classroomId, Consumable consumable) async {
+  Future<bool> updateClassroomConsumable(String schoolId, String yearLevelId,
+      String classroomId, Consumable consumable) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.updateClassroomConsumable(
         schoolId, yearLevelId, classroomId, consumable);
 
     return result.when(
-      success: (_) async {
-        // Clear sign-off when consumables change
-        await _schoolsRepository.clearSignOff(schoolId);
+      success: (_) {
         state = const AsyncValue.data(null);
         return true;
       },
@@ -533,29 +543,11 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> deleteClassroomConsumable(String schoolId, String yearLevelId, String classroomId, String consumableId) async {
+  Future<bool> deleteClassroomConsumable(String schoolId, String yearLevelId,
+      String classroomId, String consumableId) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.deleteClassroomConsumable(
         schoolId, yearLevelId, classroomId, consumableId);
-
-    return result.when(
-      success: (_) async {
-        // Clear sign-off when consumables change
-        await _schoolsRepository.clearSignOff(schoolId);
-        state = const AsyncValue.data(null);
-        return true;
-      },
-      failure: (message, exception) {
-        state = AsyncValue.error(message, StackTrace.current);
-        return false;
-      },
-    );
-  }
-
-  Future<bool> createOrUpdateSignOff(String schoolId, SignOff signOff) async {
-    state = const AsyncValue.loading();
-    final result =
-        await _schoolsRepository.createOrUpdateSignOff(schoolId, signOff);
 
     return result.when(
       success: (_) {
@@ -683,8 +675,8 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
   }
 
   // Classroom Notes Methods
-  Future<bool> createClassroomNote(
-      String schoolId, String yearLevelId, String classroomId, Note note) async {
+  Future<bool> createClassroomNote(String schoolId, String yearLevelId,
+      String classroomId, Note note) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.createClassroomNote(
         schoolId, yearLevelId, classroomId, note);
@@ -701,8 +693,8 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> updateClassroomNote(
-      String schoolId, String yearLevelId, String classroomId, Note note) async {
+  Future<bool> updateClassroomNote(String schoolId, String yearLevelId,
+      String classroomId, Note note) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.updateClassroomNote(
         schoolId, yearLevelId, classroomId, note);
@@ -719,8 +711,8 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> deleteClassroomNote(
-      String schoolId, String yearLevelId, String classroomId, String noteId) async {
+  Future<bool> deleteClassroomNote(String schoolId, String yearLevelId,
+      String classroomId, String noteId) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.deleteClassroomNote(
         schoolId, yearLevelId, classroomId, noteId);
@@ -737,35 +729,9 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> createSignedSchoolSummary(String schoolId, String signedBy, String? signatureUrl) async {
-    state = const AsyncValue.loading();
-    final result = await _schoolsRepository.createSignedSchoolSummary(
-      schoolId,
-      signedBy,
-      signatureUrl,
-    );
-
-    return result.when(
-      success: (_) {
-        debugPrint('✓ Sign-off summary created successfully');
-        state = const AsyncValue.data(null);
-        return true;
-      },
-      failure: (message, exception) {
-        debugPrint('✗ ERROR in createSignedSchoolSummary provider: $message');
-        debugPrint('Exception: $exception');
-        state = AsyncValue.error(message, StackTrace.current);
-        return false;
-      },
-    );
-  }
-
   // Year Level Breakdown Methods
-  Future<bool> createYearLevelBreakdown(
-      String schoolId,
-      String yearLevelId,
-      String classroomId,
-      YearLevelBreakdown breakdown) async {
+  Future<bool> createYearLevelBreakdown(String schoolId, String yearLevelId,
+      String classroomId, YearLevelBreakdown breakdown) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.createYearLevelBreakdown(
         schoolId, yearLevelId, classroomId, breakdown);
@@ -782,11 +748,8 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
-  Future<bool> updateYearLevelBreakdown(
-      String schoolId,
-      String yearLevelId,
-      String classroomId,
-      YearLevelBreakdown breakdown) async {
+  Future<bool> updateYearLevelBreakdown(String schoolId, String yearLevelId,
+      String classroomId, YearLevelBreakdown breakdown) async {
     state = const AsyncValue.loading();
     final result = await _schoolsRepository.updateYearLevelBreakdown(
         schoolId, yearLevelId, classroomId, breakdown);
@@ -825,5 +788,5 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
 final schoolsNotifierProvider =
     StateNotifierProvider<SchoolsNotifier, AsyncValue<void>>((ref) {
   final schoolsRepository = ref.watch(schoolsRepositoryProvider);
-  return SchoolsNotifier(schoolsRepository);
-});
+  return SchoolsNotifier(schoolsRepository, ref);
+}, dependencies: [schoolsRepositoryProvider, activeDeliveryVisitProvider]);

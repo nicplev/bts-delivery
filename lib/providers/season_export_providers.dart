@@ -2,14 +2,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../repositories/season_export_repository.dart';
 import '../models/season_export_models.dart';
 import '../services/season_export_service.dart';
+import 'staff_providers.dart';
 
 /// Provider for season export repository
 final seasonExportRepositoryProvider = Provider<SeasonExportRepository>((ref) {
-  return SeasonExportRepository();
+  return SeasonExportRepository(ref.watch(staffRepositoryProvider));
 });
 
 /// Provider for export preview data
-final seasonExportPreviewProvider = FutureProvider.family<SeasonExportPreview, ({DateTime? startDate, DateTime? endDate})>((ref, params) async {
+final seasonExportPreviewProvider = FutureProvider.family<SeasonExportPreview,
+    ({DateTime? startDate, DateTime? endDate})>((ref, params) async {
   final repository = ref.watch(seasonExportRepositoryProvider);
   final result = await repository.getExportPreview(
     startDate: params.startDate,
@@ -100,9 +102,12 @@ class SeasonExportNotifier extends StateNotifier<SeasonExportState> {
 
       // Generate Excel file
       final exportOptions = options ?? const SeasonExportOptions();
+      final report = result.dataOrNull!;
       final filePath = await SeasonExportService.generateSeasonReport(
-        result.dataOrNull!,
+        report.data,
         exportOptions,
+        visitEvidence: report.visitEvidence,
+        visitTimers: report.visitTimers,
       );
 
       if (filePath == null) {
