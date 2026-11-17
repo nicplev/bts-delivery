@@ -198,27 +198,49 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                                   if (readiness != null) ...[
                                     if (school.address?.isNotEmpty == true)
                                       const SizedBox(height: 8),
-                                    AppStatusPill(
-                                      icon: readiness ==
-                                              DeliveryVisitReadiness.ready
-                                          ? Icons.offline_pin_outlined
-                                          : Icons.cloud_outlined,
-                                      tone: readiness ==
-                                              DeliveryVisitReadiness.ready
-                                          ? AppTone.green
-                                          : AppTone.neutral,
-                                      label: readiness ==
-                                              DeliveryVisitReadiness.ready
-                                          ? 'Classroom records ready on this device'
-                                          : 'Classroom records available while connected',
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Icon(
+                                          readiness ==
+                                                  DeliveryVisitReadiness.ready
+                                              ? Icons.offline_pin_outlined
+                                              : Icons.cloud_outlined,
+                                          size: 18,
+                                          color: readiness ==
+                                                  DeliveryVisitReadiness.ready
+                                              ? AppTone.green.ink
+                                              : AppTokens.muted,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            readiness ==
+                                                    DeliveryVisitReadiness.ready
+                                                ? 'Classroom records ready on this device'
+                                                : 'Classroom records available while connected',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ],
                               ),
                             ),
                           if (visit != null)
-                            OfflineVisitMediaPanel(
-                                visit: visit, school: school),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppTokens.gutter),
+                              child: Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: OfflineVisitMediaPanel(
+                                    visit: visit, school: school),
+                              ),
+                            ),
                           if (isVisit)
                             SchoolTimerWidget(schoolId: widget.schoolId),
                         ],

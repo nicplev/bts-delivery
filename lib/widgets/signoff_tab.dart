@@ -62,6 +62,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     penColor: Colors.black,
     exportBackgroundColor: Colors.white,
   );
+  final _signerName = GlobalKey();
   final Map<String, GlobalKey> _noteKeys =
       {}; // Map of yearLevelId_classroomId -> GlobalKey
   bool _isUploading = false;
@@ -81,14 +82,21 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final key = '${yearLevelId}_$classroomId';
     final globalKey = _noteKeys[key];
 
-    if (globalKey?.currentContext != null) {
-      Scrollable.ensureVisible(
-        globalKey!.currentContext!,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-        alignment: 0.1, // Position near the top of the viewport
-      );
-    }
+    _scrollToSection(globalKey?.currentContext);
+  }
+
+  void _scrollToSection(BuildContext? target) {
+    if (target == null) return;
+    final renderObject = target.findRenderObject();
+    if (renderObject == null) return;
+    // The inner position coordinates with the visit header. Scrolling the
+    // outer position separately can reset the inner offset during the jump.
+    Scrollable.maybeOf(target)?.position.ensureVisible(
+          renderObject,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
   }
 
   @override
@@ -106,9 +114,10 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
             item.deliveryId == widget.deliveryId)
         .firstOrNull;
     ref.watch(activeChecklistItemsProvider);
-    if (widget.deliveryId != null &&
+    final showForm = widget.deliveryId != null &&
         pending == null &&
-        (signed.valueOrNull == null || _isCorrecting)) {
+        (signed.valueOrNull == null || _isCorrecting);
+    if (showForm) {
       ref.watch(_serverSigningDraftProvider(_scope));
     }
 
@@ -124,11 +133,12 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildOverviewCard(),
+          _buildOverviewCard(showForm: showForm),
           const SizedBox(height: AppTokens.sectionGap),
           _buildNotesCard(),
           const SizedBox(height: AppTokens.sectionGap),
-          _buildSignOffCard(signed, pending, uploads?.activeId),
+          _buildSignOffCard(signed, pending, uploads?.activeId,
+              showForm: showForm),
           if (legacy != null) ...[
             const SizedBox(height: 16),
             AppPanel(
@@ -144,7 +154,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     );
   }
 
-  Widget _buildOverviewCard() {
+  Widget _buildOverviewCard({required bool showForm}) {
     final schoolTotalAsync = ref.watch(schoolTotalProvider(widget.schoolId));
     final schoolConsumablesTotalsAsync =
         ref.watch(schoolConsumablesTotalsProvider(widget.schoolId));
@@ -162,27 +172,37 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               tooltip: 'Refresh',
             ),
           ),
-          const SizedBox(height: 12),
-          AppPanel(
-            tone: AppTone.blue,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Expected pack total'),
-                const SizedBox(height: 4),
-                schoolTotalAsync.when(
-                  data: (total) => Text(
-                    '$total',
-                    style: typography.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: AppTone.blue.ink,
-                    ),
-                  ),
-                  loading: () => const LinearProgressIndicator(),
-                  error: (_, __) => const Text('Pack total unavailable'),
-                ),
-              ],
+          if (showForm)
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: () =>
+                    _scrollToSection(_signerName.currentContext),
+                icon: const Icon(Icons.arrow_downward_outlined),
+                label: const Text('Go to signature'),
+              ),
             ),
+          const Divider(height: 20),
+          Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text('Expected pack total'),
+              schoolTotalAsync.when(
+                data: (total) => Text(
+                  '$total',
+                  style: typography.headlineMedium
+                      ?.copyWith(color: AppTone.blue.ink),
+                ),
+                loading: () => const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                error: (_, __) => const Text('Pack total unavailable'),
+              ),
+            ],
           ),
           schoolConsumablesTotalsAsync.when(
             loading: () => const Padding(
@@ -245,83 +265,53 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         const SizedBox(height: 8),
         yearLevelsAsync.when(
           data: (yearLevels) => yearLevels.isEmpty
-              ? Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(8),
-                    border:
-                        Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                  ),
-                  child: const Center(
-                    child: Text('No year levels found'),
-                  ),
-                )
+              ? const Text('No year levels found')
               : Column(
-                  children: yearLevels
-                      .map((yearLevel) => _buildYearLevelCard(yearLevel))
-                      .toList(),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final yearLevel in yearLevels)
+                      _buildYearLevelGroup(yearLevel),
+                  ],
                 ),
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
-            ),
-            child: Text('Error loading year levels: $error'),
-          ),
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => const Text('Couldn’t load year levels'),
         ),
       ],
     );
   }
 
-  Widget _buildYearLevelCard(YearLevel yearLevel) {
+  Widget _buildYearLevelGroup(YearLevel yearLevel) {
     final classroomsAsync = ref.watch(classroomsProvider(
-        (schoolId: widget.schoolId, yearLevelId: yearLevel.id)));
+      (schoolId: widget.schoolId, yearLevelId: yearLevel.id),
+    ));
 
-    return AppPanel(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            yearLevel.label,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          classroomsAsync.when(
-            data: (classrooms) => classrooms.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 4),
-                    child: Text(
-                      'No classrooms found',
-                      style: TextStyle(fontSize: 14, color: Colors.grey),
-                    ),
-                  )
-                : Column(
-                    children: classrooms
-                        .map((classroom) =>
-                            _buildClassroomRow(classroom, yearLevel.id))
-                        .toList(),
-                  ),
-            loading: () => const Padding(
-              padding: EdgeInsets.all(8),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (error, _) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text(
-                'Error loading classrooms: $error',
-                style: const TextStyle(fontSize: 14, color: Colors.red),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 20),
+        Text(
+          yearLevel.label,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        classroomsAsync.when(
+          data: (classrooms) => classrooms.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('No classrooms found'),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var index = 0; index < classrooms.length; index++) ...[
+                      if (index > 0) const Divider(height: 1),
+                      _buildClassroomRow(classrooms[index], yearLevel.id),
+                    ],
+                  ],
+                ),
+          loading: () => const LinearProgressIndicator(),
+          error: (_, __) => const Text('Couldn’t load classrooms'),
+        ),
+      ],
     );
   }
 
@@ -374,29 +364,21 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         };
         final actual = classroom.actualPacksDelivered;
 
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(top: 6),
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: AppTokens.surfaceQuiet,
-            borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-          ),
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(classroom.name, style: typography.titleMedium),
-              const SizedBox(height: 6),
               Wrap(
-                spacing: 6,
-                runSpacing: 6,
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
+                  Text(classroom.name, style: typography.titleMedium),
                   AppStatusPill(label: status, icon: icon, tone: tone),
-                  if (breakdowns != null && breakdowns.length > 1)
-                    const AppStatusPill(label: 'Composite', tone: AppTone.blue),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Text(
                 packTotalAsync.when(
                   data: (total) {
@@ -418,11 +400,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               ),
               if (breakdowns != null && breakdowns.length > 1)
                 Text(
-                  breakdowns
-                      .map((item) =>
-                          '${item.yearLevelLabel}: ${item.studentCount}')
-                      .join(' • '),
-                  style: typography.bodySmall?.copyWith(color: AppTokens.muted),
+                  'Composite · ${breakdowns.map((item) => '${item.yearLevelLabel}: ${item.studentCount}').join(' · ')}',
+                  style: typography.bodySmall,
                 ),
               if (notes != null && notes.isNotEmpty)
                 TextButton.icon(
@@ -564,83 +543,36 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final key = '${yearLevelId}_$classroomId';
     _noteKeys.putIfAbsent(key, () => GlobalKey());
 
-    return AppPanel(
+    final typography = Theme.of(context).textTheme;
+    return Padding(
       key: _noteKeys[key],
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      tone: AppTone.yellow,
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$yearLevelLabel – ${classroom.name}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 4),
-              AppStatusPill(
-                label:
-                    '${notes.length} ${notes.length == 1 ? 'note' : 'notes'}',
-                icon: Icons.notes_outlined,
-                tone: AppTone.yellow,
-              ),
-              if (classroom.lastUpdatedBy != null &&
-                  classroom.lastUpdatedAt != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-            ],
+          const Divider(height: 12),
+          Text(
+            '$yearLevelLabel – ${classroom.name}',
+            style: typography.titleMedium,
           ),
-          const SizedBox(height: 8),
-          ...notes.map((note) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Icon(
-                        Icons.note,
-                        size: 12,
-                        color: AppTone.yellow.ink,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            note.content,
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          if (note.author != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(
-                                'by ${note.author}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade600,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              )),
+          if (classroom.lastUpdatedBy != null &&
+              classroom.lastUpdatedAt != null)
+            Text(
+              'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
+              style: typography.bodySmall,
+            ),
+          for (final note in notes)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(note.content),
+                  if (note.author != null)
+                    Text('by ${note.author}', style: typography.bodySmall),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -649,8 +581,9 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
   Widget _buildSignOffCard(
     AsyncValue<SignedEvidence?> signed,
     EvidenceUpload? pending,
-    String? activeId,
-  ) {
+    String? activeId, {
+    required bool showForm,
+  }) {
     final latest = signed.valueOrNull;
     return AppPanel(
       child: Column(
@@ -672,10 +605,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               ],
             ),
           if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
-          if (widget.deliveryId != null &&
-              pending == null &&
-              (latest == null || _isCorrecting))
-            _buildSignOffForm(),
+          if (showForm) _buildSignOffForm(),
           if (widget.deliveryId == null && latest == null && pending == null)
             const Text('Open a scheduled delivery to create a sign-off.'),
           if (signed.hasError)
@@ -813,15 +743,19 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         const SizedBox(height: 8),
         const Text('This signature will be linked to the selected delivery.'),
         const SizedBox(height: 16),
-        TextField(
-          controller: _nameController,
-          maxLength: 200,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            hintText: 'Enter your full name',
-            prefixIcon: Icon(Icons.person),
+        Semantics(
+          container: true,
+          child: TextField(
+            key: _signerName,
+            controller: _nameController,
+            maxLength: 200,
+            decoration: const InputDecoration(
+              labelText: 'Name',
+              hintText: 'Enter your full name',
+              prefixIcon: Icon(Icons.person),
+            ),
+            enabled: !_isUploading,
           ),
-          enabled: !_isUploading,
         ),
         const SizedBox(height: 16),
         Text(
@@ -829,29 +763,33 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
-        AspectRatio(
-          aspectRatio: 2.0,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: AppTokens.muted),
-              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-              child: Stack(
-                children: [
-                  Signature(
-                    controller: _signatureController,
-                    backgroundColor: Colors.white,
-                  ),
-                  if (_isUploading)
-                    Container(
-                      color: Colors.white.withValues(alpha: 0.7),
-                      child: const Center(
-                        child: CircularProgressIndicator(),
-                      ),
+        Semantics(
+          container: true,
+          label: 'Signature drawing area',
+          child: AspectRatio(
+            aspectRatio: 2.0,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTokens.muted),
+                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+                child: Stack(
+                  children: [
+                    Signature(
+                      controller: _signatureController,
+                      backgroundColor: Colors.white,
                     ),
-                ],
+                    if (_isUploading)
+                      Container(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        child: const Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

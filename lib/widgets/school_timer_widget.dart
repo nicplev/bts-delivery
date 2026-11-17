@@ -120,22 +120,21 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
   }) {
     final textTheme = Theme.of(context).textTheme;
 
-    return AppPanel(
-      margin: const EdgeInsets.fromLTRB(
-        AppTokens.gutter,
-        8,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
         AppTokens.gutter,
         4,
+        AppTokens.gutter,
+        8,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final stackAction = constraints.maxWidth <
               MediaQuery.textScalerOf(context).scale(240);
           final display = Row(
             children: [
-              AppIconTile(icon: icon, tone: tone),
-              const SizedBox(width: 12),
+              Icon(icon, size: 20, color: tone.ink),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +142,7 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
                     if (elapsed != null)
                       Text(
                         elapsed,
-                        style: textTheme.titleLarge?.copyWith(
+                        style: textTheme.titleMedium?.copyWith(
                           fontFeatures: const [FontFeature.tabularFigures()],
                           fontWeight: FontWeight.w700,
                           color: tone.ink,
@@ -151,7 +150,7 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
                       ),
                     Text(
                       label,
-                      style: textTheme.bodyMedium?.copyWith(
+                      style: textTheme.bodySmall?.copyWith(
                         color: AppTokens.muted,
                       ),
                     ),

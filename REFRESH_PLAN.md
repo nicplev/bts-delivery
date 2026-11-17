@@ -307,3 +307,28 @@ These are visual references, not an extracted proprietary component specificatio
 - Sol added a guarded `--restore-missing-media` option to the existing localhost-only seed script. It restores only missing synthetic objects whose original Firestore references still match. Existing objects and delivery progress remain untouched; repeat restore uploaded zero objects. Independent Astra review found no actionable findings in the recovery option. Syntax validation and `git diff --check` passed. App code is unchanged from the previously validated 84-test UI checkpoint.
 - Current full synthetic Auth/Firestore/Storage checkpoint: `/private/tmp/bts-demo-reconnect-checkpoint.wgYhej/fixture`. It includes the verified first-visit count of 13. Restart with the existing documented JDK 21 setup and `firebase emulators:start --only auth,firestore,storage,functions --project demo-bts-delivery --import /private/tmp/bts-demo-reconnect-checkpoint.wgYhej/fixture`.
 - Native screenshots alongside the existing previews: `native-today.jpg`, `native-offline-map.jpg`, `native-recovered-edit.jpg`. The simulator is left on Today. No production deployment or GitHub push occurred in this continuation.
+
+## Continuation — 17 November 2026: sign-off and card hierarchy
+
+User requested continued checklist work, prioritising sign-off scrolling and reducing clutter within cards. Astra reviews; Sol 6.1 implements. This pass preserves visit/offline/backend behaviour and company colours.
+
+- [x] Astra review of current native screenshot and primary card hierarchy.
+- [x] Simplify Today date/count summary and delivery cards: school identity first, plain metadata, one primary action and clear secondary checklist state.
+- [x] Flatten nested classroom and Sign-Off surfaces; distinguish actual/expected counts and retain warnings, recovery and evidence controls.
+- [x] Reduce competing visit-header decoration; preserve visible readiness, download and timer information.
+- [x] Verify sign-off scrolling, note jumps and keyboard reachability through the real route; add a direct signature navigation action if it improves long summaries without changing signing semantics.
+- [x] Validate narrow/large-text layouts and inspect updated native screenshots; record native gesture limitations accurately.
+- [x] Independent Astra review, relevant regression suite/analyzer, native build and reviewed local checkpoint.
+
+Physical-device, representative performance, historical migration and production release gates above stay open until their own evidence exists.
+
+### Hierarchy/sign-off verification evidence
+
+- Sol 6.1 simplified Today into a date/count heading and cards with dominant school names, plain metadata, quieter notes/staff details, one primary action and explicit secondary checklist states. Shared ordinary panels retain their outlines without decorative shadows; passive panels no longer add an inactive InkWell semantics layer.
+- Classroom actual/expected quantities and Sign-Off year/classroom/notes rows no longer sit in nested decorative panels. Visit readiness, downloads and timer controls remain explicit but visually quieter. All four primary brand colours remain unchanged.
+- Added Go to signature for the current editable form. It scrolls the coordinated inner visit position to the actual Name field; targeting the section heading left the field below the fold at large text size and was corrected before final validation. Name and Signature drawing area have separate accessibility containers. Review/save, evidence persistence, visit scope, and backend contracts are unchanged.
+- Retained actual-route iOS widget coverage at 320 px / 1.8× text and 240 px keyboard inset: Today → school → Sign-Off, repeated touch scrolling, shortcut to Name, return scrolling, View notes jump, Name semantics and input retention, and reachable Review and save. Today tests cover long metadata/notes, checklist error actions, minimum touch height and calendar navigation.
+- Final combined suite: **84/84 tests passed**. Analyzer: **zero errors/warnings, the same 26 informational baseline notices** (default exit 1). `git diff --check` passed. Native Debug build/install/launch succeeded on the separate iPhone Air / iOS 26.5 demo; existing Pod/script build warnings remain.
+- Native confirmed: Calendar opens the unchanged November 16 synthetic visits, simplified overview preserves 13/24 actual packs and expected 48 total, Go to signature brings Name/canvas/review/history into view, Name focuses independently and accepts `Demo Reviewer`, and the iOS software keyboard keeps that field visible. No signature was submitted or backend delivery changed in this pass.
+- Astra independently reviewed the combined source, route test and actual native overview/keyboard captures; no actionable regressions found. Native freehand dragging still needs the requested manual check: automation does not reliably move the inner page. Do not infer native gesture success from widget tests or the shortcut. Physical-device and release gates remain open.
+- Saved screenshots in the existing external `bts-ui-refresh` artifact folder: `bts-simplified-today.png`, `bts-simplified-today-large-text.png` (synthetic actual-widget previews); `native-simplified-signoff-overview.jpg`, `native-simplified-signoff-keyboard.jpg` (native demo captures).

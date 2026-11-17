@@ -23,23 +23,15 @@ class AppPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const radius = BorderRadius.all(Radius.circular(AppTokens.cardRadius));
-    final panel = DecoratedBox(
-      decoration: const BoxDecoration(
+    final content = Padding(padding: padding, child: child);
+    final panel = Material(
+      color: tone?.tint ?? AppTokens.surface,
+      shape: const RoundedRectangleBorder(
         borderRadius: radius,
-        boxShadow: AppTokens.panelShadow,
+        side: BorderSide(color: AppTokens.outline),
       ),
-      child: Material(
-        color: tone?.tint ?? AppTokens.surface,
-        shape: const RoundedRectangleBorder(
-          borderRadius: radius,
-          side: BorderSide(color: AppTokens.outline),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(padding: padding, child: child),
-        ),
-      ),
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
     return margin == null ? panel : Padding(padding: margin!, child: panel);
   }

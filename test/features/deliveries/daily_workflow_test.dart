@@ -41,8 +41,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(_longName), findsOneWidget);
-    expect(find.text('Scheduled delivery'), findsOneWidget);
-    expect(find.text('School'), findsOneWidget);
+    expect(find.text('1 delivery · 1 school'), findsOneWidget);
     expect(find.text('Offline'), findsOneWidget);
     expect(find.text('Checklist complete'), findsOneWidget);
     expect(find.byType(TableCalendar<Delivery>), findsNothing);
@@ -64,7 +63,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('calendar fits the production theme at 320 px with large text',
+  testWidgets('today actions and calendar fit at 320 px with large text',
       (tester) async {
     tester.view.physicalSize = const Size(320, 690);
     tester.view.devicePixelRatio = 1;
@@ -73,10 +72,25 @@ void main() {
     final today = DateTime.now();
     final repository = _DeliveriesRepository(today);
     await tester.pumpWidget(
-      _app(repository,
-          loadStaff: () => Stream.value(_staff(today)), textScale: 1.8),
+      _app(
+        repository,
+        loadStaff: () => Stream.value(_staff(today)),
+        textScale: 1.8,
+        checklist: AsyncValue.error(
+            StateError('checklist lookup failed'), StackTrace.current),
+      ),
     );
     await tester.pumpAndSettle();
+    final checklistAction = find.widgetWithText(
+      TextButton,
+      'Checklist status unavailable',
+    );
+    await tester.ensureVisible(checklistAction);
+    await tester.pumpAndSettle();
+    expect(checklistAction.hitTestable(), findsOneWidget);
+    expect(tester.getSize(checklistAction).height, greaterThanOrEqualTo(44));
+    expect(find.textContaining('· 2 vehicles · 5 pallets'), findsOneWidget);
+    expect(find.text('Use Gate 3 near the sports centre.'), findsOneWidget);
     await tester.tap(find.text('Calendar'));
     await tester.pumpAndSettle();
     expect(find.byType(TableCalendar<Delivery>), findsOneWidget);
@@ -241,6 +255,7 @@ Widget _app(
   required Stream<Staff?> Function() loadStaff,
   bool isAdmin = false,
   double textScale = 1,
+  AsyncValue<bool> checklist = const AsyncValue.data(true),
   ConnectivityStatus connectivity = ConnectivityStatus.online,
 }) {
   final router = GoRouter(
@@ -273,7 +288,7 @@ Widget _app(
         ),
       ),
       deliveryChecklistStatusProvider.overrideWith(
-        (_, __) => const AsyncValue.data(true),
+        (_, __) => checklist,
       ),
     ],
     child: MaterialApp.router(

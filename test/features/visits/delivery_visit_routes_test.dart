@@ -239,13 +239,16 @@ void main() {
   });
 
   testWidgets(
-      'visit tabs and note jump work on a narrow screen with large text',
+      'visit tabs and signature stay reachable with large text and keyboard',
       (tester) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(320, 560);
+    tester.view.physicalSize = const Size(320, 640);
     tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+    tester.view.padding = const FakeViewPadding(top: 32, bottom: 24);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewInsets);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
     const schoolName = 'Example Primary School and Early Learning Centre';
@@ -257,51 +260,88 @@ void main() {
       notes: [Note(id: 'note', content: noteText, createdAt: DateTime(2025))],
     );
     addTearDown(school.dispose);
-    const visit = DeliveryVisit(deliveryId: 'first', schoolId: 'school');
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          currentStaffProvider.overrideWith((_) => Stream.value(_staff)),
-          authStateProvider.overrideWith((_) => Stream.value(_FieldUser())),
-          activeDeliveryVisitProvider.overrideWithValue(visit),
-          deliveryVisitReadinessProvider.overrideWith(
-            (_, __) async => (
-              uid: 'field-owner',
-              status: DeliveryVisitReadiness.ready,
-            ),
-          ),
-          activeChecklistItemsProvider.overrideWith(
-            (_) => Stream.value(const []),
-          ),
-          baseSchoolsRepositoryProvider.overrideWithValue(school),
-          visitSchoolsRepositoryFactoryProvider
-              .overrideWithValue((_) => school),
-          offlineMediaOwnerProvider.overrideWith((_, __) => null),
-          connectivityStatusProvider.overrideWith(
-            (_) => Stream.value(ConnectivityStatus.offline),
-          ),
-          evidenceUploadsProvider.overrideWith(
-            (_) => Stream.value(
-              const EvidenceUploadStatus(
-                items: [],
-                activeId: null,
-                legacyReviewCount: 0,
-                localError: false,
+    final container = ProviderContainer(
+      overrides: [
+        currentStaffProvider.overrideWith((_) => Stream.value(_staff)),
+        authStateProvider.overrideWith((_) => Stream.value(_FieldUser())),
+        authRepositoryProvider.overrideWithValue(_VisitAuth()),
+        deliveryTodayProvider.overrideWith((_) => DateTime(2025)),
+        todayDeliveriesProvider.overrideWith((_) => Stream.value([
+              Delivery(
+                id: 'first',
+                schoolId: 'school',
+                schoolName: schoolName,
+                date: DateTime(2025),
+                createdAt: DateTime(2025),
               ),
+            ])),
+        deliveryChecklistStatusProvider.overrideWith(
+          (_, __) => const AsyncValue.data(false),
+        ),
+        savedEditsProvider.overrideWith((_) => Stream.value(const [])),
+        deliveryVisitReadinessProvider.overrideWith(
+          (_, __) async => (
+            uid: 'field-owner',
+            status: DeliveryVisitReadiness.ready,
+          ),
+        ),
+        activeChecklistItemsProvider.overrideWith(
+          (_) => Stream.value(const []),
+        ),
+        baseSchoolsRepositoryProvider.overrideWithValue(school),
+        visitSchoolsRepositoryFactoryProvider.overrideWithValue((_) => school),
+        offlineMediaOwnerProvider.overrideWith((_, __) => null),
+        connectivityStatusProvider.overrideWith(
+          (_) => Stream.value(ConnectivityStatus.offline),
+        ),
+        evidenceUploadsProvider.overrideWith(
+          (_) => Stream.value(
+            const EvidenceUploadStatus(
+              items: [],
+              activeId: null,
+              legacyReviewCount: 0,
+              localError: false,
             ),
           ),
-        ],
-        child: MaterialApp(
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
           theme: AppTheme.lightTheme,
-          home: const SchoolHubScreen(
-            schoolId: 'school',
-            deliveryId: 'first',
-          ),
+          routerConfig: container.read(appRouterProvider),
         ),
       ),
     );
     await tester.pumpAndSettle();
+    final open = find.text('Open school');
+    await tester.dragUntilVisible(
+      open,
+      find.byType(CustomScrollView).first,
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    expect(find.byType(SchoolHubScreen), findsOneWidget);
+
+    Future<void> scrollVisitTo(Finder target, {double delta = -160}) async {
+      final visible = target.hitTestable();
+      for (var attempt = 0;
+          attempt < 18 && visible.evaluate().isEmpty;
+          attempt++) {
+        final viewport = tester.getRect(find.byType(NestedScrollView));
+        await tester.dragFrom(
+          Offset(viewport.left + 24, viewport.center.dy),
+          Offset(0, delta),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(visible, findsOneWidget);
+    }
 
     expect(find.text('Classroom records ready on this device'), findsOneWidget);
     await tester.dragUntilVisible(
@@ -317,33 +357,52 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Expected pack total'), findsOneWidget);
     expect(find.text('10 expected packs'), findsOneWidget);
+    final signerName = find.byType(TextField);
+    final jumpToSignature = find.text('Go to signature');
+    await scrollVisitTo(jumpToSignature);
+    expect(signerName.hitTestable(), findsNothing);
+    await tester.tap(jumpToSignature);
+    await tester.pumpAndSettle();
+    expect(signerName.hitTestable(), findsOneWidget);
+
+    await scrollVisitTo(jumpToSignature, delta: 160);
     final viewNotes = find.text('View notes');
-    for (var attempt = 0;
-        attempt < 12 && viewNotes.hitTestable().evaluate().isEmpty;
-        attempt++) {
-      await tester.drag(find.byType(NestedScrollView), const Offset(0, -160));
-      await tester.pumpAndSettle();
-    }
-    expect(viewNotes.hitTestable(), findsOneWidget);
+    await scrollVisitTo(viewNotes);
     await tester.tap(viewNotes);
     await tester.pumpAndSettle();
     expect(find.text(noteText).hitTestable(), findsOneWidget);
+
+    await scrollVisitTo(signerName);
+    final semantics = tester.ensureSemantics();
+    try {
+      await tester.pump();
+      final nameSemantics = tester.getSemantics(signerName).getSemanticsData();
+      expect(nameSemantics.label, contains('Name'));
+      expect(nameSemantics.label, isNot(contains('Signature')));
+    } finally {
+      semantics.dispose();
+    }
+    await tester.tap(signerName.hitTestable());
+    tester.view.viewInsets = const FakeViewPadding(bottom: 240);
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isTrue);
+    expect(signerName.hitTestable(), findsOneWidget);
+    await tester.enterText(signerName, 'Example Visitor');
+    await tester.pumpAndSettle();
+
+    final review = find.text('Review and save');
+    await scrollVisitTo(review);
+    expect(tester.testTextInput.isVisible, isTrue);
+    expect(find.text('Example Visitor'), findsOneWidget);
+    tester.testTextInput.hide();
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('School Information'));
-    await tester.pumpAndSettle();
-    expect(find.text('School Information').hitTestable(), findsOneWidget);
-
-    final openInMaps = find.text('Open in Maps');
-    for (var attempt = 0;
-        attempt < 12 && openInMaps.hitTestable().evaluate().isEmpty;
-        attempt++) {
-      await tester.drag(find.byType(NestedScrollView), const Offset(0, -160));
-      await tester.pumpAndSettle();
-    }
-    expect(openInMaps.hitTestable(), findsOneWidget);
+    await scrollVisitTo(find.text('School Information'));
+    await scrollVisitTo(find.text('Open in Maps'));
     final infoPage = find.byKey(const PageStorageKey('school-info'));
     expect(
       find.descendant(of: infoPage, matching: find.text(savedAddress)),
@@ -362,7 +421,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Year 1').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 }
 
 final _staff = Staff(

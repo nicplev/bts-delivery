@@ -34,6 +34,7 @@ class DeliveryDayList extends ConsumerWidget {
 
     final loaded = deliveries.asData?.value;
     final showSummary = calendar == null && loaded != null && loaded.isNotEmpty;
+    final text = Theme.of(context).textTheme;
     final day = MaterialLocalizations.of(context).formatFullDate(date);
     return Center(
       child: ConstrainedBox(
@@ -49,13 +50,19 @@ class DeliveryDayList extends ConsumerWidget {
                 14,
               ),
               sliver: SliverToBoxAdapter(
-                child: showSummary
-                    ? _DeliveryDaySummary(day: day, deliveries: loaded)
-                    : AppStatusPill(
-                        icon: Icons.calendar_today_outlined,
-                        label: day,
-                        tone: AppTone.blue,
-                      ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Semantics(
+                      header: true,
+                      child: Text(day, style: text.titleLarge),
+                    ),
+                    if (showSummary) ...[
+                      const SizedBox(height: 4),
+                      Text(_deliverySummary(loaded), style: text.bodySmall),
+                    ],
+                  ],
+                ),
               ),
             ),
             deliveries.when(
@@ -119,76 +126,12 @@ class DeliveryDayList extends ConsumerWidget {
   }
 }
 
-class _DeliveryDaySummary extends StatelessWidget {
-  const _DeliveryDaySummary({required this.day, required this.deliveries});
-
-  final String day;
-  final List<Delivery> deliveries;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = deliveries.length;
-    final schools =
-        deliveries.map((delivery) => delivery.schoolId).toSet().length;
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AppStatusPill(
-            icon: Icons.calendar_today_outlined,
-            label: day,
-            tone: AppTone.blue,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _DayMetric(
-                  value: total,
-                  label: total == 1
-                      ? 'Scheduled delivery'
-                      : 'Scheduled deliveries',
-                ),
-              ),
-              const SizedBox(width: 12),
-              const SizedBox(
-                width: 1,
-                height: 42,
-                child: ColoredBox(color: AppTokens.outline),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: _DayMetric(
-                  value: schools,
-                  label: schools == 1 ? 'School' : 'Schools',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DayMetric extends StatelessWidget {
-  const _DayMetric({required this.value, required this.label});
-
-  final int value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('$value', style: text.displaySmall),
-        Text(label, style: text.bodySmall),
-      ],
-    );
-  }
+String _deliverySummary(List<Delivery> deliveries) {
+  final total = deliveries.length;
+  final schools =
+      deliveries.map((delivery) => delivery.schoolId).toSet().length;
+  return '$total ${total == 1 ? 'delivery' : 'deliveries'} · '
+      '$schools ${schools == 1 ? 'school' : 'schools'}';
 }
 
 class DeliveryMessage extends StatelessWidget {
@@ -253,19 +196,26 @@ class _DeliveryCard extends ConsumerWidget {
     final staffNames =
         team?.map((staff) => staff.name).toList() ?? delivery.staffNames;
     final checklist = ref.watch(deliveryChecklistStatusProvider(delivery.id));
-    final checklistIcon = checklist.when(
-      data: (complete) => complete ? Icons.task_alt : Icons.checklist,
-      error: (_, __) => Icons.error_outline,
-      loading: () => Icons.checklist,
-    );
-    final checklistLabel = checklist.when(
-      data: (complete) => complete ? 'Checklist complete' : 'Checklist',
-      error: (_, __) => 'Checklist status unavailable',
-      loading: () => 'Checklist',
+    final (checklistIcon, checklistLabel, checklistTone) = checklist.when(
+      skipLoadingOnRefresh: false,
+      data: (complete) => complete
+          ? (Icons.task_alt, 'Checklist complete', AppTone.green)
+          : (Icons.checklist, 'Checklist incomplete', AppTone.blue),
+      error: (_, __) =>
+          (Icons.error_outline, 'Checklist status unavailable', AppTone.pink),
+      loading: () =>
+          (Icons.checklist, 'Checking checklist status', AppTone.blue),
     );
     final time = delivery.time;
-    final showSchoolIcon = MediaQuery.textScalerOf(context).scale(19) < 27 &&
-        MediaQuery.sizeOf(context).width > 340;
+    final vehicles = delivery.vehicleCount;
+    final pallets = delivery.palletCount;
+    final metadata = [
+      time == null ? 'All day' : DateTimeUtils.formatTime(time),
+      if (vehicles != null)
+        '$vehicles ${vehicles == 1 ? 'vehicle' : 'vehicles'}',
+      if (pallets != null) '$pallets ${pallets == 1 ? 'pallet' : 'pallets'}',
+    ];
+    final text = Theme.of(context).textTheme;
 
     return AppPanel(
       child: Column(
@@ -274,27 +224,16 @@ class _DeliveryCard extends ConsumerWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (showSchoolIcon) ...[
-                const AppIconTile(icon: Icons.school_outlined, size: 44),
-                const SizedBox(width: 12),
-              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      delivery.schoolName,
-                      style: Theme.of(context).textTheme.titleLarge,
+                    Semantics(
+                      header: true,
+                      child: Text(delivery.schoolName, style: text.titleLarge),
                     ),
-                    const SizedBox(height: 7),
-                    AppStatusPill(
-                      icon:
-                          time == null ? Icons.event_outlined : Icons.schedule,
-                      label: time == null
-                          ? 'All day'
-                          : DateTimeUtils.formatTime(time),
-                      tone: time == null ? AppTone.neutral : AppTone.blue,
-                    ),
+                    const SizedBox(height: 4),
+                    Text(metadata.join(' · '), style: text.bodySmall),
                   ],
                 ),
               ),
@@ -323,26 +262,14 @@ class _DeliveryCard extends ConsumerWidget {
                 ),
             ],
           ),
-          if (delivery.vehicleCount != null ||
-              delivery.palletCount != null) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (delivery.vehicleCount != null)
-                  AppStatusPill(
-                    icon: Icons.local_shipping_outlined,
-                    label: '${delivery.vehicleCount} vehicles',
-                  ),
-                if (delivery.palletCount != null)
-                  AppStatusPill(
-                    icon: Icons.inventory_2_outlined,
-                    label: '${delivery.palletCount} pallets',
-                    tone: AppTone.yellow,
-                  ),
-              ],
-            ),
+          if (staffNames.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _DeliveryFact(
+                icon: Icons.group_outlined, label: staffNames.join(', ')),
+          ],
+          if (delivery.notes?.isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            _DeliveryFact(icon: Icons.notes_outlined, label: delivery.notes!),
           ],
           const SizedBox(height: 12),
           Wrap(
@@ -363,11 +290,9 @@ class _DeliveryCard extends ConsumerWidget {
                 icon: Icon(checklistIcon, size: 18),
                 label: Text(checklistLabel),
                 style: TextButton.styleFrom(
-                  foregroundColor: checklist.hasError
-                      ? AppTone.pink.ink
-                      : checklist.valueOrNull == true
-                          ? AppTone.green.ink
-                          : AppTone.blue.ink,
+                  foregroundColor: checklistTone.ink,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                 ),
                 onPressed: () async {
                   await showPreDeliveryChecklistDialog(
@@ -382,19 +307,6 @@ class _DeliveryCard extends ConsumerWidget {
               ),
             ],
           ),
-          if (staffNames.isNotEmpty || delivery.notes?.isNotEmpty == true) ...[
-            const SizedBox(height: 8),
-            const Divider(),
-            if (staffNames.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _DeliveryFact(
-                  icon: Icons.group_outlined, label: staffNames.join(', ')),
-            ],
-            if (delivery.notes?.isNotEmpty == true) ...[
-              const SizedBox(height: 10),
-              _DeliveryFact(icon: Icons.notes_outlined, label: delivery.notes!),
-            ],
-          ],
         ],
       ),
     );

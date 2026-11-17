@@ -40,12 +40,10 @@ class OfflineVisitMediaPanel extends ConsumerWidget {
     return TextButton.icon(
       style: TextButton.styleFrom(
         foregroundColor: tone.ink,
-        backgroundColor: tone.tint,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
       ),
       icon: const Icon(Icons.download_outlined, size: 18),
-      label: Text(label, textAlign: TextAlign.center),
+      label: Text(label),
       onPressed: () => showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,

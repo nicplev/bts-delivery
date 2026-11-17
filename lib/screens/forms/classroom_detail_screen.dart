@@ -166,29 +166,33 @@ class ClassroomDetailScreen extends ConsumerWidget {
                         ],
                       );
                     }
-                    return AppPanel(
-                      tone: AppTone.blue,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Expected packs'),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${packTotal.total}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineMedium
-                                ?.copyWith(
-                                    color: AppTone.blue.ink,
-                                    fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Last updated: ${_formatDate(packTotal.createdAt)}',
-                            style: const TextStyle(color: AppTokens.muted),
-                          ),
-                        ],
-                      ),
+                    final typography = Theme.of(context).textTheme;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              'Expected packs',
+                              style: typography.bodyMedium,
+                            ),
+                            Text(
+                              '${packTotal.total}',
+                              style: typography.headlineMedium?.copyWith(
+                                color: AppTone.blue.ink,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Last updated: ${_formatDate(packTotal.createdAt)}',
+                          style: typography.bodySmall,
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -898,7 +902,10 @@ class ClassroomDetailScreen extends ConsumerWidget {
   }
 
   Widget _buildCompletionStatusCard(
-      BuildContext context, WidgetRef ref, Classroom classroom) {
+    BuildContext context,
+    WidgetRef ref,
+    Classroom classroom,
+  ) {
     return AppPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -941,47 +948,57 @@ class ClassroomDetailScreen extends ConsumerWidget {
           if (classroom.actualPacksDelivered case final int actual
               when classroom.completionStatus ==
                   ClassroomCompletionStatus.incomplete) ...[
-            const SizedBox(height: 12),
+            const Divider(height: 24),
             Builder(
               builder: (context) {
                 final expected = ref
-                    .watch(packTotalProvider((
-                      schoolId: schoolId,
-                      yearLevelId: yearLevelId,
-                      classroomId: classroom.id,
-                    )))
+                    .watch(
+                      packTotalProvider((
+                        schoolId: schoolId,
+                        yearLevelId: yearLevelId,
+                        classroomId: classroom.id,
+                      )),
+                    )
                     .asData
                     ?.value
                     ?.total;
 
-                return AppPanel(
-                  tone: AppTone.yellow,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AppSectionHeading(
-                        title: 'Partial Delivery',
-                        trailing: TextButton(
-                          onPressed: () => _showActualQuantityDialog(
-                            context,
-                            ref,
-                            classroom,
-                            yearLevelId,
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Partial Delivery',
+                            style: Theme.of(context).textTheme.titleSmall,
                           ),
-                          child: const Text('Edit'),
-                        ),
+                          const SizedBox(height: 4),
+                          Text(
+                            expected == null
+                                ? '$actual packs delivered'
+                                : '$actual of $expected packs delivered',
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  color: AppTone.yellow.ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
                       ),
-                      Text(
-                        expected == null
-                            ? '$actual packs delivered'
-                            : '$actual of $expected packs delivered',
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: AppTone.yellow.ink,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: () => _showActualQuantityDialog(
+                        context,
+                        ref,
+                        classroom,
+                        yearLevelId,
                       ),
-                    ],
-                  ),
+                      tooltip: 'Edit delivered pack quantity',
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                  ],
                 );
               },
             ),
