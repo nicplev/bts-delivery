@@ -6,6 +6,7 @@ import 'package:bts_delivery_app/providers/schools_providers.dart';
 import 'package:bts_delivery_app/screens/admin/school_staff_allocation_screen.dart';
 import 'package:bts_delivery_app/screens/forms/add_edit_delivery_screen.dart';
 import 'package:bts_delivery_app/screens/forms/schools_bulk_import_screen.dart';
+import 'package:bts_delivery_app/widgets/design/design.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -102,7 +103,7 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding(bottom: 210);
     addTearDown(tester.view.resetViewInsets);
     await tester.pumpAndSettle();
-    final submit = find.widgetWithText(FilledButton, 'Import Schools');
+    final submit = find.widgetWithText(AppGlassPrimaryButton, 'Import schools');
     await tester.scrollUntilVisible(submit, 140,
         scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();

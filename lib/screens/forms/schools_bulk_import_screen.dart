@@ -10,6 +10,7 @@ import '../../providers/repository_providers.dart';
 import '../../providers/schools_providers.dart';
 import '../../models/school.dart';
 import '../../widgets/design/design.dart';
+import '../admin/admin_page.dart';
 
 class SchoolsBulkImportScreen extends ConsumerStatefulWidget {
   const SchoolsBulkImportScreen({super.key});
@@ -138,139 +139,142 @@ class _SchoolsBulkImportScreenState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Bulk Import Schools')),
-      body: SafeArea(
-        top: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppTokens.gutter,
-            10,
-            AppTokens.gutter,
-            AppTokens.sectionGap,
+    final colors = AppPalette.of(context);
+    const mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
+    return AdminPage(
+      title: 'Import schools',
+      subtitle: 'Add many schools at once from CSV data.',
+      action: AppGlassPrimaryButton(
+        label: _isLoading ? 'Importing...' : 'Import schools',
+        icon: AppIcons.upload,
+        loading: _isLoading,
+        onPressed: _importSchools,
+      ),
+      children: [
+        AdminSection(
+          first: true,
+          label: 'Template',
+          child: AppPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'School Name is required. Address, Contact Name, Contact Phone and Contact Email are optional.',
+                  style: AppTypography.subheadline.copyWith(color: colors.ink),
+                ),
+                const SizedBox(height: 12),
+                AppSecondaryButton(
+                  label: 'Download CSV template',
+                  icon: AppIcons.download,
+                  onPressed: _downloadTemplate,
+                ),
+              ],
+            ),
           ),
-          children: [
-            AppPanel(
-              tone: AppTone.blue,
+        ),
+        AdminSection(
+          label: 'CSV data',
+          child: AppPanel(
+            child: TextField(
+              controller: _csvController,
+              decoration: InputDecoration(
+                hintText: 'Paste CSV data',
+                suffixIcon: IconButton(
+                  icon:
+                      const Icon(HeroiconsOutline.clipboardDocument, size: 20),
+                  onPressed: _pasteFromClipboard,
+                  tooltip: 'Paste from clipboard',
+                ),
+              ),
+              minLines: 5,
+              maxLines: 10,
+              style: mono.copyWith(color: colors.ink),
+            ),
+          ),
+        ),
+        if (_successMessage != null) ...[
+          const SizedBox(height: AppTokens.sectionGap),
+          AppPanel(
+            child: Semantics(
+              liveRegion: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const AppIconTile(icon: AppIcons.complete),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text('Import successful',
+                            style: AppTypography.headline
+                                .copyWith(color: colors.ink)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(_successMessage!,
+                      style: AppTypography.subheadline
+                          .copyWith(color: colors.ink)),
+                  const SizedBox(height: 12),
+                  AppSecondaryButton(
+                    label: 'Done',
+                    icon: AppIcons.check,
+                    onPressed: () => context.go('/schools'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+        if (_errorMessage != null) ...[
+          const SizedBox(height: AppTokens.sectionGap),
+          AppPanel(
+            child: Semantics(
+              liveRegion: true,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const AppSectionHeading(title: 'School template'),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'School Name is required. Address, Contact Name, Contact Phone and Contact Email are optional.',
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _downloadTemplate,
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Download CSV Template'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            AppPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const AppSectionHeading(title: 'CSV Data'),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _csvController,
-                    decoration: InputDecoration(
-                      hintText: 'Paste CSV data',
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.content_paste_outlined),
-                        onPressed: _pasteFromClipboard,
-                        tooltip: 'Paste from clipboard',
+                  Row(
+                    children: [
+                      Icon(AppIcons.error, color: colors.error, size: 22),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Import failed',
+                            style: AppTypography.headline
+                                .copyWith(color: colors.error)),
                       ),
-                    ),
-                    minLines: 5,
-                    maxLines: 10,
-                    style:
-                        const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                    ],
                   ),
+                  const SizedBox(height: 8),
+                  Text(_errorMessage!,
+                      style: AppTypography.subheadline
+                          .copyWith(color: colors.ink)),
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _isLoading ? null : _importSchools,
-              icon: _isLoading
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.upload_outlined),
-              label: Text(_isLoading ? 'Importing...' : 'Import Schools'),
-            ),
-            if (_successMessage != null) ...[
-              const SizedBox(height: 12),
-              AppPanel(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const AppStatusPill(
-                      label: 'Import Successful',
-                      icon: Icons.check_circle_outline,
-                      tone: AppTone.green,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(_successMessage!),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: () => context.go('/schools'),
-                      icon: const Icon(Icons.check),
-                      label: const Text('Done'),
-                    ),
-                  ],
+          ),
+        ],
+        AdminSection(
+          label: 'CSV format',
+          child: AppPanel(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.surfaceQuiet,
+                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: SelectableText(
+                  'School Name,Address,Contact Name,Contact Phone,Contact Email\n'
+                  'Example School,10 Example St,Alex,0400000000,alex@example.test\n'
+                  'North Campus,20 Example St,,,',
+                  style: mono.copyWith(color: colors.ink),
                 ),
               ),
-            ],
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
-              AppPanel(
-                tone: AppTone.pink,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const AppSectionHeading(title: 'Import Failed'),
-                    const SizedBox(height: 8),
-                    Text(_errorMessage!),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            AppPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const AppSectionHeading(title: 'CSV Format'),
-                  const SizedBox(height: 8),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).surfaceQuiet,
-                      borderRadius:
-                          BorderRadius.circular(AppTokens.controlRadius),
-                    ),
-                    child: const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SelectableText(
-                        'School Name,Address,Contact Name,Contact Phone,Contact Email\n'
-                        'Example School,10 Example St,Alex,0400000000,alex@example.test\n'
-                        'North Campus,20 Example St,,,',
-                        style: TextStyle(fontFamily: 'monospace', fontSize: 13),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }

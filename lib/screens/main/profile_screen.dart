@@ -10,6 +10,7 @@ import '../../services/date_utils.dart';
 import '../../widgets/connectivity_indicator.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
+import '../admin/admin_page.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -37,184 +38,154 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final isManager = ref.watch(isManagerProvider);
     final showAllDeliveries = ref.watch(allDeliveriesProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: Column(
-        children: [
-          const ConnectivityIndicator(),
-          Expanded(
-            child: user.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, __) => Center(
-                child: DeliveryMessage(
-                  icon: Icons.error_outline,
-                  title: 'Couldn’t load your profile',
-                  action: TextButton(
-                    onPressed: () => ref.invalidate(currentUserProvider),
-                    child: const Text('Retry'),
-                  ),
-                ),
+    final List<Widget> content = user.when(
+      loading: () => const [AdminLoading()],
+      error: (_, __) => [
+        DeliveryMessage(
+          icon: AppIcons.error,
+          title: 'Couldn’t load your profile',
+          action: AppSecondaryButton(
+            label: 'Retry',
+            icon: AppIcons.retry,
+            onPressed: () => ref.invalidate(currentUserProvider),
+          ),
+        ),
+      ],
+      data: (account) => [
+        _ProfileHeader(
+          user: account,
+          staff: staff,
+          isAdmin: isAdmin,
+          isManager: isManager,
+        ),
+        AdminSection(
+          label: 'Account information',
+          child: AppGroupedList(
+            children: [
+              _InfoRow(
+                  label: 'Email', value: account?.email ?? 'Not available'),
+              _InfoRow(
+                label: 'Role',
+                value: isAdmin
+                    ? 'Administrator'
+                    : isManager
+                        ? 'Manager'
+                        : 'Staff Member',
               ),
-              data: (account) => Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 700),
-                  child: ListView(
-                    padding: EdgeInsets.fromLTRB(
-                      AppTokens.gutter,
-                      8,
-                      AppTokens.gutter,
-                      MediaQuery.paddingOf(context).bottom +
-                          AppTokens.sectionGap,
-                    ),
-                    children: [
-                      _ProfileHeader(
-                        user: account,
-                        staff: staff,
-                        isAdmin: isAdmin,
-                        isManager: isManager,
-                      ),
-                      _ProfileSection(
-                        title: 'Account information',
-                        children: [
-                          _ProfileRow(
-                            icon: Icons.mail_outline_rounded,
-                            title: 'Email',
-                            detail: account?.email ?? 'Not available',
-                          ),
-                          _ProfileRow(
-                            icon: Icons.badge_outlined,
-                            title: 'Role',
-                            detail: isAdmin
-                                ? 'Administrator'
-                                : isManager
-                                    ? 'Manager'
-                                    : 'Staff Member',
-                          ),
-                          _ProfileRow(
-                            icon: Icons.calendar_today_outlined,
-                            title: 'Account Created',
-                            detail: account == null
-                                ? 'Not available'
-                                : DateTimeUtils.formatDateTime(
-                                    account.createdAt),
-                          ),
-                          if (account?.lastLoginAt != null)
-                            _ProfileRow(
-                              icon: Icons.schedule,
-                              title: 'Last Login',
-                              detail: DateTimeUtils.formatDateTime(
-                                  account!.lastLoginAt!),
-                            ),
-                        ],
-                      ),
-                      if (staff != null)
-                        _ProfileSection(
-                          title: 'Staff information',
-                          children: [
-                            _ProfileRow(
-                              icon: Icons.person_outline,
-                              tone: AppTone.green,
-                              title: 'Name',
-                              detail: staff.name,
-                            ),
-                            _ProfileRow(
-                              icon: Icons.work_outline,
-                              tone: AppTone.green,
-                              title: 'Position',
-                              detail: staff.hasManagerAccess
-                                  ? 'Manager'
-                                  : 'Staff Member',
-                            ),
-                            _ProfileRow(
-                              icon: Icons.today_outlined,
-                              tone: AppTone.green,
-                              title: 'Staff Since',
-                              detail: DateTimeUtils.formatDate(staff.createdAt),
-                            ),
-                            _ProfileRow(
-                              icon: Icons.badge_outlined,
-                              tone: AppTone.green,
-                              title: 'Role',
-                              detail: staff.role,
-                            ),
-                          ],
-                        ),
-                      if (isManager && !isAdmin)
-                        _ProfileSection(
-                          title: 'Settings',
-                          children: [
-                            SwitchListTile(
-                              secondary: const AppIconTile(
-                                icon: Icons.visibility_outlined,
-                                tone: AppTone.green,
-                              ),
-                              title: const Text('Show All Deliveries'),
-                              subtitle: const Text(
-                                  'View all deliveries or only yours'),
-                              value: showAllDeliveries,
-                              onChanged: (value) {
-                                ref.read(allDeliveriesProvider.notifier).state =
-                                    value;
-                              },
-                            ),
-                          ],
-                        ),
-                      if (isAdmin)
-                        _ProfileSection(
-                          title: 'Admin actions',
-                          children: [
-                            _ProfileRow(
-                              icon: Icons.people_outline,
-                              title: 'Staff Management',
-                              onTap: () => context.go('/profile/staff'),
-                            ),
-                            _ProfileRow(
-                              icon: Icons.fact_check_outlined,
-                              tone: AppTone.green,
-                              title: 'Pre-Signoff Checklist',
-                              onTap: () => context.go('/profile/checklist'),
-                            ),
-                            _ProfileRow(
-                              icon: Icons.checklist_rtl,
-                              tone: AppTone.green,
-                              title: 'Pre-Delivery Checklist',
-                              onTap: () =>
-                                  context.go('/profile/pre-delivery-checklist'),
-                            ),
-                            _ProfileRow(
-                              icon: Icons.summarize_outlined,
-                              tone: AppTone.yellow,
-                              title: 'Season Report',
-                              detail: 'Export end-of-season data',
-                              onTap: () => context.go('/profile/season-export'),
-                            ),
-                          ],
-                        ),
-                      _ProfileSection(
-                        title: 'Actions',
-                        children: [
-                          if (staff == null && !isAdmin)
-                            _ProfileRow(
-                              icon: Icons.link,
-                              title: 'Link to Staff Account',
-                              onTap: () => context.go('/staff-link'),
-                            ),
-                          _ProfileRow(
-                            icon: Icons.logout_rounded,
-                            tone: AppTone.pink,
-                            title: 'Sign Out',
-                            onTap: () => _showSignOutDialog(context),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+              _InfoRow(
+                label: 'Account created',
+                value: account == null
+                    ? 'Not available'
+                    : DateTimeUtils.formatDateTime(account.createdAt),
               ),
+              if (account?.lastLoginAt != null)
+                _InfoRow(
+                  label: 'Last login',
+                  value: DateTimeUtils.formatDateTime(account!.lastLoginAt!),
+                ),
+            ],
+          ),
+        ),
+        if (staff != null)
+          AdminSection(
+            label: 'Staff information',
+            child: AppGroupedList(
+              children: [
+                _InfoRow(label: 'Name', value: staff.name),
+                _InfoRow(
+                  label: 'Position',
+                  value: staff.hasManagerAccess ? 'Manager' : 'Staff Member',
+                ),
+                _InfoRow(
+                  label: 'Staff since',
+                  value: DateTimeUtils.formatDate(staff.createdAt),
+                ),
+                _InfoRow(label: 'Role', value: staff.role),
+              ],
             ),
           ),
-        ],
-      ),
+        if (isManager && !isAdmin)
+          AdminSection(
+            label: 'Settings',
+            child: AppGroupedList(
+              children: [
+                MergeSemantics(
+                  child: AppListRow(
+                    icon: HeroiconsOutline.eye,
+                    title: 'Show all deliveries',
+                    subtitle: 'View all deliveries or only yours',
+                    showChevron: false,
+                    trailing: Switch(
+                      value: showAllDeliveries,
+                      onChanged: (value) {
+                        ref.read(allDeliveriesProvider.notifier).state = value;
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (isAdmin)
+          AdminSection(
+            label: 'Admin actions',
+            child: AppGroupedList(
+              separatorIndent: 57,
+              children: [
+                AppListRow(
+                  icon: AppIcons.people,
+                  title: 'Staff management',
+                  onTap: () => context.go('/profile/staff'),
+                ),
+                AppListRow(
+                  icon: AppIcons.checklist,
+                  title: 'Pre-sign-off checklist',
+                  onTap: () => context.go('/profile/checklist'),
+                ),
+                AppListRow(
+                  icon: AppIcons.records,
+                  title: 'Pre-delivery checklist',
+                  onTap: () => context.go('/profile/pre-delivery-checklist'),
+                ),
+                AppListRow(
+                  icon: HeroiconsOutline.documentChartBar,
+                  title: 'Season report',
+                  subtitle: 'Export end-of-season data',
+                  onTap: () => context.go('/profile/season-export'),
+                ),
+              ],
+            ),
+          ),
+        if (staff == null && !isAdmin)
+          AdminSection(
+            label: 'Actions',
+            child: AppGroupedList(
+              separatorIndent: 57,
+              children: [
+                AppListRow(
+                  icon: HeroiconsOutline.link,
+                  title: 'Link to staff account',
+                  onTap: () => context.go('/staff-link'),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: AppTokens.sectionGap),
+        AdminDestructiveButton(
+          label: 'Sign out',
+          icon: AppIcons.logout,
+          onPressed: () => _showSignOutDialog(context),
+        ),
+      ],
+    );
+
+    return AdminPage(
+      title: 'Profile',
+      showBack: false,
+      children: [
+        const ConnectivityIndicator(),
+        ...content,
+      ],
     );
   }
 
@@ -222,7 +193,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sign Out'),
+        title: const Text('Sign out'),
         content: const Text('Are you sure you want to sign out?'),
         actions: [
           TextButton(
@@ -230,15 +201,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
+            style: adminDestructiveStyle(context),
             onPressed: () {
               Navigator.pop(context);
               ref.read(authNotifierProvider.notifier).signOut();
             },
-            child: const Text('Sign Out'),
+            child: const Text('Sign out'),
           ),
         ],
       ),
@@ -261,23 +229,22 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
     final linked = staff != null || isAdmin;
-    final tone = isAdmin
-        ? AppTone.pink
-        : linked
-            ? AppTone.green
-            : AppTone.blue;
+    final role = isAdmin
+        ? 'Administrator'
+        : isManager
+            ? 'Manager'
+            : linked
+                ? 'Staff Member'
+                : 'Account not linked';
 
     return AppPanel(
-      padding: const EdgeInsets.all(20),
       child: Row(
         children: [
           AppIconTile(
-            icon: isAdmin
-                ? Icons.admin_panel_settings_outlined
-                : Icons.person_outline_rounded,
-            tone: tone,
-            size: 58,
+            icon: isAdmin ? HeroiconsOutline.shieldCheck : AppIcons.person,
+            size: 48,
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -286,18 +253,12 @@ class _ProfileHeader extends StatelessWidget {
               children: [
                 Text(
                   staff?.name ?? user?.email ?? 'User',
-                  style: Theme.of(context).textTheme.headlineSmall,
+                  style: AppTypography.title2.copyWith(color: colors.ink),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 AppStatusPill(
-                  tone: tone,
-                  label: isAdmin
-                      ? 'Administrator'
-                      : isManager
-                          ? 'Manager'
-                          : linked
-                              ? 'Staff Member'
-                              : 'Account not linked',
+                  label: role,
+                  icon: linked ? null : HeroiconsOutline.link,
                 ),
               ],
             ),
@@ -308,60 +269,22 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-class _ProfileSection extends StatelessWidget {
-  const _ProfileSection({required this.title, required this.children});
+/// Label–value row. Side by side when there is room; the value moves under
+/// the label on narrow screens or with large text so nothing is truncated.
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
 
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: AppTokens.sectionGap),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 9),
-            child: Text(title,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelLarge
-                    ?.copyWith(color: AppPalette.of(context).muted)),
-          ),
-          AppGroupedList(children: children),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileRow extends StatelessWidget {
-  const _ProfileRow({
-    required this.icon,
-    required this.title,
-    this.detail,
-    this.onTap,
-    this.tone = AppTone.blue,
-  });
-
-  final IconData icon;
-  final String title;
-  final String? detail;
-  final VoidCallback? onTap;
-  final AppTone tone;
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: AppIconTile(icon: icon, tone: tone),
-      title: Text(title),
-      subtitle: detail != null ? Text(detail!) : null,
-      trailing: onTap != null
-          ? Icon(Icons.chevron_right_rounded,
-              color: AppPalette.of(context).muted)
-          : null,
-      onTap: onTap,
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      final stacked = constraints.maxWidth < 340 ||
+          MediaQuery.textScalerOf(context).scale(17) > 22;
+      return stacked
+          ? AppListRow(title: label, subtitle: value)
+          : AppListRow(title: label, detail: value);
+    });
   }
 }

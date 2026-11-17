@@ -7,6 +7,11 @@ import '../../providers/repository_providers.dart';
 import '../../models/school.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
+import '../admin/admin_page.dart';
+
+enum _AddChoice { add, bulk }
+
+enum _SchoolChoice { edit, staff, delete }
 
 class SchoolsScreen extends ConsumerStatefulWidget {
   const SchoolsScreen({super.key});
@@ -37,134 +42,134 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
     }).toList();
   }
 
+  Future<void> _showAddOptions() async {
+    final choice = await showAdminActionSheet<_AddChoice>(
+      context,
+      title: 'Add schools',
+      actions: const [
+        AdminSheetAction(
+            value: _AddChoice.add, label: 'Add school', icon: AppIcons.add),
+        AdminSheetAction(
+            value: _AddChoice.bulk,
+            label: 'Bulk import CSV',
+            icon: AppIcons.importFile),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case _AddChoice.add:
+        _showSchoolDialog(context, ref);
+      case _AddChoice.bulk:
+        context.push('/schools/bulk-import');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final schoolsAsync = ref.watch(schoolsProvider);
     final isAdmin = ref.watch(isAdminProvider);
     final currentStaffAsync = ref.watch(currentStaffProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Schools'),
-        actions: [
-          if (isAdmin)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.add),
-              tooltip: 'Add School',
-              onSelected: (value) {
-                switch (value) {
-                  case 'add':
-                    _showAddSchoolDialog(context, ref);
-                    break;
-                  case 'bulk':
-                    context.push('/schools/bulk-import');
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'add',
-                  child: Row(
-                    children: [
-                      Icon(Icons.add),
-                      SizedBox(width: 8),
-                      Text('Add School'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'bulk',
-                  child: Row(
-                    children: [
-                      Icon(Icons.upload_file),
-                      SizedBox(width: 8),
-                      Text('Bulk Import CSV'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
-      body: currentStaffAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => Center(
-          child: DeliveryMessage(
-            icon: Icons.error_outline,
-            title: 'Couldn’t load your staff account',
-            action: TextButton(
-              onPressed: () => ref.invalidate(currentStaffProvider),
-              child: const Text('Retry'),
-            ),
+    String? subtitle;
+    final List<Widget> content = currentStaffAsync.when(
+      loading: () => const [AdminLoading()],
+      error: (_, __) => [
+        DeliveryMessage(
+          icon: AppIcons.error,
+          title: 'Couldn’t load your staff account',
+          action: AppSecondaryButton(
+            label: 'Retry',
+            icon: AppIcons.retry,
+            onPressed: () => ref.invalidate(currentStaffProvider),
           ),
         ),
-        data: (staff) {
-          if (staff == null && !isAdmin) {
-            return Center(
-              child: DeliveryMessage(
-                icon: Icons.link_off,
-                title: 'Account not linked',
-                description: 'Link your staff account to see your schools.',
-                action: Wrap(
-                  spacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: () => context.go('/staff-link'),
-                      icon: const Icon(Icons.link),
-                      label: const Text('Link Account'),
-                    ),
-                    TextButton(
-                      onPressed: () => context.go('/profile'),
-                      child: const Text('Go to Profile'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          return schoolsAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (_, __) => Center(
-              child: DeliveryMessage(
-                icon: Icons.error_outline,
-                title: 'Couldn’t load schools',
-                action: TextButton(
-                  onPressed: () => ref.invalidate(schoolsProvider),
-                  child: const Text('Retry'),
-                ),
+      ],
+      data: (staff) {
+        if (staff == null && !isAdmin) {
+          return [
+            DeliveryMessage(
+              icon: HeroiconsOutline.link,
+              title: 'Account not linked',
+              description: 'Link your staff account to see your schools.',
+              action: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  AppPrimaryButton(
+                    label: 'Link account',
+                    icon: HeroiconsOutline.link,
+                    onPressed: () => context.go('/staff-link'),
+                  ),
+                  AppSecondaryButton(
+                    label: 'Go to profile',
+                    onPressed: () => context.go('/profile'),
+                  ),
+                ],
               ),
             ),
-            data: (schools) {
-              if (schools.isEmpty) {
-                final canBrowseAll =
-                    isAdmin || (staff?.hasManagerAccess ?? false);
-                return Center(
-                  child: DeliveryMessage(
-                    icon: Icons.school_outlined,
-                    title: canBrowseAll
-                        ? 'No schools found'
-                        : 'No schools assigned',
-                    description: isAdmin
-                        ? 'Use Add School to create the first school.'
-                        : canBrowseAll
-                            ? 'Contact an administrator to add schools.'
-                            : 'Ask your manager or administrator to assign a school.',
-                    action: canBrowseAll
-                        ? null
-                        : TextButton(
-                            onPressed: () => context.go('/profile'),
-                            child: const Text('View Profile'),
-                          ),
-                  ),
-                );
-              }
-              return _buildDirectory(schools);
-            },
-          );
-        },
-      ),
+          ];
+        }
+
+        return schoolsAsync.when(
+          loading: () => const [AdminLoading()],
+          error: (_, __) => [
+            DeliveryMessage(
+              icon: AppIcons.error,
+              title: 'Couldn’t load schools',
+              action: AppSecondaryButton(
+                label: 'Retry',
+                icon: AppIcons.retry,
+                onPressed: () => ref.invalidate(schoolsProvider),
+              ),
+            ),
+          ],
+          data: (schools) {
+            if (schools.isEmpty) {
+              final canBrowseAll =
+                  isAdmin || (staff?.hasManagerAccess ?? false);
+              return [
+                DeliveryMessage(
+                  icon: AppIcons.school,
+                  title:
+                      canBrowseAll ? 'No schools found' : 'No schools assigned',
+                  description: isAdmin
+                      ? 'Use Add school to create the first school.'
+                      : canBrowseAll
+                          ? 'Contact an administrator to add schools.'
+                          : 'Ask your manager or administrator to assign a school.',
+                  action: canBrowseAll
+                      ? null
+                      : AppSecondaryButton(
+                          label: 'View profile',
+                          onPressed: () => context.go('/profile'),
+                        ),
+                ),
+              ];
+            }
+            final results = _filterSchools(schools);
+            subtitle = _searchQuery.isNotEmpty
+                ? '${results.length} of ${schools.length} schools'
+                : '${schools.length} ${schools.length == 1 ? 'school' : 'schools'}';
+            return _buildDirectory(schools, results, isAdmin);
+          },
+        );
+      },
+    );
+
+    return AdminPage(
+      title: 'Schools',
+      subtitle: subtitle,
+      showBack: false,
+      navActions: [
+        if (isAdmin)
+          AppGlassIconButton(
+            icon: AppIcons.add,
+            semanticLabel: 'Add school',
+            onPressed: _showAddOptions,
+          ),
+      ],
+      children: content,
     );
   }
 
@@ -175,368 +180,273 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
     });
   }
 
-  Widget _buildDirectory(List<School> schools) {
-    final results = _filterSchools(schools);
-    final showSearch = schools.length > 5;
-    final count = _searchQuery.isNotEmpty
-        ? '${results.length} of ${schools.length} schools'
-        : '${schools.length} ${schools.length == 1 ? 'school' : 'schools'}';
-
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 700),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+  List<Widget> _buildDirectory(
+      List<School> schools, List<School> results, bool isAdmin) {
+    final colors = AppPalette.of(context);
+    return [
+      if (schools.length > 5) ...[
+        TextField(
+          controller: _searchController,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Search by name or address',
+            prefixIcon: Icon(AppIcons.search, size: 20, color: colors.muted),
+            suffixIcon: _searchQuery.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    icon: Icon(HeroiconsSolid.xCircle,
+                        size: 20, color: colors.muted),
+                    onPressed: _clearSearch,
+                  )
+                : null,
+            fillColor: colors.fill,
+            border: _searchBorder,
+            enabledBorder: _searchBorder,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+          onChanged: (value) => setState(() => _searchQuery = value),
+        ),
+        const SizedBox(height: 16),
+      ],
+      if (results.isEmpty)
+        DeliveryMessage(
+          icon: AppIcons.search,
+          title: 'No schools found',
+          description: 'Try a different search term.',
+          action: AppSecondaryButton(
+            label: 'Clear search',
+            onPressed: _clearSearch,
+          ),
+        )
+      else
+        AppGroupedList(
+          separatorIndent: 57,
           children: [
-            if (showSearch)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppTokens.gutter,
-                  8,
-                  AppTokens.gutter,
-                  12,
-                ),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Search by name or address',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            tooltip: 'Clear search',
-                            icon: const Icon(Icons.close_rounded),
-                            onPressed: _clearSearch,
-                          )
-                        : null,
-                    fillColor: AppPalette.of(context).surface,
-                  ),
-                  onChanged: (value) => setState(() => _searchQuery = value),
-                ),
+            for (final school in results)
+              _SchoolRow(
+                key: ValueKey(school.id),
+                school: school,
+                isAdmin: isAdmin,
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppTokens.gutter,
-                8,
-                AppTokens.gutter,
-                12,
-              ),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: AppStatusPill(
-                  label: count,
-                  icon: Icons.school_outlined,
-                  tone: AppTone.green,
-                ),
-              ),
-            ),
-            Expanded(
-              child: results.isEmpty
-                  ? Center(
-                      child: DeliveryMessage(
-                        icon: Icons.search_off_rounded,
-                        title: 'No schools found',
-                        description: 'Try a different search term.',
-                        action: TextButton(
-                          onPressed: _clearSearch,
-                          child: const Text('Clear Search'),
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: EdgeInsets.fromLTRB(
-                        AppTokens.gutter,
-                        2,
-                        AppTokens.gutter,
-                        MediaQuery.paddingOf(context).bottom + 16,
-                      ),
-                      itemCount: results.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) => _SchoolCard(
-                        school: results[index],
-                        searchQuery: _searchQuery,
-                      ),
-                    ),
-            ),
           ],
         ),
-      ),
-    );
+    ];
   }
 
-  void _showAddSchoolDialog(BuildContext context, WidgetRef ref) {
-    _showSchoolDialog(context, ref, null);
-  }
+  static const _searchBorder = OutlineInputBorder(
+    borderRadius: BorderRadius.all(Radius.circular(AppTokens.controlRadius)),
+    borderSide: BorderSide.none,
+  );
 
-  void _showSchoolDialog(BuildContext context, WidgetRef ref, School? school) {
-    final nameController = TextEditingController(text: school?.name ?? '');
-    final addressController =
-        TextEditingController(text: school?.address ?? '');
-    final formKey = GlobalKey<FormState>();
+  void _showSchoolDialog(BuildContext context, WidgetRef ref) {
+    _showSchoolFormDialog(
+      context,
+      title: 'Add school',
+      submitLabel: 'Add',
+      onSubmit: (name, address) async {
+        final schoolsRepo = ref.read(schoolsRepositoryProvider);
+        final newSchool = School(
+          id: '',
+          name: name,
+          address: address,
+          createdAt: DateTime.now(),
+        );
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(school == null ? 'Add School' : 'Edit School'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'School Name',
-                  hintText: 'e.g., Brighton Primary School',
-                  prefixIcon: Icon(Icons.school),
-                ),
-                textCapitalization: TextCapitalization.words,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter a school name';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: addressController,
-                decoration: const InputDecoration(
-                  labelText: 'Address (Optional)',
-                  hintText: 'e.g., 123 Main St, Brighton',
-                  prefixIcon: Icon(Icons.location_on),
-                ),
-                textCapitalization: TextCapitalization.words,
-                maxLines: 2,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
+        final result = await schoolsRepo.createSchool(newSchool);
 
-              Navigator.of(dialogContext).pop();
-
-              final schoolsRepo = ref.read(schoolsRepositoryProvider);
-              final newSchool = School(
-                id: school?.id ?? '',
-                name: nameController.text.trim(),
-                address: addressController.text.trim().isEmpty
-                    ? null
-                    : addressController.text.trim(),
-                createdAt: school?.createdAt ?? DateTime.now(),
+        result.when(
+          success: (_) {
+            ref.invalidate(schoolsProvider);
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('School added successfully')),
               );
-
-              final result = school == null
-                  ? await schoolsRepo.createSchool(newSchool)
-                  : await schoolsRepo.updateSchool(newSchool);
-
-              result.when(
-                success: (_) {
-                  ref.invalidate(schoolsProvider);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(school == null
-                            ? 'School added successfully'
-                            : 'School updated successfully'),
-                      ),
-                    );
-                  }
-                },
-                failure: (message, _) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(message),
-                      ),
-                    );
-                  }
-                },
+            }
+          },
+          failure: (message, _) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(message)),
               );
-            },
-            child: Text(school == null ? 'Add' : 'Save'),
-          ),
-        ],
-      ),
+            }
+          },
+        );
+      },
     );
   }
 }
 
-class _SchoolCard extends ConsumerWidget {
-  const _SchoolCard({required this.school, this.searchQuery = ''});
+/// Add / edit school form. [onSubmit] gets the trimmed name and the address
+/// (null when empty) after the dialog closes.
+void _showSchoolFormDialog(
+  BuildContext context, {
+  required String title,
+  required String submitLabel,
+  School? school,
+  required Future<void> Function(String name, String? address) onSubmit,
+}) {
+  final nameController = TextEditingController(text: school?.name ?? '');
+  final addressController = TextEditingController(text: school?.address ?? '');
+  final formKey = GlobalKey<FormState>();
+
+  showDialog(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      scrollable: true,
+      title: Text(title),
+      content: Form(
+        key: formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'School name',
+                hintText: 'e.g., Brighton Primary School',
+                prefixIcon: Icon(AppIcons.school, size: 20),
+              ),
+              textCapitalization: TextCapitalization.words,
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Please enter a school name';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: addressController,
+              decoration: const InputDecoration(
+                labelText: 'Address (optional)',
+                hintText: 'e.g., 123 Main St, Brighton',
+                prefixIcon: Icon(AppIcons.location, size: 20),
+              ),
+              textCapitalization: TextCapitalization.words,
+              maxLines: 2,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            if (!formKey.currentState!.validate()) return;
+
+            Navigator.of(dialogContext).pop();
+            final address = addressController.text.trim();
+            await onSubmit(
+              nameController.text.trim(),
+              address.isEmpty ? null : address,
+            );
+          },
+          child: Text(submitLabel),
+        ),
+      ],
+    ),
+  );
+}
+
+class _SchoolRow extends ConsumerWidget {
+  const _SchoolRow({super.key, required this.school, required this.isAdmin});
 
   final School school;
-  final String searchQuery;
+  final bool isAdmin;
+
+  Future<void> _showOptions(BuildContext context, WidgetRef ref) async {
+    final choice = await showAdminActionSheet<_SchoolChoice>(
+      context,
+      title: school.name,
+      actions: const [
+        AdminSheetAction(
+            value: _SchoolChoice.edit, label: 'Edit', icon: AppIcons.edit),
+        AdminSheetAction(
+            value: _SchoolChoice.staff,
+            label: 'Manage staff',
+            icon: AppIcons.people),
+        AdminSheetAction(
+            value: _SchoolChoice.delete,
+            label: 'Delete',
+            icon: AppIcons.delete,
+            destructive: true),
+      ],
+    );
+    if (!context.mounted || choice == null) return;
+    switch (choice) {
+      case _SchoolChoice.edit:
+        _showEditSchoolDialog(context, ref);
+      case _SchoolChoice.staff:
+        context.push('/schools/${school.id}/staff-allocation', extra: school);
+      case _SchoolChoice.delete:
+        _showDeleteDialog(context, ref);
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isAdmin = ref.watch(isAdminProvider);
-
-    final matchingName = searchQuery.isNotEmpty &&
-        school.name.toLowerCase().contains(searchQuery.toLowerCase());
-
-    return AppPanel(
+    final address = school.address?.isNotEmpty == true ? school.address : null;
+    return AppListRow(
+      icon: AppIcons.school,
+      title: school.name,
+      subtitle: address,
+      titleStyle:
+          AppTypography.headline.copyWith(color: AppPalette.of(context).ink),
       onTap: () => context.push('/schools/${school.id}'),
-      child: Row(
-        children: [
-          AppIconTile(
-            icon: Icons.school_outlined,
-            tone: matchingName ? AppTone.blue : AppTone.green,
-            size: 46,
-          ),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(school.name,
-                    style: Theme.of(context).textTheme.titleMedium),
-                if (school.address?.isNotEmpty == true) ...[
-                  const SizedBox(height: 5),
-                  Text(school.address!,
-                      style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          if (isAdmin)
-            PopupMenuButton<String>(
-              tooltip: 'Manage school',
-              onSelected: (value) {
-                switch (value) {
-                  case 'edit':
-                    _showEditSchoolDialog(context, ref, school);
-                  case 'staff':
-                    context.push('/schools/${school.id}/staff-allocation',
-                        extra: school);
-                  case 'delete':
-                    _showDeleteDialog(context, ref, school);
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                const PopupMenuItem(
-                    value: 'staff', child: Text('Manage Staff')),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Delete',
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.error)),
-                ),
-              ],
+      showChevron: !isAdmin,
+      trailing: isAdmin
+          ? AdminOptionsButton(
+              semanticLabel: 'Manage school',
+              onPressed: () => _showOptions(context, ref),
             )
-          else
-            Icon(Icons.chevron_right_rounded,
-                color: AppPalette.of(context).muted),
-        ],
-      ),
+          : null,
     );
   }
 
-  void _showEditSchoolDialog(
-      BuildContext context, WidgetRef ref, School school) {
-    final nameController = TextEditingController(text: school.name);
-    final addressController = TextEditingController(text: school.address ?? '');
-    final formKey = GlobalKey<FormState>();
+  void _showEditSchoolDialog(BuildContext context, WidgetRef ref) {
+    _showSchoolFormDialog(
+      context,
+      title: 'Edit school',
+      submitLabel: 'Save',
+      school: school,
+      onSubmit: (name, address) async {
+        final schoolsRepo = ref.read(schoolsRepositoryProvider);
+        final updatedSchool = school.copyWith(name: name, address: address);
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit School'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'School Name',
-                  prefixIcon: Icon(Icons.school),
-                ),
-                textCapitalization: TextCapitalization.words,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter a school name';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: addressController,
-                decoration: const InputDecoration(
-                  labelText: 'Address (Optional)',
-                  prefixIcon: Icon(Icons.location_on),
-                ),
-                textCapitalization: TextCapitalization.words,
-                maxLines: 2,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
+        final result = await schoolsRepo.updateSchool(updatedSchool);
 
-              Navigator.of(dialogContext).pop();
-
-              final schoolsRepo = ref.read(schoolsRepositoryProvider);
-              final updatedSchool = school.copyWith(
-                name: nameController.text.trim(),
-                address: addressController.text.trim().isEmpty
-                    ? null
-                    : addressController.text.trim(),
+        result.when(
+          success: (_) {
+            ref.invalidate(schoolsProvider);
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('School updated successfully')),
               );
-
-              final result = await schoolsRepo.updateSchool(updatedSchool);
-
-              result.when(
-                success: (_) {
-                  ref.invalidate(schoolsProvider);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('School updated successfully'),
-                      ),
-                    );
-                  }
-                },
-                failure: (message, _) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(message),
-                      ),
-                    );
-                  }
-                },
+            }
+          },
+          failure: (message, _) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(message)),
               );
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+            }
+          },
+        );
+      },
     );
   }
 
-  void _showDeleteDialog(BuildContext context, WidgetRef ref, School school) {
+  void _showDeleteDialog(BuildContext context, WidgetRef ref) {
+    final colors = AppPalette.of(context);
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete School'),
+        scrollable: true,
+        title: const Text('Delete school'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -545,16 +455,13 @@ class _SchoolCard extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               'Warning: This will delete all associated data including year levels, classrooms, deliveries, and records.',
-              style:
-                  TextStyle(color: AppTone.blue.inkFor(context), fontSize: 12),
+              style: AppTypography.subheadline.copyWith(color: colors.muted),
             ),
             const SizedBox(height: 8),
             Text(
               'This action cannot be undone.',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold),
+              style: AppTypography.subheadline
+                  .copyWith(color: colors.error, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -576,26 +483,20 @@ class _SchoolCard extends ConsumerWidget {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('School deleted successfully'),
-                      ),
+                          content: Text('School deleted successfully')),
                     );
                   }
                 },
                 failure: (message, _) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(message),
-                      ),
+                      SnackBar(content: Text(message)),
                     );
                   }
                 },
               );
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
+            style: adminDestructiveStyle(context),
             child: const Text('Delete'),
           ),
         ],
