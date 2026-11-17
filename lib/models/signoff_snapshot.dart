@@ -8,6 +8,9 @@ import 'school.dart';
 /// The export data reviewed by the signer, encoded using JSON primitives for
 /// persistence on this device. A cached capture always requires review.
 class SignOffSnapshot {
+  // Keep this in sync with validSnapshot in firestore.rules.
+  static const maxReviewChecklistItems = 500;
+
   SignOffSnapshot({
     required this.sourceReadAt,
     required this.serverReviewed,

@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bts_delivery_app/app/router/app_router.dart';
 import 'package:bts_delivery_app/app/theme/app_theme.dart';
+import 'package:bts_delivery_app/models/checklist_item.dart';
 import 'package:bts_delivery_app/models/delivery.dart';
 import 'package:bts_delivery_app/models/delivery_visit.dart';
 import 'package:bts_delivery_app/models/offline/evidence_upload.dart';
@@ -136,7 +139,8 @@ void main() {
         fieldDraftStoreProvider.overrideWith((_) async => drafts),
         savedEditsProvider.overrideWith((_) => Stream.value(const [])),
         offlineMediaOwnerProvider.overrideWith((_, __) => null),
-        connectivityServiceProvider.overrideWithValue(_VisitOfflineConnectivity()),
+        connectivityServiceProvider
+            .overrideWithValue(_VisitOfflineConnectivity()),
         connectivityStatusProvider.overrideWith(
           (_) => Stream.value(ConnectivityStatus.offline),
         ),
@@ -276,6 +280,13 @@ void main() {
     );
     final queue = StateProvider((_) => emptyQueue);
     final worker = _VisitEvidenceWorker();
+    final checklistItem = ChecklistItem(
+      id: 'checked-packs',
+      title: 'Packs checked',
+      order: 0,
+      createdAt: DateTime.utc(2025),
+    );
+    final checklist = StateProvider((_) => [checklistItem]);
     final container = ProviderContainer(
       overrides: [
         currentStaffProvider.overrideWith(
@@ -304,12 +315,13 @@ void main() {
           ),
         ),
         activeChecklistItemsProvider.overrideWith(
-          (_) => Stream.value(const []),
+          (ref) => Stream.value(ref.watch(checklist)),
         ),
         baseSchoolsRepositoryProvider.overrideWithValue(school),
         visitSchoolsRepositoryFactoryProvider.overrideWithValue((_) => school),
         offlineMediaOwnerProvider.overrideWith((_, __) => null),
-        connectivityServiceProvider.overrideWithValue(_VisitOfflineConnectivity()),
+        connectivityServiceProvider
+            .overrideWithValue(_VisitOfflineConnectivity()),
         connectivityStatusProvider.overrideWith(
           (_) => Stream.value(ConnectivityStatus.offline),
         ),
@@ -456,6 +468,35 @@ void main() {
         'Example Visitor');
     expect(tester.widget<Signature>(canvas).controller.points, points);
 
+    container.read(checklist.notifier).state = [
+      for (var index = 0;
+          index <= SignOffSnapshot.maxReviewChecklistItems;
+          index++)
+        checklistItem.copyWith(id: 'item-$index'),
+    ];
+    await tester.pumpAndSettle();
+    await scrollCaptureTo(review);
+    await tester.tap(review.hitTestable());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('The signing checklist exceeds 500 items'),
+        findsOneWidget);
+    expect(find.text('Review delivery details'), findsNothing);
+    expect(worker.saved, isEmpty);
+    expect(tester.widget<Signature>(canvas).controller.points, points);
+    container.read(checklist.notifier).state = [checklistItem];
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    Future<void> confirmReview() async {
+      final checkbox =
+          find.widgetWithText(CheckboxListTile, checklistItem.title);
+      await tester.ensureVisible(checkbox);
+      await tester.pump();
+      await tester.tap(checkbox);
+      await tester.pump();
+      await tester.tap(find.text('Save for review'));
+    }
+
     await scrollCaptureTo(review);
     await tester.tap(review.hitTestable());
     await tester.pump();
@@ -463,7 +504,7 @@ void main() {
     expect(find.text('Review delivery details'), findsOneWidget);
     expect(find.textContaining('cached or unavailable'), findsOneWidget);
     school.reviewChanged = true;
-    await tester.tap(find.text('Save for review'));
+    await confirmReview();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(
@@ -478,7 +519,7 @@ void main() {
     await tester.tap(review.hitTestable());
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('Save for review'));
+    await confirmReview();
     // The actual signature encoder rasterizes through the engine. Pump Dart
     // work and allow its raster callback to complete outside the test clock.
     for (var attempt = 0; attempt < 80 && worker.saved.isEmpty; attempt++) {
@@ -493,10 +534,10 @@ void main() {
     expect(saved.ownerUid, 'field-owner');
     expect(saved.schoolId, 'school');
     expect(saved.deliveryId, 'first');
-    expect(saved.payload['typedName'], 'Example Visitor');
-    expect(saved.payload['snapshot']['serverReviewed'], isFalse);
-    expect(saved.payload['snapshot']['summary']['notes'],
-        'Use the west entrance.');
+    final expectedPayload = jsonDecode(
+      File('test/fixtures/visit_signature_payload.json').readAsStringSync(),
+    );
+    expect(saved.payload, expectedPayload);
     expect(saved.bytes.take(4), [0x89, 0x50, 0x4e, 0x47]);
     expect(find.byType(Signature), findsNothing);
     expect(find.text('Signature saved on this device'), findsOneWidget);
@@ -681,7 +722,7 @@ class _VisitSchools implements SchoolsRepository {
   }) async {
     final empty = SignOffSnapshot.incomplete(schoolId);
     return SignOffSnapshot(
-      sourceReadAt: DateTime.now(),
+      sourceReadAt: DateTime.utc(2025),
       serverReviewed: server,
       summary: {
         ...empty.summary,
@@ -777,7 +818,6 @@ class _VisitEvidenceWorker implements EvidenceUploadWorker {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
-
 
 class _VisitOfflineConnectivity implements ConnectivityService {
   @override

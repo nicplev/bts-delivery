@@ -204,6 +204,7 @@ service cloud.firestore {
 
     function validSnapshot(snapshot, reviewStatus) {
       let summary = snapshot.summary;
+      let reviewChecklist = summary.get('reviewChecklist', []);
       return snapshot.keys().hasOnly(['sourceReadAt', 'serverReviewed', 'summary']) &&
         boundedText(snapshot.sourceReadAt, 40) && snapshot.serverReviewed is bool &&
         reviewStatus == (snapshot.serverReviewed ? 'serverReviewed' : 'cached') &&
@@ -211,7 +212,7 @@ service cloud.firestore {
           'schoolName', 'schoolAddress', 'totalPacks', 'packTotalsByYearLevel',
           'packTotalsByClassroom', 'consumablesTotals', 'consumablesByYearLevel',
           'consumablesByClassroom', 'classroomDeliveryDetails', 'photoUrls', 'notes',
-          'notesByClassroom']) &&
+          'notesByClassroom', 'reviewChecklist']) &&
         boundedText(summary.schoolName, 200) && optionalText(summary.get('schoolAddress', null), 1000) &&
         count(summary.totalPacks) && optionalText(summary.get('notes', null), 100000) &&
         summary.packTotalsByYearLevel is map && summary.packTotalsByClassroom is map &&
@@ -219,7 +220,8 @@ service cloud.firestore {
         summary.consumablesByClassroom is map && summary.notesByClassroom is map &&
         summary.classroomDeliveryDetails is list && summary.classroomDeliveryDetails.size() <= 500 &&
         (!snapshot.serverReviewed || summary.classroomDeliveryDetails.size() > 0) &&
-        summary.photoUrls is list && summary.photoUrls.size() <= 1000;
+        summary.photoUrls is list && summary.photoUrls.size() <= 1000 &&
+        reviewChecklist is list && reviewChecklist.size() <= 500;
     }
 
     function validSignoffEvidence(schoolId, evidenceId) {

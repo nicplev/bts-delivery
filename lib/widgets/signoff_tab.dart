@@ -949,6 +949,10 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       _readSigningReview(DeliveryVisit visit) async {
     final repository = ref.read(baseSchoolsRepositoryProvider);
     final checklist = ref.read(activeChecklistItemsProvider).asData?.value;
+    if (checklist != null &&
+        checklist.length > SignOffSnapshot.maxReviewChecklistItems) {
+      throw const _ReviewChecklistTooLarge();
+    }
     SignOffSnapshot? draft;
     if (ref.read(isOnlineProvider)) {
       try {
@@ -1073,6 +1077,15 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         return true;
       }
       return false;
+    } on _ReviewChecklistTooLarge {
+      if (captureContext.mounted) {
+        _showError(
+          'The signing checklist exceeds ${SignOffSnapshot.maxReviewChecklistItems} items. '
+          'Ask a manager to shorten it.',
+          displayContext: captureContext,
+        );
+      }
+      return false;
     } catch (_) {
       if (captureContext.mounted) {
         _showError('Could not save the signature. Your entry is still open.',
@@ -1099,66 +1112,64 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          scrollable: true,
           title: const Text('Review delivery details'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (changed) ...[
-                  const Text(
-                      'Delivery information changed. Review the updated details.'),
-                  const SizedBox(height: 8),
-                ],
-                if (draft.serverReviewed)
-                  Text(
-                      'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
-                else
-                  const Text(
-                    'Some delivery information is cached or unavailable. '
-                    'This signature will need another review after syncing.',
-                  ),
-                const SizedBox(height: 12),
-                if (schoolNotes?.isNotEmpty == true) ...[
-                  Text('School notes',
-                      style: Theme.of(context).textTheme.titleSmall),
-                  Text(schoolNotes!),
-                  const SizedBox(height: 8),
-                ],
-                if (photoCount > 0 || photosChanged) ...[
-                  Text('$photoCount classroom photo attachments'),
-                  if (photosChanged)
-                    const Text(
-                      'Photo attachments changed. Return to the classroom to inspect them.',
-                    ),
-                  const SizedBox(height: 8),
-                ],
-                if (draft.classrooms.isEmpty)
-                  const Text(
-                      'No classroom quantities are available in this snapshot.')
-                else ...[
-                  Text(
-                    '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs',
-                  ),
-                  for (final row in draft.classrooms)
-                    _buildSnapshotClassroom(row as Map, notesByRoom),
-                ],
-                for (final item in checklist)
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: checked.contains(item.id),
-                    title: Text(item.title),
-                    subtitle:
-                        item.subtitle == null ? null : Text(item.subtitle!),
-                    onChanged: (value) => setState(() {
-                      if (value == true) {
-                        checked.add(item.id);
-                      } else {
-                        checked.remove(item.id);
-                      }
-                    }),
-                  ),
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (changed) ...[
+                const Text(
+                    'Delivery information changed. Review the updated details.'),
+                const SizedBox(height: 8),
               ],
-            ),
+              if (draft.serverReviewed)
+                Text(
+                    'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
+              else
+                const Text(
+                  'Some delivery information is cached or unavailable. '
+                  'This signature will need another review after syncing.',
+                ),
+              const SizedBox(height: 12),
+              if (schoolNotes?.isNotEmpty == true) ...[
+                Text('School notes',
+                    style: Theme.of(context).textTheme.titleSmall),
+                Text(schoolNotes!),
+                const SizedBox(height: 8),
+              ],
+              if (photoCount > 0 || photosChanged) ...[
+                Text('$photoCount classroom photo attachments'),
+                if (photosChanged)
+                  const Text(
+                    'Photo attachments changed. Return to the classroom to inspect them.',
+                  ),
+                const SizedBox(height: 8),
+              ],
+              if (draft.classrooms.isEmpty)
+                const Text(
+                    'No classroom quantities are available in this snapshot.')
+              else ...[
+                Text(
+                  '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs',
+                ),
+                for (final row in draft.classrooms)
+                  _buildSnapshotClassroom(row as Map, notesByRoom),
+              ],
+              for (final item in checklist)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: checked.contains(item.id),
+                  title: Text(item.title),
+                  subtitle: item.subtitle == null ? null : Text(item.subtitle!),
+                  onChanged: (value) => setState(() {
+                    if (value == true) {
+                      checked.add(item.id);
+                    } else {
+                      checked.remove(item.id);
+                    }
+                  }),
+                ),
+            ],
           ),
           actions: [
             TextButton(
@@ -1353,6 +1364,10 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       ),
     );
   }
+}
+
+class _ReviewChecklistTooLarge implements Exception {
+  const _ReviewChecklistTooLarge();
 }
 
 class _SignatureCaptureScreen extends StatefulWidget {

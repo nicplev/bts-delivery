@@ -1,20 +1,23 @@
 const assert = require("node:assert/strict");
 const {test, after} = require("node:test");
 const admin = require("firebase-admin");
+const visitSignaturePayload = require("../../test/fixtures/visit_signature_payload.json");
 
-const projectId = "demo-bts-delivery";
+const projectId = process.env.BTS_EMULATOR_TEST_PROJECT ?? "demo-bts-delivery";
 const dbHost = process.env.FIRESTORE_EMULATOR_HOST;
 const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST;
 const storageHost = process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+const functionsHost = process.env.BTS_EMULATOR_TEST_FUNCTIONS_HOST ?? "127.0.0.1:5001";
 const local = (value) => /^(?:localhost|127\.0\.0\.1):\d+$/.test(value ?? "");
-if (![dbHost, authHost, storageHost].every(local)) {
+if (!["demo-bts-delivery", "demo-bts-delivery-rules"].includes(projectId) ||
+    ![dbHost, authHost, storageHost, functionsHost].every(local)) {
   throw new Error("Run this suite with the demo Firebase emulators.");
 }
 const app = admin.initializeApp({projectId});
 const db = app.firestore();
 const root = `projects/${projectId}/databases/(default)/documents`;
 const documents = `http://${dbHost}/v1/${root}`;
-const functions = `http://127.0.0.1:5001/${projectId}/us-central1`;
+const functions = `http://${functionsHost}/${projectId}/us-central1`;
 const bucket = `${projectId}.appspot.com`;
 const storage = `http://${storageHost}/v0/b/${bucket}/o`;
 
@@ -334,30 +337,36 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
       ownerUid: field.uid,
       signaturePath: `schools/alpha/signoffs/${operation}.png`,
       capturedAt: now,
-      typedName: "Example signer",
       reviewStatus: "cached",
-      snapshot: {
-        sourceReadAt: now.toDate().toISOString(),
-        serverReviewed: false,
-        summary: {
-          schoolName: "Alpha",
-          totalPacks: 12,
-          packTotalsByYearLevel: {},
-          packTotalsByClassroom: {},
-          consumablesTotals: {},
-          consumablesByYearLevel: {},
-          consumablesByClassroom: {},
-          notesByClassroom: {},
-          classroomDeliveryDetails: [],
-          photoUrls: [],
-        },
-      },
+      ...visitSignaturePayload,
     };
     const path = `schools/alpha/signoffs/${operation}`;
     const pointer = "schools/alpha/signoffPointers/visit-alpha";
     await status(await write(path, outsider, {...capture, ownerUid: outsider.uid}), 403);
     await status(await write(path, field, {...capture, reviewStatus: "serverReviewed"}), 403);
     await status(await write(path, field, {...capture, deliveryId: "beta"}), 403);
+    const snapshot = capture.snapshot;
+    const {reviewChecklist, ...legacySummary} = snapshot.summary;
+    assert.equal(reviewChecklist.length, 1);
+    for (const summary of [
+      {...snapshot.summary, reviewChecklist: {id: "invalid"}},
+      {...snapshot.summary, reviewChecklist: Array(501).fill(reviewChecklist[0])},
+      {...snapshot.summary, unsupportedMetadata: []},
+    ]) {
+      await status(await write(path, field, {...capture, snapshot: {...snapshot, summary}}), 403);
+    }
+
+    for (const [id, summary] of [
+      ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaab", legacySummary],
+      ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaac", {...legacySummary, reviewChecklist: []}],
+    ]) {
+      await status(await write(`schools/alpha/signoffs/${id}`, field, {
+        ...capture,
+        id,
+        signaturePath: `schools/alpha/signoffs/${id}.png`,
+        snapshot: {...snapshot, summary},
+      }), 200);
+    }
 
     const pointerData = {evidenceId: operation, deliveryId: "alpha", capturedAt: now};
     await status(await commit(field, [
@@ -365,6 +374,9 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
       {update: {name: `${root}/${pointer}`, fields: fields(pointerData)}},
     ]), 200);
     await status(await get(pointer, field), 200);
+    const savedCapture = (await db.doc(path).get()).data();
+    assert.equal(savedCapture.typedName, visitSignaturePayload.typedName);
+    assert.deepEqual(savedCapture.snapshot, visitSignaturePayload.snapshot);
     await status(await get(path, outsider), 403);
     await status(await write(path, field, {...capture, typedName: "Changed"}), 403);
     await status(await remove(path, adminUser), 403);
