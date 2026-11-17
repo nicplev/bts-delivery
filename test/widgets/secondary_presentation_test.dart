@@ -77,7 +77,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text(_school.name).last);
     await tester.pumpAndSettle();
-    final save = find.text('Save Delivery');
+    final save = find.text('Save delivery');
     await tester.scrollUntilVisible(save, 160,
         scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
