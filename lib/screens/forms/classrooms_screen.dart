@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../providers/auth_providers.dart';
 import '../../providers/schools_providers.dart';
 import '../../models/school.dart';
 import '../../models/delivery_visit.dart';
 import '../../providers/delivery_visit_provider.dart';
 import '../../services/offline/field_draft_store.dart';
+import '../../widgets/classroom_record_row.dart';
 import '../../widgets/field_draft_dialog.dart';
 import '../../utils/notification_utils.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
+import 'year_levels_screen.dart';
 
+/// One year level's classrooms: the year badge and name as the header, the
+/// visit progress, year totals and the classroom rows. "Add classroom" is the
+/// floating primary action; rename / delete live in each row's options and
+/// the year level's own options in the nav bar.
 class ClassroomsScreen extends ConsumerWidget {
   const ClassroomsScreen({
     super.key,
@@ -35,161 +42,212 @@ class ClassroomsScreen extends ConsumerWidget {
     )));
 
     final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
-    final yearLevelLabel = yearLevelsAsync.valueOrNull
+    final canEditYearLevel = ref.watch(canEditSchoolDataProvider);
+    final yearLevel = yearLevelsAsync.valueOrNull
         ?.where((level) => level.id == yearLevelId)
-        .firstOrNull
-        ?.label;
+        .firstOrNull;
+    final yearLevelLabel = yearLevel?.label;
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: MediaQuery.textScalerOf(context).scale(24) * 2 + 12,
-        title: Text(
-          yearLevelLabel == null
-              ? 'Classrooms'
-              : '$yearLevelLabel – Classrooms',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
+      extendBodyBehindAppBar: true,
+      appBar: AppNavBar(
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showAddClassroomDialog(context, ref),
-            tooltip: 'Add Classroom',
-          ),
+          if (canEditYearLevel && yearLevel != null)
+            AppGlassIconButton(
+              key: const ValueKey('year-level-options'),
+              icon: AppIcons.more,
+              semanticLabel: 'Year level options',
+              onPressed: () => _showYearLevelOptions(context, ref, yearLevel),
+            ),
         ],
       ),
-      body: classroomsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => Center(
-          child: DeliveryMessage(
-            icon: Icons.error_outline,
-            title: 'Couldn’t load classrooms',
-            action: TextButton(
-              onPressed: () => ref.invalidate(classroomsProvider((
-                schoolId: schoolId,
-                yearLevelId: yearLevelId,
-              ))),
-              child: const Text('Retry'),
-            ),
-          ),
+      body: AppFloatingActionArea(
+        action: AppGlassPrimaryButton(
+          key: const ValueKey('add-classroom'),
+          label: 'Add classroom',
+          icon: AppIcons.add,
+          onPressed: () => _showAddClassroomDialog(context, ref),
         ),
-        data: (classrooms) {
-          if (classrooms.isEmpty) {
-            return Center(
-              child: DeliveryMessage(
-                icon: Icons.class_outlined,
-                title: 'No classrooms found',
-                action: FilledButton.icon(
-                  onPressed: () => _showAddClassroomDialog(context, ref),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Classroom'),
-                ),
+        child: Builder(builder: (context) {
+          final header = <Widget>[
+            if (yearLevelLabel != null) ...[
+              AppYearBadge(label: yearLevelLabel, size: 44),
+              const SizedBox(height: 12),
+            ],
+            AppLargeTitle(
+              title: yearLevelLabel ?? 'Classrooms',
+              subtitle: classroomsAsync.whenOrNull(
+                data: (rooms) => rooms.isEmpty
+                    ? 'Classrooms'
+                    : '${rooms.length} classroom${rooms.length == 1 ? '' : 's'}',
               ),
-            );
-          }
-
-          final completed = classrooms
-              .where((room) =>
-                  room.completionStatus == ClassroomCompletionStatus.complete)
-              .length;
-          return ListView(
-            padding: EdgeInsets.fromLTRB(
-              AppTokens.gutter,
-              12,
-              AppTokens.gutter,
-              MediaQuery.paddingOf(context).bottom + 16,
             ),
-            children: [
-              if (isVisit) ...[
-                AppPanel(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Pack delivery'),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$completed of ${classrooms.length} classrooms complete',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(
-                        value: completed / classrooms.length,
-                        minHeight: 6,
-                        borderRadius: BorderRadius.circular(99),
-                        color: AppTone.green.accent,
-                        backgroundColor: AppTone.green.tintFor(context),
-                        semanticsLabel: 'Pack delivery completion',
-                      ),
-                    ],
+            const SizedBox(height: 16),
+          ];
+          final body = classroomsAsync.when<List<Widget>>(
+            loading: () => const [
+              Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ],
+            error: (_, __) => [
+              AppPanel(
+                child: DeliveryMessage(
+                  icon: AppIcons.error,
+                  title: 'Couldn’t load classrooms',
+                  action: AppSecondaryButton(
+                    label: 'Retry',
+                    icon: AppIcons.retry,
+                    expand: false,
+                    large: false,
+                    onPressed: () => ref.invalidate(classroomsProvider((
+                      schoolId: schoolId,
+                      yearLevelId: yearLevelId,
+                    ))),
                   ),
                 ),
-                const SizedBox(height: 16),
-              ],
-              consumablesTotalsAsync.when(
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-                data: (totals) {
-                  if (totals.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return AppPanel(
-                    margin: const EdgeInsets.only(bottom: 16),
+              ),
+            ],
+            data: (classrooms) {
+              if (classrooms.isEmpty) {
+                return const [
+                  AppPanel(
+                    child: DeliveryMessage(
+                      icon: AppIcons.classroom,
+                      title: 'No classrooms found',
+                      description: 'Use “Add classroom” to create one.',
+                    ),
+                  ),
+                ];
+              }
+              final completed = classrooms
+                  .where((room) =>
+                      room.completionStatus ==
+                      ClassroomCompletionStatus.complete)
+                  .length;
+              final colors = AppPalette.of(context);
+              return [
+                if (isVisit) ...[
+                  AppPanel(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Row(
-                          children: [
-                            const AppIconTile(icon: Icons.inventory_2_outlined),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Year Level Totals',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ),
-                          ],
+                        Text('Pack delivery',
+                            style: AppTypography.footnote.copyWith(
+                                color: colors.muted,
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 4),
+                        Text(
+                          '$completed of ${classrooms.length} classrooms complete',
+                          style:
+                              AppTypography.title3.copyWith(color: colors.ink),
                         ),
-                        const SizedBox(height: 8),
-                        for (final entry in totals.entries)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(child: Text(entry.key)),
-                                const SizedBox(width: 12),
-                                Flexible(
-                                  child: Text(
-                                    '${entry.value.quantity} ${entry.value.unit}',
-                                    textAlign: TextAlign.end,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                        const SizedBox(height: 12),
+                        AppProgressBar(
+                          value: completed / classrooms.length,
+                          semanticLabel: 'Pack delivery completion',
+                        ),
                       ],
                     ),
-                  );
-                },
-              ),
-              const AppSectionHeading(title: 'Classrooms'),
-              const SizedBox(height: 8),
-              ...classrooms.map((classroom) {
-                return _ClassroomCard(
-                  schoolId: schoolId,
-                  yearLevelId: yearLevelId,
-                  yearLevelLabel: yearLevelLabel ?? '',
-                  classroom: classroom,
-                );
-              }),
-            ],
+                  ),
+                  const SizedBox(height: AppTokens.sectionGap),
+                ],
+                ...consumablesTotalsAsync.maybeWhen(
+                  orElse: () => const <Widget>[],
+                  data: (totals) => totals.isEmpty
+                      ? const <Widget>[]
+                      : [
+                          const AppSectionLabel('Year level totals'),
+                          const SizedBox(height: 8),
+                          AppGroupedList(
+                            separatorIndent: 57,
+                            children: [
+                              for (final entry in totals.entries)
+                                AppListRow(
+                                  icon: AppIcons.consumables,
+                                  title: entry.key,
+                                  detail:
+                                      '${entry.value.quantity} ${entry.value.unit}',
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: AppTokens.sectionGap),
+                        ],
+                ),
+                const AppSectionLabel('Classrooms'),
+                const SizedBox(height: 8),
+                AppGroupedList(
+                  separatorIndent: 64,
+                  children: [
+                    for (final classroom in classrooms)
+                      _ClassroomRow(
+                        key: ValueKey('classroom-${classroom.id}'),
+                        schoolId: schoolId,
+                        yearLevelId: yearLevelId,
+                        yearLevelLabel: yearLevelLabel ?? '',
+                        classroom: classroom,
+                        isVisit: isVisit,
+                      ),
+                  ],
+                ),
+              ];
+            },
           );
-        },
+          return ListView(
+            padding: AppInsets.scroll(context),
+            children: [...header, ...body],
+          );
+        }),
       ),
+    );
+  }
+
+  void _showYearLevelOptions(
+    BuildContext context,
+    WidgetRef ref,
+    YearLevel yearLevel,
+  ) {
+    showAppGlassSheet<void>(
+      context: context,
+      title: yearLevel.label,
+      builder: (sheetContext) {
+        void run(void Function() action) {
+          Navigator.of(sheetContext).pop();
+          if (context.mounted) action();
+        }
+
+        final colors = AppPalette.of(sheetContext);
+        return SingleChildScrollView(
+          child: AppGroupedList(
+            separatorIndent: 57,
+            children: [
+              AppListRow(
+                key: const ValueKey('rename-year-level'),
+                icon: AppIcons.edit,
+                title: 'Rename year level',
+                onTap: () => run(() =>
+                    showEditYearLevelDialog(context, ref, schoolId, yearLevel)),
+              ),
+              AppListRow(
+                key: const ValueKey('delete-year-level'),
+                icon: AppIcons.delete,
+                title: 'Delete year level',
+                titleStyle: AppTypography.body.copyWith(color: colors.error),
+                onTap: () => run(() => showDeleteYearLevelDialog(
+                      context,
+                      ref,
+                      schoolId,
+                      yearLevel,
+                      onDeleted: () {
+                        if (context.mounted) appNavigateBack(context);
+                      },
+                    )),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -200,13 +258,13 @@ class ClassroomsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Classroom'),
+        title: const Text('Add classroom'),
         content: Form(
           key: formKey,
           child: TextFormField(
             controller: nameController,
             decoration: const InputDecoration(
-              labelText: 'Classroom Name',
+              labelText: 'Classroom name',
               hintText: 'e.g., Room 1A, Blue Room',
             ),
             autofocus: true,
@@ -258,194 +316,99 @@ class ClassroomsScreen extends ConsumerWidget {
   }
 }
 
-class _ClassroomCard extends ConsumerWidget {
-  const _ClassroomCard({
+class _ClassroomRow extends ConsumerWidget {
+  const _ClassroomRow({
+    super.key,
     required this.schoolId,
     required this.yearLevelId,
     required this.yearLevelLabel,
     required this.classroom,
+    required this.isVisit,
   });
 
   final String schoolId;
   final String yearLevelId;
   final String yearLevelLabel;
   final Classroom classroom;
+  final bool isVisit;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final packTotalAsync = ref.watch(packTotalProvider((
-      schoolId: schoolId,
-      yearLevelId: yearLevelId,
-      classroomId: classroom.id,
-    )));
-    final yearLevelBreakdownsAsync = ref.watch(yearLevelBreakdownsProvider((
-      schoolId: schoolId,
-      yearLevelId: yearLevelId,
-      classroomId: classroom.id,
-    )));
+    final breakdowns = ref
+        .watch(yearLevelBreakdownsProvider((
+          schoolId: schoolId,
+          yearLevelId: yearLevelId,
+          classroomId: classroom.id,
+        )))
+        .asData
+        ?.value;
+    final colors = AppPalette.of(context);
+    final students = breakdowns == null || breakdowns.isEmpty
+        ? null
+        : breakdowns.fold<int>(0, (sum, item) => sum + item.studentCount);
 
-    final backgroundColor =
-        YearLevelColors.getBackgroundColor(context, yearLevelLabel);
-    final iconColor = YearLevelColors.getIconColor(context, yearLevelLabel);
-    final needsBorder = YearLevelColors.needsBorder(yearLevelLabel);
-
-    final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
-    final (statusLabel, statusIcon, statusTone) =
-        switch (classroom.completionStatus) {
-      ClassroomCompletionStatus.notAttended => (
-          'Not Attended',
-          Icons.remove_circle_outline,
-          AppTone.neutral
-        ),
-      ClassroomCompletionStatus.incomplete => (
-          'Incomplete',
-          Icons.warning_amber_rounded,
-          AppTone.yellow
-        ),
-      ClassroomCompletionStatus.complete => (
-          'Complete',
-          Icons.check_circle_outline,
-          AppTone.green
-        ),
-    };
-    final breakdowns = yearLevelBreakdownsAsync.asData?.value;
-    final typography = Theme.of(context).textTheme;
-
-    return AppPanel(
-      margin: const EdgeInsets.only(bottom: 10),
-      onTap: () => context.push(schoolWorkPath(
-        schoolId,
-        visit: ref.read(activeDeliveryVisitProvider),
-        suffix:
-            '/year/${Uri.encodeComponent(yearLevelId)}/classrooms/${Uri.encodeComponent(classroom.id)}',
-      )),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: backgroundColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: needsBorder
-                      ? Border.all(color: AppPalette.of(context).outline)
-                      : null,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ClassroomRecordRow(
+          schoolId: schoolId,
+          yearLevelId: yearLevelId,
+          yearLevelLabel: yearLevelLabel,
+          classroom: classroom,
+          isVisit: isVisit,
+          onTap: () => context.push(schoolWorkPath(
+            schoolId,
+            visit: ref.read(activeDeliveryVisitProvider),
+            suffix:
+                '/year/${Uri.encodeComponent(yearLevelId)}/classrooms/${Uri.encodeComponent(classroom.id)}',
+          )),
+          action: PopupMenuButton<String>(
+            tooltip: 'Classroom options',
+            icon: Icon(AppIcons.more, size: 20, color: colors.ink),
+            onSelected: (value) {
+              if (value == 'edit') {
+                _showEditClassroomDialog(context, ref, classroom);
+              } else if (value == 'delete') {
+                _showDeleteConfirmation(context, ref, classroom);
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(AppIcons.edit, size: 20, color: colors.ink),
+                    const SizedBox(width: 12),
+                    const Text('Rename'),
+                  ],
                 ),
-                child: Icon(Icons.meeting_room_outlined,
-                    size: 21, color: iconColor),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(classroom.name, style: typography.titleMedium),
-              ),
-              PopupMenuButton<String>(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(AppIcons.delete, size: 20, color: colors.error),
+                    const SizedBox(width: 12),
+                    Text('Delete', style: TextStyle(color: colors.error)),
+                  ],
                 ),
-                elevation: 4,
-                offset: const Offset(0, 8),
-                onSelected: (value) {
-                  if (value == 'edit') {
-                    _showEditClassroomDialog(context, ref, classroom);
-                  } else if (value == 'delete') {
-                    _showDeleteConfirmation(context, ref, classroom);
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'edit',
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.edit_outlined,
-                          size: 20,
-                          color: AppPalette.of(context).muted,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Edit',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: AppPalette.of(context).ink,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.delete_outline,
-                          size: 20,
-                          color: AppPalette.of(context).error,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Delete',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: AppPalette.of(context).error,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (isVisit)
-                AppStatusPill(
-                    label: statusLabel, icon: statusIcon, tone: statusTone),
-              if (breakdowns != null && breakdowns.length > 1)
-                const AppStatusPill(label: 'Composite', tone: AppTone.blue),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            packTotalAsync.when(
-              loading: () => 'Loading pack total…',
-              error: (_, __) => 'Pack total unavailable',
-              data: (total) => total == null
-                  ? 'Pack total: Not set'
-                  : 'Pack total: ${total.total}',
+        ),
+        if (students != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(64, 0, 16, 10),
+            child: Text(
+              [
+                '$students students',
+                if (breakdowns!.length > 1)
+                  'Composite: ${breakdowns.map((item) => '${item.studentCount} ${item.yearLevelLabel}').join(', ')}',
+              ].join(' · '),
+              style: AppTypography.footnote.copyWith(color: colors.muted),
             ),
-            style: typography.bodyMedium
-                ?.copyWith(color: AppPalette.of(context).muted),
           ),
-          if (breakdowns != null && breakdowns.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              '${breakdowns.fold<int>(0, (sum, item) => sum + item.studentCount)} students',
-              style: typography.bodyMedium
-                  ?.copyWith(color: AppTone.blue.inkFor(context)),
-            ),
-            if (breakdowns.length > 1)
-              Text(
-                breakdowns
-                    .map(
-                        (item) => '${item.studentCount} ${item.yearLevelLabel}')
-                    .join(', '),
-                style: typography.bodySmall
-                    ?.copyWith(color: AppPalette.of(context).muted),
-              ),
-          ],
-        ],
-      ),
+      ],
     );
   }
 
@@ -499,7 +462,7 @@ class _ClassroomCard extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Classroom'),
+        title: const Text('Delete classroom'),
         content: Text(
           'Are you sure you want to delete "${classroom.name}"? This action cannot be undone.',
         ),
@@ -532,8 +495,8 @@ class _ClassroomCard extends ConsumerWidget {
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
+              backgroundColor: AppPalette.of(context).error,
+              foregroundColor: AppPalette.of(context).onError,
             ),
             child: const Text('Delete'),
           ),
