@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +25,9 @@ import '../services/date_utils.dart';
 import '../services/excel_export_service.dart';
 import '../models/school.dart';
 import 'design/design.dart';
+
+part 'signoff/pack_progress.dart';
+part 'signoff/signature_capture.dart';
 
 final _signedEvidenceProvider = StreamProvider.autoDispose
     .family<SignedEvidence?, ({String schoolId, String? deliveryId})>(
@@ -72,6 +76,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
   MaterialPageRoute<void>? _captureRoute;
   DialogRoute<bool>? _reviewRoute;
   bool _isCorrecting = false;
+  bool _showBreakdown = false;
 
   @override
   void dispose() {
@@ -116,6 +121,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           return DeliveryVisitGate(
             visit: visit,
             child: _SignatureCaptureScreen(
+              schoolId: widget.schoolId,
               schoolName: widget.schoolName,
               visitId: visit.deliveryId,
               visitDate: widget.visitDate,
@@ -147,9 +153,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     if (renderObject == null) return;
     // The inner position coordinates with the visit header. Scrolling the
     // outer position separately can reset the inner offset during the jump.
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     Scrollable.maybeOf(target)?.position.ensureVisible(
           renderObject,
-          duration: const Duration(milliseconds: 400),
+          duration:
+              reduceMotion ? Duration.zero : const Duration(milliseconds: 400),
           curve: Curves.easeInOut,
           alignment: 0.1,
         );
@@ -174,144 +182,395 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         !signatureStatusUnavailable &&
         pending == null &&
         (signed.valueOrNull == null || _isCorrecting);
-    return SingleChildScrollView(
-      key: const PageStorageKey('school-signoff'),
-      primary: true,
-      padding: EdgeInsets.fromLTRB(
-        AppTokens.gutter,
-        16,
-        AppTokens.gutter,
-        MediaQuery.paddingOf(context).bottom + 16,
+    final latest = signed.valueOrNull;
+    final record = _isCorrecting ? null : latest;
+    final progress = _watchPackProgress(ref, widget.schoolId);
+
+    final ({String label, IconData icon, VoidCallback onPressed})? primary;
+    if (showForm) {
+      primary = (
+        label: 'Continue to signature',
+        icon: AppIcons.signature,
+        onPressed: _openCapture,
+      );
+    } else if (record != null && record.snapshot.serverReviewed) {
+      // Builds an Excel file, then offers to share or open it.
+      primary = (
+        label: 'Export summary',
+        icon: AppIcons.exportFile,
+        onPressed: () => _exportSummary(evidence: record),
+      );
+    } else {
+      primary = null;
+    }
+    // At large text sizes the wrapped floating label would cover most of a
+    // small screen, so the action sits in the content instead.
+    final inline = _largeText(context);
+    final action = primary == null || inline
+        ? null
+        : AppGlassPrimaryButton(
+            label: primary.label,
+            icon: primary.icon,
+            onPressed: primary.onPressed,
+          );
+    final inlineAction = primary == null || !inline
+        ? null
+        : AppPrimaryButton(
+            label: primary.label,
+            icon: primary.icon,
+            onPressed: primary.onPressed,
+          );
+
+    final status = _buildStatusNotices(
+      signed: signed,
+      pending: pending,
+      activeId: uploads?.activeId,
+      signatureStatusLoading: signatureStatusLoading,
+      signatureStatusUnavailable: signatureStatusUnavailable,
+    );
+
+    return AppFloatingActionArea(
+      action: action,
+      child: Builder(
+        builder: (context) => SingleChildScrollView(
+          key: const PageStorageKey('school-signoff'),
+          primary: true,
+          padding: EdgeInsets.fromLTRB(
+            AppTokens.gutter,
+            16,
+            AppTokens.gutter,
+            AppInsets.bottom(context),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (record != null) ...[
+                _buildSignedRecord(record,
+                    pending: pending, inlineAction: inlineAction),
+                ..._gap(status, before: 16),
+                const SizedBox(height: AppTokens.sectionGap),
+                const AppSectionLabel('Current visit records'),
+                const SizedBox(height: 8),
+              ] else ...[
+                ..._gap(status, after: 16),
+                if (inlineAction != null) ...[
+                  inlineAction,
+                  const SizedBox(height: 16),
+                ],
+              ],
+              _PackSummaryCard(progress: progress, onRefresh: _refreshTotals),
+              const SizedBox(height: 16),
+              _buildAttentionCard(progress),
+              if (_showBreakdown) ...[
+                const SizedBox(height: AppTokens.sectionGap),
+                _buildDeliveryBreakdown(),
+              ],
+              _buildConsumablesTotals(),
+              _buildPhotosRow(),
+              const SizedBox(height: AppTokens.sectionGap),
+              _buildNotesCard(),
+              _buildSchoolNotes(),
+              if (record == null) ...[
+                const SizedBox(height: AppTokens.sectionGap),
+                AppSecondaryButton(
+                  label: 'View visit history',
+                  icon: AppIcons.timer,
+                  onPressed: _showSignOffHistory,
+                ),
+              ],
+              if (legacy != null) ...[
+                const SizedBox(height: AppTokens.sectionGap),
+                AppPanel(
+                  padding: EdgeInsets.zero,
+                  child: ExpansionTile(
+                    shape: const Border(),
+                    collapsedShape: const Border(),
+                    leading:
+                        const AppIconTile(icon: AppIcons.signature, size: 29),
+                    title: const Text('Earlier school sign-off'),
+                    subtitle: const Text('No delivery visit was recorded'),
+                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [_buildCompletedSignOff(legacy)],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  /// Spaces a list of notices with 12 pt between them.
+  List<Widget> _gap(List<Widget> items, {double before = 0, double after = 0}) {
+    if (items.isEmpty) return const [];
+    return [
+      if (before > 0) SizedBox(height: before),
+      for (var index = 0; index < items.length; index++) ...[
+        if (index > 0) const SizedBox(height: 12),
+        items[index],
+      ],
+      if (after > 0) SizedBox(height: after),
+    ];
+  }
+
+  /// Sign-off states: checking, unavailable, saved on this device, correction
+  /// in progress, no scheduled delivery, history failure.
+  List<Widget> _buildStatusNotices({
+    required AsyncValue<SignedEvidence?> signed,
+    required EvidenceUpload? pending,
+    required String? activeId,
+    required bool signatureStatusLoading,
+    required bool signatureStatusUnavailable,
+  }) {
+    final latest = signed.valueOrNull;
+    return [
+      if (widget.deliveryId != null && signatureStatusUnavailable)
+        const AppNotice.warning(
+          message:
+              'Signature status unavailable. Saved work may need attention.',
+        )
+      else if (widget.deliveryId != null && signatureStatusLoading)
+        const AppNotice(
+          icon: AppIcons.timer,
+          message: 'Checking signature status…',
+        ),
+      if (pending != null) _buildPendingSignature(pending, activeId),
+      if (widget.deliveryId == null && latest == null && pending == null)
+        const AppNotice(
+          icon: AppIcons.infoOutline,
+          message: 'Open a scheduled delivery to create a sign-off.',
+        ),
+      if (signed.hasError)
+        const AppNotice(
+          icon: AppIcons.error,
+          message: 'Could not load earlier signed snapshots.',
+        ),
+      if (pending == null && _isCorrecting)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const AppNotice(
+              icon: AppIcons.edit,
+              message: 'Signing a correction. The original record is kept.',
+            ),
+            const SizedBox(height: 8),
+            AppSecondaryButton(
+              label: 'Cancel correction',
+              large: false,
+              onPressed: () => setState(() => _isCorrecting = false),
+            ),
+          ],
+        ),
+    ];
+  }
+
+  static bool _largeText(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(17) > 26;
+
+  Widget _buildPendingSignature(EvidenceUpload pending, String? activeId) {
+    final colors = AppPalette.of(context);
+    final syncing = pending.id == activeId;
+    final attention = !syncing && pending.needsAttention;
+    final ink = attention ? colors.warningInk : colors.ink;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: attention ? colors.warningTint : colors.surface,
+        borderRadius: BorderRadius.circular(AppTokens.cardRadius),
+        border: colors.highContrast ? Border.all(color: colors.outline) : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          children: [
+            attention
+                ? const AppIconTile.warning(icon: AppIcons.warning, size: 29)
+                : const AppIconTile(icon: AppIcons.savedOnDevice, size: 29),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Signature saved on this device',
+                    style: AppTypography.headline.copyWith(color: ink),
+                  ),
+                  Text(
+                    syncing ? 'Syncing' : pending.statusText,
+                    style: AppTypography.subheadline
+                        .copyWith(color: attention ? ink : colors.muted),
+                  ),
+                ],
+              ),
+            ),
+            if (!syncing) EvidenceUploadActions(item: pending),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAttentionCard(_PackProgress progress) {
+    final colors = AppPalette.of(context);
+    final yearLevels = ref.watch(yearLevelsProvider(widget.schoolId));
+    final attention = progress.rooms.where((room) => !room.complete).toList();
+    final complete = progress.rooms.length - attention.length;
+    final Widget? placeholder = yearLevels.when(
+      data: (years) =>
+          years.isEmpty ? const Text('No year levels found') : null,
+      loading: () => const Text('Loading classrooms…'),
+      error: (_, __) => const Text('Couldn’t load year levels'),
+    );
+    final completeLabel = complete == 0
+        ? 'No classrooms complete yet'
+        : '${_count(complete, 'classroom')} complete';
+    final expanded = _showBreakdown;
+    final toggle = Semantics(
+      expanded: expanded,
+      child: AppPressable(
+        onTap: () => setState(() => _showBreakdown = !expanded),
+        semanticLabel:
+            '$completeLabel. ${expanded ? 'Hide' : 'Show'} all classrooms',
+        excludeChildSemantics: true,
+        pressedColor: colors.fill,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 52),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 36,
+                  child: Icon(
+                    complete == 0
+                        ? AppIcons.completeOutline
+                        : AppIcons.complete,
+                    size: 26,
+                    color: complete == 0 ? colors.inactive : colors.ink,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(completeLabel,
+                      style: AppTypography.body.copyWith(color: colors.ink)),
+                ),
+                const SizedBox(width: 6),
+                AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 200),
+                  child: Icon(AppIcons.chevronDown,
+                      size: 18, color: colors.chevron),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (placeholder != null) {
+      return AppPanel(
+        child: DefaultTextStyle.merge(
+          style: AppTypography.body.copyWith(color: colors.muted),
+          child: placeholder,
+        ),
+      );
+    }
+    return AppGroupedList(
+      separatorIndent: 64,
+      children: [
+        for (final room in attention) _AttentionRow(room: room),
+        if (progress.loading && progress.rooms.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('Loading classrooms…',
+                style: AppTypography.body.copyWith(color: colors.muted)),
+          ),
+        if (progress.rooms.isNotEmpty || !progress.loading) toggle,
+      ],
+    );
+  }
+
+  Widget _buildConsumablesTotals() {
+    final colors = AppPalette.of(context);
+    final totals = ref.watch(schoolConsumablesTotalsProvider(widget.schoolId));
+    Widget message(String text) => AppPanel(
+          child: Text(text,
+              style: AppTypography.body.copyWith(color: colors.muted)),
+        );
+    final Widget? body = totals.when(
+      loading: () => message('Loading consumables totals…'),
+      error: (_, __) => message('Consumables totals unavailable'),
+      data: (totals) => totals.isEmpty
+          ? null
+          : AppGroupedList(
+              children: [
+                for (final entry in totals.entries)
+                  AppListRow(
+                    title: entry.key,
+                    detail: '${entry.value.quantity} ${entry.value.unit}',
+                  ),
+              ],
+            ),
+    );
+    if (body == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppTokens.sectionGap),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildOverviewCard(
-            showForm: showForm,
-            signatureStatusLoading: signatureStatusLoading,
-            signatureStatusUnavailable: signatureStatusUnavailable,
-          ),
-          const SizedBox(height: AppTokens.sectionGap),
-          _buildNotesCard(),
-          const SizedBox(height: AppTokens.sectionGap),
-          _buildSignOffCard(signed, pending, uploads?.activeId),
-          if (legacy != null) ...[
-            const SizedBox(height: 16),
-            AppPanel(
-              child: ExpansionTile(
-                title: const Text('Earlier school sign-off'),
-                subtitle: const Text('No delivery visit was recorded'),
-                children: [_buildCompletedSignOff(legacy)],
-              ),
-            ),
-          ],
+          const AppSectionLabel('Consumables totals'),
+          const SizedBox(height: 8),
+          body,
         ],
       ),
     );
   }
 
-  Widget _buildOverviewCard({
-    required bool showForm,
-    required bool signatureStatusLoading,
-    required bool signatureStatusUnavailable,
-  }) {
-    final schoolTotalAsync = ref.watch(schoolTotalProvider(widget.schoolId));
-    final schoolConsumablesTotalsAsync =
-        ref.watch(schoolConsumablesTotalsProvider(widget.schoolId));
-
-    final typography = Theme.of(context).textTheme;
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  /// Photos attached to this visit's classrooms (count only).
+  Widget _buildPhotosRow() {
+    final deliveryId = widget.deliveryId;
+    if (deliveryId == null) return const SizedBox.shrink();
+    final years = ref.watch(yearLevelsProvider(widget.schoolId)).valueOrNull;
+    if (years == null) return const SizedBox.shrink();
+    var count = 0;
+    var loading = false;
+    var unavailable = false;
+    for (final year in years) {
+      final rooms = ref.watch(classroomsProvider(
+        (schoolId: widget.schoolId, yearLevelId: year.id),
+      ));
+      loading = loading || rooms.isLoading;
+      for (final room in rooms.valueOrNull ?? <Classroom>[]) {
+        final photos = ref.watch(classroomPhotosProvider((
+          schoolId: widget.schoolId,
+          yearLevelId: year.id,
+          classroomId: room.id,
+          deliveryId: deliveryId,
+        )));
+        loading = loading || photos.isLoading;
+        unavailable = unavailable || photos.hasError;
+        count += photos.valueOrNull?.length ?? 0;
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: AppGroupedList(
+        separatorIndent: 57,
         children: [
-          AppSectionHeading(
-            title: 'Delivery Overview',
-            trailing: IconButton(
-              onPressed: _refreshTotals,
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Refresh',
-            ),
+          AppListRow(
+            icon: AppIcons.photos,
+            title: 'Photos',
+            detail: unavailable
+                ? 'Unavailable'
+                : loading
+                    ? 'Loading…'
+                    : count == 0
+                        ? 'None attached'
+                        : '$count attached',
           ),
-          if (widget.deliveryId != null && signatureStatusUnavailable)
-            const Text(
-                'Signature status unavailable. Saved work may need attention.')
-          else if (widget.deliveryId != null && signatureStatusLoading)
-            const Text('Checking signature status…')
-          else if (showForm)
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: FilledButton.icon(
-                onPressed: _openCapture,
-                icon: const Icon(Icons.draw_outlined),
-                label: const Text('Capture signature'),
-              ),
-            ),
-          const Divider(height: 20),
-          Wrap(
-            spacing: 10,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              const Text('Expected pack total'),
-              schoolTotalAsync.when(
-                data: (total) => Text(
-                  '$total',
-                  style: typography.headlineMedium
-                      ?.copyWith(color: AppTone.blue.inkFor(context)),
-                ),
-                loading: () => const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                error: (_, __) => const Text('Pack total unavailable'),
-              ),
-            ],
-          ),
-          schoolConsumablesTotalsAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.only(top: 12),
-              child: Text('Loading consumables totals…'),
-            ),
-            error: (_, __) => const Padding(
-              padding: EdgeInsets.only(top: 12),
-              child: Text('Consumables totals unavailable'),
-            ),
-            data: (totals) {
-              if (totals.isEmpty) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text('Consumables Totals', style: typography.titleMedium),
-                    const SizedBox(height: 8),
-                    for (final entry in totals.entries)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: Text(entry.key)),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                '${entry.value.quantity} ${entry.value.unit}',
-                                textAlign: TextAlign.end,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          _buildDeliveryBreakdown(),
         ],
       ),
     );
@@ -319,26 +578,35 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
 
   Widget _buildDeliveryBreakdown() {
     final yearLevelsAsync = ref.watch(yearLevelsProvider(widget.schoolId));
+    final colors = AppPalette.of(context);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('Classroom Totals',
-            style: Theme.of(context).textTheme.titleMedium),
+        const AppSectionLabel('All classrooms'),
         const SizedBox(height: 8),
         yearLevelsAsync.when(
           data: (yearLevels) => yearLevels.isEmpty
-              ? const Text('No year levels found')
+              ? AppPanel(
+                  child: Text('No year levels found',
+                      style: AppTypography.body.copyWith(color: colors.muted)),
+                )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final yearLevel in yearLevels)
+                    for (final (index, yearLevel) in yearLevels.indexed) ...[
+                      if (index > 0) const SizedBox(height: 16),
                       _buildYearLevelGroup(yearLevel),
+                    ],
                   ],
                 ),
-          loading: () => const LinearProgressIndicator(),
-          error: (_, __) => const Text('Couldn’t load year levels'),
+          loading: () => const AppProgressBar(
+              value: 0, semanticLabel: 'Loading year levels'),
+          error: (_, __) => AppPanel(
+            child: Text('Couldn’t load year levels',
+                style: AppTypography.body.copyWith(color: colors.ink)),
+          ),
         ),
       ],
     );
@@ -348,32 +616,39 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final classroomsAsync = ref.watch(classroomsProvider(
       (schoolId: widget.schoolId, yearLevelId: yearLevel.id),
     ));
+    final colors = AppPalette.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Divider(height: 20),
-        Text(
-          yearLevel.label,
-          style: Theme.of(context).textTheme.titleSmall,
+        Row(
+          children: [
+            Padding(
+              padding: const EdgeInsetsDirectional.only(start: 4),
+              child: AppYearBadge(label: yearLevel.label, size: 24),
+            ),
+            Expanded(child: AppSectionLabel(yearLevel.label)),
+          ],
         ),
+        const SizedBox(height: 8),
         classroomsAsync.when(
           data: (classrooms) => classrooms.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('No classrooms found'),
+              ? AppPanel(
+                  child: Text('No classrooms found',
+                      style: AppTypography.body.copyWith(color: colors.muted)),
                 )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+              : AppGroupedList(
+                  separatorIndent: 50,
                   children: [
-                    for (var index = 0; index < classrooms.length; index++) ...[
-                      if (index > 0) const Divider(height: 1),
-                      _buildClassroomRow(classrooms[index], yearLevel.id),
-                    ],
+                    for (final classroom in classrooms)
+                      _buildClassroomRow(classroom, yearLevel.id),
                   ],
                 ),
           loading: () => const LinearProgressIndicator(),
-          error: (_, __) => const Text('Couldn’t load classrooms'),
+          error: (_, __) => AppPanel(
+            child: Text('Couldn’t load classrooms',
+                style: AppTypography.body.copyWith(color: colors.ink)),
+          ),
         ),
       ],
     );
@@ -404,121 +679,153 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       classroomId: classroom.id,
     )));
 
-    final typography = Theme.of(context).textTheme;
+    final colors = AppPalette.of(context);
     final notes = notesAsync.asData?.value;
     final breakdowns = breakdownsAsync.asData?.value;
+    final muted = AppTypography.subheadline.copyWith(color: colors.muted);
 
     return consumablesAsync.when(
       data: (consumables) {
         final allConsumablesDelivered = consumables.every(
           (item) => item.actualQuantityDelivered == item.quantity,
         );
-        final (status, icon, tone) = switch (classroom.completionStatus) {
+        final actual = classroom.actualPacksDelivered;
+        final expected = packTotalAsync.valueOrNull?.total;
+        final (status, ring) = switch (classroom.completionStatus) {
           ClassroomCompletionStatus.notAttended => (
-              'Not Attended',
-              Icons.remove_circle_outline,
-              AppTone.neutral
+              'Not attended',
+              const AppStatusRing(
+                  status: AppCompletion.notStarted,
+                  semanticLabel: 'Not attended'),
             ),
           ClassroomCompletionStatus.complete when allConsumablesDelivered => (
               'Complete',
-              Icons.check_circle_outline,
-              AppTone.green
+              const AppStatusRing(
+                  status: AppCompletion.complete, semanticLabel: 'Complete'),
             ),
-          _ => ('Incomplete', Icons.warning_amber_rounded, AppTone.yellow),
+          _ => (
+              'Incomplete',
+              AppStatusRing(
+                status: AppCompletion.partial,
+                progress: actual != null && expected != null && expected > 0
+                    ? actual / expected
+                    : 0.5,
+                semanticLabel: 'Incomplete',
+              ),
+            ),
         };
-        final actual = classroom.actualPacksDelivered;
 
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Column(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(classroom.name, style: typography.titleMedium),
-                  AppStatusPill(label: status, icon: icon, tone: tone),
-                ],
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: ring,
               ),
-              const SizedBox(height: 4),
-              Text(
-                packTotalAsync.when(
-                  data: (total) {
-                    if (classroom.completionStatus ==
-                            ClassroomCompletionStatus.incomplete &&
-                        actual != null) {
-                      return total == null
-                          ? '$actual packs delivered'
-                          : '$actual of ${total.total} packs delivered';
-                    }
-                    return total == null
-                        ? 'No pack total set'
-                        : '${total.total} expected packs';
-                  },
-                  loading: () => 'Loading pack total…',
-                  error: (_, __) => 'Pack total unavailable',
-                ),
-                style: typography.bodyMedium,
-              ),
-              if (breakdowns != null && breakdowns.length > 1)
-                Text(
-                  'Composite · ${breakdowns.map((item) => '${item.yearLevelLabel}: ${item.studentCount}').join(' · ')}',
-                  style: typography.bodySmall,
-                ),
-              if (notes != null && notes.isNotEmpty)
-                TextButton.icon(
-                  onPressed: () => _scrollToNote(yearLevelId, classroom.id),
-                  icon: const Icon(Icons.notes_outlined),
-                  label: const Text('View notes'),
-                ),
-              if (consumables.isNotEmpty) ...[
-                const Divider(height: 16),
-                for (final item in consumables)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(_getConsumableIcon(item.itemName),
-                            size: 16, color: AppTone.blue.inkFor(context)),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(item.itemName)),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            item.actualQuantityDelivered == null
-                                ? '${item.quantity} ${item.unit} expected'
-                                : '${item.actualQuantityDelivered} / ${item.quantity} ${item.unit}',
-                            textAlign: TextAlign.end,
-                            style: typography.bodyMedium
-                                ?.copyWith(fontWeight: FontWeight.w600),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(classroom.name,
+                        style:
+                            AppTypography.headline.copyWith(color: colors.ink)),
+                    Text(status, style: muted),
+                    const SizedBox(height: 4),
+                    Text(
+                      packTotalAsync.when(
+                        data: (total) {
+                          if (classroom.completionStatus ==
+                                  ClassroomCompletionStatus.incomplete &&
+                              actual != null) {
+                            return total == null
+                                ? '$actual packs delivered'
+                                : '$actual of ${total.total} packs delivered';
+                          }
+                          return total == null
+                              ? 'No pack total set'
+                              : '${total.total} expected packs';
+                        },
+                        loading: () => 'Loading pack total…',
+                        error: (_, __) => 'Pack total unavailable',
+                      ),
+                      style: AppTypography.body.copyWith(color: colors.ink),
+                    ),
+                    if (breakdowns != null && breakdowns.length > 1)
+                      Text(
+                        'Composite · ${breakdowns.map((item) => '${item.yearLevelLabel}: ${item.studentCount}').join(' · ')}',
+                        style: muted,
+                      ),
+                    if (consumables.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      for (final item in consumables)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Icon(AppIcons.consumables,
+                                  size: 16, color: colors.muted),
+                              Text(item.itemName,
+                                  style: AppTypography.subheadline
+                                      .copyWith(color: colors.ink)),
+                              Text(
+                                item.actualQuantityDelivered == null
+                                    ? '${item.quantity} ${item.unit} expected'
+                                    : '${item.actualQuantityDelivered} / ${item.quantity} ${item.unit}',
+                                style: AppTypography.subheadline.copyWith(
+                                    color: colors.ink,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-              ],
-              if (classroom.lastUpdatedBy != null &&
-                  classroom.lastUpdatedAt != null) ...[
-                const Divider(height: 16),
-                Text(
-                  'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-                  style: typography.bodySmall
-                      ?.copyWith(color: AppPalette.of(context).muted),
+                    ],
+                    if (classroom.lastUpdatedBy != null &&
+                        classroom.lastUpdatedAt != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
+                        style: AppTypography.footnote
+                            .copyWith(color: colors.muted),
+                      ),
+                    ],
+                    if (notes != null && notes.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      AppSecondaryButton(
+                        label: 'View notes',
+                        icon: AppIcons.notes,
+                        large: false,
+                        // Full width at large text so the label can wrap.
+                        expand: _largeText(context),
+                        onPressed: () =>
+                            _scrollToNote(yearLevelId, classroom.id),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
+              ),
             ],
           ),
         );
       },
-      loading: () => const LinearProgressIndicator(),
-      error: (_, __) => Text('Error loading classroom: ${classroom.name}'),
+      loading: () => const Padding(
+        padding: EdgeInsets.all(16),
+        child: LinearProgressIndicator(),
+      ),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('Error loading classroom: ${classroom.name}',
+            style: AppTypography.body.copyWith(color: colors.ink)),
+      ),
     );
   }
 
   Widget _buildNotesCard() {
+    final colors = AppPalette.of(context);
     final years = ref.watch(yearLevelsProvider(widget.schoolId));
     var loading = years.isLoading;
     var unavailable = years.hasError;
@@ -551,19 +858,30 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       }
     }
 
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const AppSectionHeading(title: 'Classroom Notes'),
-          const SizedBox(height: 12),
-          if (loading) const Text('Loading classroom notes…'),
-          if (unavailable) const Text('Some classroom notes are unavailable.'),
-          if (sections.isEmpty && !loading && !unavailable)
-            const Text('No classroom notes recorded.'),
-          ...sections,
-        ],
-      ),
+    final messages = [
+      if (loading) 'Loading classroom notes…',
+      if (unavailable) 'Some classroom notes are unavailable.',
+      if (sections.isEmpty && !loading && !unavailable)
+        'No classroom notes recorded.',
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const AppSectionLabel('Classroom notes'),
+        const SizedBox(height: 8),
+        AppGroupedList(
+          separatorIndent: 64,
+          children: [
+            for (final message in messages)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(message,
+                    style: AppTypography.body.copyWith(color: colors.muted)),
+              ),
+            ...sections,
+          ],
+        ),
+      ],
     );
   }
 
@@ -580,130 +898,315 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final key = '${yearLevelId}_$classroomId';
     _noteKeys.putIfAbsent(key, () => GlobalKey());
 
-    final typography = Theme.of(context).textTheme;
+    final colors = AppPalette.of(context);
+    final muted = AppTypography.footnote.copyWith(color: colors.muted);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(height: 12),
-          Text(
-            '$yearLevelLabel – ${classroom.name}',
-            style: typography.titleMedium,
-          ),
-          if (classroom.lastUpdatedBy != null &&
-              classroom.lastUpdatedAt != null)
-            Text(
-              'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-              style: typography.bodySmall,
-            ),
-          for (final (index, note) in notes.indexed)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(note.content, key: index == 0 ? _noteKeys[key] : null),
-                  if (note.author != null)
-                    Text('by ${note.author}', style: typography.bodySmall),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSignOffCard(
-    AsyncValue<SignedEvidence?> signed,
-    EvidenceUpload? pending,
-    String? activeId,
-  ) {
-    final latest = signed.valueOrNull;
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (pending != null)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // At large text the notes get the full width; the year stays in
+          // words in the heading.
+          if (!_largeText(context)) ...[
+            AppYearBadge(label: yearLevelLabel),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const AppStatusPill(
-                  label: 'Signature saved on this device',
-                  icon: Icons.cloud_upload_outlined,
-                  tone: AppTone.blue,
+                Text(
+                  '$yearLevelLabel – ${classroom.name}',
+                  style: AppTypography.headline.copyWith(color: colors.ink),
                 ),
-                const SizedBox(height: 8),
-                Text(pending.id == activeId ? 'Syncing' : pending.statusText),
-                if (pending.id != activeId)
-                  EvidenceUploadActions(item: pending),
+                if (classroom.lastUpdatedBy != null &&
+                    classroom.lastUpdatedAt != null)
+                  Text(
+                    'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
+                    style: muted,
+                  ),
+                for (final (index, note) in notes.indexed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          note.content,
+                          key: index == 0 ? _noteKeys[key] : null,
+                          style: AppTypography.body.copyWith(color: colors.ink),
+                        ),
+                        if (note.author != null)
+                          Text('by ${note.author}', style: muted),
+                      ],
+                    ),
+                  ),
               ],
             ),
-          if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
-          if (widget.deliveryId == null && latest == null && pending == null)
-            const Text('Open a scheduled delivery to create a sign-off.'),
-          if (signed.hasError)
-            const Text('Could not load earlier signed snapshots.'),
-          if (pending == null && _isCorrecting)
-            TextButton(
-              onPressed: () => setState(() => _isCorrecting = false),
-              child: const Text('Cancel correction'),
-            ),
-          TextButton.icon(
-            onPressed: _showSignOffHistory,
-            icon: const Icon(Icons.history),
-            label: const Text('Recent signed snapshots'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSignedEvidence(SignedEvidence evidence) {
+  /// General school notes (they are also part of the signed snapshot).
+  Widget _buildSchoolNotes() {
+    final colors = AppPalette.of(context);
+    final notes = ref.watch(notesProvider(widget.schoolId));
+    final Widget? body = notes.when(
+      loading: () => null,
+      error: (_, __) => Text('School notes unavailable',
+          style: AppTypography.body.copyWith(color: colors.muted)),
+      data: (notes) => notes.isEmpty
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final (index, note) in notes.indexed) ...[
+                  if (index > 0) const SizedBox(height: 10),
+                  Text(note.content,
+                      style: AppTypography.body.copyWith(color: colors.ink)),
+                  if (note.author != null)
+                    Text('by ${note.author}',
+                        style: AppTypography.footnote
+                            .copyWith(color: colors.muted)),
+                ],
+              ],
+            ),
+    );
+    if (body == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppTokens.sectionGap),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const AppSectionLabel('School notes'),
+          const SizedBox(height: 8),
+          AppPanel(child: body),
+        ],
+      ),
+    );
+  }
+
+  /// The signed record: status line, record card, footnote and the history /
+  /// correction actions. Export is the screen's floating action.
+  Widget _buildSignedRecord(
+    SignedEvidence evidence, {
+    required EvidenceUpload? pending,
+    Widget? inlineAction,
+  }) {
+    final colors = AppPalette.of(context);
     final reviewed = evidence.snapshot.serverReviewed;
+    final signedAt =
+        DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal());
+    // A queued signature for this visit means the newest signature is still
+    // only on this device; otherwise the record came from the server.
+    final savedToServer = pending == null;
+    final packs = _snapshotPacks(evidence.snapshot);
+    final photoCount =
+        (evidence.snapshot.summary['photoUrls'] as List?)?.length ?? 0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          reviewed ? 'Signed snapshot' : 'Synced signature needs review',
-          style: Theme.of(context).textTheme.titleLarge,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Semantics(
+            header: true,
+            child: Text('Signed record',
+                style: AppTypography.title2.copyWith(color: colors.ink)),
+          ),
         ),
-        Text(
-          '${evidence.typedName} · ${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}',
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(
+                  savedToServer
+                      ? AppIcons.savedToServer
+                      : AppIcons.savedOnDevice,
+                  size: 18,
+                  color: colors.ink,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: savedToServer
+                            ? 'Saved to server. '
+                            : 'Signature saved on this device. ',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, color: colors.ink),
+                      ),
+                      TextSpan(text: 'Signed $signedAt'),
+                    ],
+                  ),
+                  style:
+                      AppTypography.subheadline.copyWith(color: colors.muted),
+                ),
+              ),
+            ],
+          ),
         ),
-        Text(reviewed
-            ? 'Covers the delivery details reviewed at signing.'
-            : 'Captured with incomplete or cached delivery details. Sign again after review.'),
-        ref.watch(_signatureUrlProvider(evidence.signaturePath)).when(
-              loading: () => const LinearProgressIndicator(),
-              error: (_, __) => const Text('Signature image unavailable'),
-              data: (url) => url == null
-                  ? const Text('Signature image unavailable')
-                  : Image.network(
-                      url,
-                      height: 90,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) =>
-                          const Text('Signature image unavailable'),
+        const SizedBox(height: 16),
+        if (!reviewed) ...[
+          const AppNotice.warning(
+            message: 'Synced signature needs review. '
+                'Captured with incomplete or cached delivery details. '
+                'Sign again after review.',
+          ),
+          const SizedBox(height: 16),
+        ],
+        AppPanel(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppListRow(
+                icon: AppIcons.person,
+                title: 'Receiver',
+                detail: evidence.typedName,
+              ),
+              _separator(57),
+              AppListRow(
+                icon: AppIcons.packs,
+                title: 'Packs recorded',
+                detail: packs.unavailable
+                    ? 'Pack total unavailable'
+                    : '${packs.recorded} of ${packs.expected}',
+              ),
+              if (packs.outstanding > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: AppNotice.warning(
+                    message:
+                        _outstandingMessage(packs.outstanding, packs.rooms),
+                  ),
+                ),
+              _separator(57),
+              AppListRow(
+                icon: AppIcons.photos,
+                title: 'Photos',
+                detail:
+                    photoCount == 0 ? 'None included' : '$photoCount included',
+              ),
+              _separator(57),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const AppIconTile(icon: AppIcons.signature, size: 29),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text('Signature',
+                              style: AppTypography.body
+                                  .copyWith(color: colors.ink)),
+                        ),
+                      ],
                     ),
-            ),
-        Wrap(
-          spacing: 8,
-          children: [
-            if (reviewed)
-              OutlinedButton.icon(
-                onPressed: () => _exportSummary(evidence: evidence),
-                icon: const Icon(Icons.table_chart_outlined),
-                label: const Text('Export snapshot'),
+                    const SizedBox(height: 10),
+                    _SignatureImage(
+                      child: ref
+                          .watch(_signatureUrlProvider(evidence.signaturePath))
+                          .when(
+                            loading: () => const LinearProgressIndicator(),
+                            error: (_, __) =>
+                                const Text('Signature image unavailable'),
+                            data: (url) => url == null
+                                ? const Text('Signature image unavailable')
+                                : Image.network(
+                                    url,
+                                    height: 90,
+                                    fit: BoxFit.contain,
+                                    semanticLabel:
+                                        'Signature of ${evidence.typedName}',
+                                    errorBuilder: (_, __, ___) => const Text(
+                                        'Signature image unavailable'),
+                                  ),
+                          ),
+                    ),
+                  ],
+                ),
               ),
-            if (widget.deliveryId != null)
-              TextButton(
-                onPressed: () => setState(() => _isCorrecting = true),
-                child: const Text('Sign a correction'),
-              ),
-          ],
+            ],
+          ),
         ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
+            '${reviewed ? 'Covers the delivery details reviewed at signing. ' : ''}'
+            'The original delivery record is kept. '
+            'Corrections are added as a new signed record.',
+            style: AppTypography.footnote.copyWith(color: colors.muted),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (inlineAction != null) ...[
+          inlineAction,
+          const SizedBox(height: 10),
+        ],
+        AppSecondaryButton(
+          label: 'View visit history',
+          icon: AppIcons.timer,
+          onPressed: _showSignOffHistory,
+        ),
+        if (widget.deliveryId != null) ...[
+          const SizedBox(height: 10),
+          AppSecondaryButton(
+            label: 'Sign a correction',
+            icon: AppIcons.signature,
+            onPressed: () => setState(() => _isCorrecting = true),
+          ),
+        ],
       ],
+    );
+  }
+
+  Widget _separator(double indent) => Divider(
+        height: 1,
+        thickness: 1,
+        indent: indent,
+        color: AppPalette.of(context).separator,
+      );
+
+  /// Packs recorded vs expected as captured in a signed snapshot.
+  ({int expected, int recorded, int outstanding, int rooms, bool unavailable})
+      _snapshotPacks(SignOffSnapshot snapshot) {
+    var expected = 0;
+    var recorded = 0;
+    var outstanding = 0;
+    var rooms = 0;
+    var unavailable = snapshot.classrooms.isEmpty;
+    for (final row in snapshot.classrooms) {
+      if (row is! Map) continue;
+      if (row['expectedPacksUnavailable'] == true) unavailable = true;
+      final roomExpected = (row['expectedPacks'] as num?)?.toInt() ?? 0;
+      final actual = (row['actualPacksDelivered'] as num?)?.toInt();
+      final roomRecorded =
+          actual ?? (row['status'] == 'notAttended' ? 0 : roomExpected);
+      expected += roomExpected;
+      recorded += roomRecorded;
+      final short = math.max(0, roomExpected - roomRecorded);
+      outstanding += short;
+      if (short > 0) rooms++;
+    }
+    return (
+      expected: expected,
+      recorded: recorded,
+      outstanding: unavailable ? 0 : outstanding,
+      rooms: rooms,
+      unavailable: unavailable,
     );
   }
 
@@ -712,184 +1215,136 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     final history = repository
         .readSignOffHistory(widget.schoolId, widget.deliveryId)
         .timeout(const Duration(seconds: 12));
-    await showDialog<void>(
+    await showAppGlassSheet<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Recent signed snapshots'),
-        content: FutureBuilder<List<SignedEvidence>>(
-          future: history,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return const Text('Could not load history. Try again.');
-            }
-            final records = snapshot.data;
-            if (records == null) return const LinearProgressIndicator();
-            if (records.isEmpty) {
-              return const Text('No signed snapshots found.');
-            }
-            return SizedBox(
-              width: 380,
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final evidence in records)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(evidence.typedName),
-                      subtitle: Text(
-                        '${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}'
-                        '${evidence.snapshot.serverReviewed ? '' : ' · Review required'}',
-                      ),
-                      trailing: evidence.snapshot.serverReviewed
-                          ? IconButton(
-                              tooltip: 'Export snapshot',
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                _exportSummary(evidence: evidence);
-                              },
-                              icon: const Icon(Icons.download_outlined),
-                            )
-                          : null,
-                    ),
-                ],
-              ),
+      title: 'Recent signed snapshots',
+      builder: (context) => FutureBuilder<List<SignedEvidence>>(
+        future: history,
+        builder: (context, snapshot) {
+          final colors = AppPalette.of(context);
+          Widget message(String text) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(text,
+                    style: AppTypography.body.copyWith(color: colors.ink)),
+              );
+          if (snapshot.hasError) {
+            return message('Could not load history. Try again.');
+          }
+          final records = snapshot.data;
+          if (records == null) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: LinearProgressIndicator(),
             );
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
+          }
+          if (records.isEmpty) {
+            return message('No signed snapshots found.');
+          }
+          return ListView(
+            shrinkWrap: true,
+            children: [
+              for (final evidence in records)
+                AppListRow(
+                  icon: evidence.snapshot.serverReviewed
+                      ? AppIcons.complete
+                      : AppIcons.warningOutline,
+                  title: evidence.typedName,
+                  subtitle:
+                      '${DateTimeUtils.formatDateTime(evidence.capturedAt.toLocal())}'
+                      '${evidence.snapshot.serverReviewed ? '' : ' · Review required'}',
+                  trailing: evidence.snapshot.serverReviewed
+                      ? IconButton(
+                          tooltip: 'Export snapshot',
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            _exportSummary(evidence: evidence);
+                          },
+                          icon: Icon(AppIcons.download, color: colors.ink),
+                        )
+                      : null,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 
   Widget _buildCompletedSignOff(SignOff signOff) {
+    final colors = AppPalette.of(context);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           children: [
-            Icon(Icons.check_circle, color: AppTone.green.inkFor(context)),
+            Icon(AppIcons.complete, color: colors.ink),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'School-level record',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: AppTone.green.inkFor(context),
-                    ),
+                style: AppTypography.headline.copyWith(color: colors.ink),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            const Icon(Icons.person, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Signed by:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text(signOff.typedName),
-                ],
-              ),
+        const SizedBox(height: 12),
+        for (final (icon, label, value) in [
+          (AppIcons.person, 'Signed by:', signOff.typedName),
+          (
+            AppIcons.timer,
+            'Signed at:',
+            DateTimeUtils.formatDateTime(signOff.createdAt)
+          ),
+        ])
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                AppIconTile(icon: icon, size: 29),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label,
+                          style: AppTypography.footnote.copyWith(
+                              color: colors.muted,
+                              fontWeight: FontWeight.w600)),
+                      Text(value,
+                          style:
+                              AppTypography.body.copyWith(color: colors.ink)),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            const Icon(Icons.access_time, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Signed at:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text(DateTimeUtils.formatDateTime(signOff.createdAt)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        AspectRatio(
-          aspectRatio: 2.5,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: AppPalette.of(context).muted),
-              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-              child: Image.network(
-                signOff.signatureURL,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return const Center(child: CircularProgressIndicator());
-                },
-                errorBuilder: (_, __, ___) =>
-                    const Center(child: Text('Signature image unavailable')),
-              ),
+        _SignatureImage(
+          child: AspectRatio(
+            aspectRatio: 2.5,
+            child: Image.network(
+              signOff.signatureURL,
+              fit: BoxFit.contain,
+              semanticLabel: 'Signature of ${signOff.typedName}',
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return const Center(child: CircularProgressIndicator());
+              },
+              errorBuilder: (_, __, ___) =>
+                  const Center(child: Text('Signature image unavailable')),
             ),
           ),
         ),
         const SizedBox(height: 16),
-        // Export Summary Button
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _exportSummary,
-            icon: const Icon(Icons.table_chart),
-            label: const Text('Export to Excel'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-          ),
+        AppSecondaryButton(
+          label: 'Export to Excel',
+          icon: AppIcons.exportFile,
+          onPressed: _exportSummary,
         ),
       ],
     );
-  }
-
-  /// Returns an appropriate icon based on the consumable item name
-  IconData _getConsumableIcon(String itemName) {
-    final lowerName = itemName.toLowerCase();
-
-    if (lowerName.contains('headphone') || lowerName.contains('earphone')) {
-      return Icons.headphones;
-    } else if (lowerName.contains('tissue')) {
-      return Icons.inbox;
-    } else if (lowerName.contains('paper')) {
-      return Icons.content_copy;
-    } else if (lowerName.contains('pencil') || lowerName.contains('pen')) {
-      return Icons.edit;
-    } else if (lowerName.contains('glue') || lowerName.contains('adhesive')) {
-      return Icons.format_paint;
-    } else if (lowerName.contains('eraser')) {
-      return Icons.remove_circle_outline;
-    } else if (lowerName.contains('ruler')) {
-      return Icons.straighten;
-    } else if (lowerName.contains('scissors')) {
-      return Icons.content_cut;
-    } else if (lowerName.contains('marker') || lowerName.contains('crayon')) {
-      return Icons.brush;
-    } else if (lowerName.contains('notebook') || lowerName.contains('book')) {
-      return Icons.menu_book;
-    } else if (lowerName.contains('folder') || lowerName.contains('binder')) {
-      return Icons.folder;
-    } else {
-      // Default icon for unknown items
-      return Icons.check_circle_outline;
-    }
   }
 
   void _refreshTotals() {
@@ -1111,80 +1566,111 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       context: captureContext,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          scrollable: true,
-          title: const Text('Review delivery details'),
-          content: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (changed) ...[
-                const Text(
-                    'Delivery information changed. Review the updated details.'),
-                const SizedBox(height: 8),
-              ],
-              if (draft.serverReviewed)
-                Text(
-                    'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
-              else
-                const Text(
-                  'Some delivery information is cached or unavailable. '
-                  'This signature will need another review after syncing.',
-                ),
-              const SizedBox(height: 12),
-              if (schoolNotes?.isNotEmpty == true) ...[
-                Text('School notes',
-                    style: Theme.of(context).textTheme.titleSmall),
-                Text(schoolNotes!),
-                const SizedBox(height: 8),
-              ],
-              if (photoCount > 0 || photosChanged) ...[
-                Text('$photoCount classroom photo attachments'),
-                if (photosChanged)
-                  const Text(
-                    'Photo attachments changed. Return to the classroom to inspect them.',
+        builder: (context, setState) {
+          final colors = AppPalette.of(context);
+          return AlertDialog(
+            scrollable: true,
+            title: const Text('Review delivery details'),
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (changed) ...[
+                  const AppNotice.warning(
+                    message:
+                        'Delivery information changed. Review the updated details.',
                   ),
-                const SizedBox(height: 8),
+                  const SizedBox(height: 8),
+                ],
+                if (draft.serverReviewed)
+                  Text(
+                    'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.',
+                    style:
+                        AppTypography.subheadline.copyWith(color: colors.muted),
+                  )
+                else
+                  const AppNotice.warning(
+                    message:
+                        'Some delivery information is cached or unavailable. '
+                        'This signature will need another review after syncing.',
+                  ),
+                const SizedBox(height: 12),
+                if (schoolNotes?.isNotEmpty == true) ...[
+                  const AppSectionLabel('School notes'),
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(schoolNotes!,
+                        style: AppTypography.body.copyWith(color: colors.ink)),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (photoCount > 0 || photosChanged) ...[
+                  Row(
+                    children: [
+                      const AppIconTile(icon: AppIcons.photos, size: 29),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text('$photoCount classroom photo attachments',
+                            style:
+                                AppTypography.body.copyWith(color: colors.ink)),
+                      ),
+                    ],
+                  ),
+                  if (photosChanged) ...[
+                    const SizedBox(height: 8),
+                    const AppNotice.warning(
+                      message:
+                          'Photo attachments changed. Return to the classroom to inspect them.',
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                ],
+                if (draft.classrooms.isEmpty)
+                  Text(
+                      'No classroom quantities are available in this snapshot.',
+                      style: AppTypography.body.copyWith(color: colors.ink))
+                else ...[
+                  AppSectionLabel(
+                    '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs',
+                  ),
+                  for (final row in draft.classrooms)
+                    _buildSnapshotClassroom(row as Map, notesByRoom),
+                ],
+                if (checklist.isNotEmpty) const SizedBox(height: 12),
+                for (final item in checklist)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: checked.contains(item.id),
+                    title: Text(item.title),
+                    subtitle:
+                        item.subtitle == null ? null : Text(item.subtitle!),
+                    onChanged: (value) => setState(() {
+                      if (value == true) {
+                        checked.add(item.id);
+                      } else {
+                        checked.remove(item.id);
+                      }
+                    }),
+                  ),
               ],
-              if (draft.classrooms.isEmpty)
-                const Text(
-                    'No classroom quantities are available in this snapshot.')
-              else ...[
-                Text(
-                  '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs',
-                ),
-                for (final row in draft.classrooms)
-                  _buildSnapshotClassroom(row as Map, notesByRoom),
-              ],
-              for (final item in checklist)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: checked.contains(item.id),
-                  title: Text(item.title),
-                  subtitle: item.subtitle == null ? null : Text(item.subtitle!),
-                  onChanged: (value) => setState(() {
-                    if (value == true) {
-                      checked.add(item.id);
-                    } else {
-                      checked.remove(item.id);
-                    }
-                  }),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: checked.length == checklist.length
+                    ? () => Navigator.of(context).pop(true)
+                    : null,
+                child: Text(draft.serverReviewed
+                    ? 'Save signature'
+                    : 'Save for review'),
+              ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: checked.length == checklist.length
-                  ? () => Navigator.of(context).pop(true)
-                  : null,
-              child: Text(
-                  draft.serverReviewed ? 'Save signature' : 'Save for review'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
     _reviewRoute = route;
@@ -1212,6 +1698,9 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
 
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      leading: AppYearBadge(label: '$level', size: 32),
       title: Text('$level · $name'),
       subtitle: Text(
         '$status\n$expected · ${actual == null ? 'No recorded pack count' : '$actual recorded packs'}',
@@ -1328,7 +1817,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Export Successful'),
+        title: const Text('Export successful'),
         content: Text(
           Platform.isIOS
               ? 'Your Excel file has been created and is ready to share.'
@@ -1357,8 +1846,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 }
               }
             },
-            icon: Icon(Platform.isIOS ? Icons.share : Icons.open_in_new),
-            label: Text(Platform.isIOS ? 'Share File' : 'Open File'),
+            icon: Icon(Platform.isIOS ? AppIcons.share : AppIcons.external),
+            label: Text(Platform.isIOS ? 'Share file' : 'Open file'),
           ),
         ],
       ),
@@ -1370,173 +1859,28 @@ class _ReviewChecklistTooLarge implements Exception {
   const _ReviewChecklistTooLarge();
 }
 
-class _SignatureCaptureScreen extends StatefulWidget {
-  const _SignatureCaptureScreen({
-    required this.schoolName,
-    required this.visitId,
-    required this.visitDate,
-    required this.name,
-    required this.signature,
-    required this.onReview,
-  });
+/// White, rounded frame for a saved signature image (the image itself has a
+/// white background, so the frame stays white in every theme).
+class _SignatureImage extends StatelessWidget {
+  const _SignatureImage({required this.child});
 
-  final String schoolName;
-  final String visitId;
-  final DateTime? visitDate;
-  final TextEditingController name;
-  final SignatureController signature;
-  final Future<bool> Function(BuildContext context) onReview;
-
-  @override
-  State<_SignatureCaptureScreen> createState() =>
-      _SignatureCaptureScreenState();
-}
-
-class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
-  bool _reviewing = false;
-
-  Future<void> _reviewAndSave(BuildContext captureContext) async {
-    if (_reviewing) return;
-    FocusScope.of(context).unfocus();
-    setState(() => _reviewing = true);
-    final saved = await widget.onReview(captureContext);
-    if (!mounted) return;
-    setState(() => _reviewing = false);
-    if (saved && ModalRoute.of(context)?.isCurrent == true) {
-      Navigator.of(context).pop();
-    }
-  }
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final typography = Theme.of(context).textTheme;
     final colors = AppPalette.of(context);
-    final visitDate = widget.visitDate;
-    return PopScope(
-      canPop: !_reviewing,
-      child: ScaffoldMessenger(
-        child: Scaffold(
-          appBar: AppBar(
-            automaticallyImplyLeading: false,
-            toolbarHeight: MediaQuery.textScalerOf(context).scale(16) * 2 + 32,
-            titleSpacing: 8,
-            title: TextButton.icon(
-              onPressed: _reviewing ? null : () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back to review'),
-            ),
-          ),
-          body: Builder(
-              builder: (captureContext) => SafeArea(
-                    top: false,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(AppTokens.gutter),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 640),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Semantics(
-                                header: true,
-                                child: Text(
-                                  'Capture signature',
-                                  style: typography.headlineMedium,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(widget.schoolName,
-                                  style: typography.titleMedium),
-                              Text(
-                                visitDate == null
-                                    ? 'Delivery visit'
-                                    : DateTimeUtils.formatDate(visitDate),
-                                style: typography.bodyMedium
-                                    ?.copyWith(color: colors.muted),
-                              ),
-                              Text('Visit ${widget.visitId}',
-                                  style: typography.bodySmall),
-                              const SizedBox(height: AppTokens.sectionGap),
-                              Semantics(
-                                container: true,
-                                child: TextField(
-                                  controller: widget.name,
-                                  enabled: !_reviewing,
-                                  maxLength: 200,
-                                  textCapitalization: TextCapitalization.words,
-                                  textInputAction: TextInputAction.done,
-                                  decoration:
-                                      const InputDecoration(labelText: 'Name'),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Text('Signature', style: typography.titleMedium),
-                              const SizedBox(height: 8),
-                              Semantics(
-                                container: true,
-                                label: 'Signature drawing area',
-                                child: AbsorbPointer(
-                                  absorbing: _reviewing,
-                                  child: AspectRatio(
-                                    aspectRatio: 2,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(
-                                          AppTokens.controlRadius),
-                                      child: DecoratedBox(
-                                        position: DecorationPosition.foreground,
-                                        decoration: BoxDecoration(
-                                          border:
-                                              Border.all(color: colors.outline),
-                                          borderRadius: BorderRadius.circular(
-                                            AppTokens.controlRadius,
-                                          ),
-                                        ),
-                                        child: Signature(
-                                          controller: widget.signature,
-                                          backgroundColor: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  TextButton.icon(
-                                    onPressed: _reviewing
-                                        ? null
-                                        : widget.signature.clear,
-                                    icon: const Icon(Icons.clear),
-                                    label: const Text('Clear'),
-                                  ),
-                                  FilledButton.icon(
-                                    onPressed: _reviewing
-                                        ? null
-                                        : () => _reviewAndSave(captureContext),
-                                    icon: _reviewing
-                                        ? const SizedBox.square(
-                                            dimension: 16,
-                                            child: CircularProgressIndicator(
-                                                strokeWidth: 2),
-                                          )
-                                        : const Icon(Icons.check),
-                                    label: Text(
-                                      _reviewing
-                                          ? 'Checking…'
-                                          : 'Review and save',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  )),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+        border: Border.all(color: colors.separator),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: DefaultTextStyle.merge(
+          // Fallback text sits on white in every theme.
+          style: AppTypography.subheadline.copyWith(color: Colors.black87),
+          child: Center(child: child),
         ),
       ),
     );
