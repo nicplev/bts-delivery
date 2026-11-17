@@ -276,7 +276,7 @@ These are visual references, not an extracted proprietary component specificatio
 - [x] Astra review for accessibility, truthful metrics, scope and offline regressions.
 - [x] Run regression tests/analyzer, inspect actual-widget previews at small/large text, and build/launch the native sign-in screen.
 - [x] Complete the native primary-workflow tap-through after Mac unlock: navigation, draft restoration, media downloads/viewers and restart/reconnect recovery.
-- [ ] Confirm lower Sign-Off scrolling/signature controls with manual native gestures; automated native gestures were inconclusive (actual-route Flutter touch/wheel checks pass).
+- [x] Confirm lower Sign-Off scrolling with manual native gestures: user confirmed on 17 November 2026 that dragging beside the signature box scrolls normally. Physical-device acceptance remains separate.
 - [x] Save screenshots, final evidence and a local reviewed checkpoint. No production deployment implied.
 
 
@@ -332,3 +332,8 @@ Physical-device, representative performance, historical migration and production
 - Native confirmed: Calendar opens the unchanged November 16 synthetic visits, simplified overview preserves 13/24 actual packs and expected 48 total, Go to signature brings Name/canvas/review/history into view, Name focuses independently and accepts `Demo Reviewer`, and the iOS software keyboard keeps that field visible. No signature was submitted or backend delivery changed in this pass.
 - Astra independently reviewed the combined source, route test and actual native overview/keyboard captures; no actionable regressions found. Native freehand dragging still needs the requested manual check: automation does not reliably move the inner page. Do not infer native gesture success from widget tests or the shortcut. Physical-device and release gates remain open.
 - Saved screenshots in the existing external `bts-ui-refresh` artifact folder: `bts-simplified-today.png`, `bts-simplified-today-large-text.png` (synthetic actual-widget previews); `native-simplified-signoff-overview.jpg`, `native-simplified-signoff-keyboard.jpg` (native demo captures).
+
+
+## Apple HIG overhaul continuation — 17 November 2026
+
+User confirmed native Sign-Off scrolling works normally. Saved the reviewed direction and implementation checklist in [UI_OVERHAUL_PLAN.md](UI_OVERHAUL_PLAN.md). User authorised cleanup and implementation; Astra reviews and Sol 6.1 implements. Existing release gates remain separate.
