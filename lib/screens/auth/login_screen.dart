@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_providers.dart';
-import '../../app/theme/brand_colors.dart';
 import '../../widgets/design/design.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -42,7 +41,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           const SnackBar(
             content: Text(
                 'Invalid verification code. Please contact an administrator.'),
-            backgroundColor: BrandColors.pinkDarker,
             duration: Duration(seconds: 4),
           ),
         );
@@ -200,14 +198,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: AppTone.pink.tint,
+                                color: AppTone.pink.tintFor(context),
                                 borderRadius: BorderRadius.circular(
                                     AppTokens.controlRadius),
                               ),
                               child: Text(
                                 authState.error.toString(),
-                                style: text.bodySmall
-                                    ?.copyWith(color: AppTone.pink.ink),
+                                style: text.bodySmall?.copyWith(
+                                    color: AppTone.pink.inkFor(context)),
                               ),
                             ),
                           ],

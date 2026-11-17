@@ -1,17 +1,25 @@
+import 'dart:async';
 import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signature/signature.dart';
 import 'package:uuid/uuid.dart';
 import '../models/checklist_item.dart';
+import '../models/delivery_visit.dart';
 import '../models/offline/evidence_upload.dart';
 import '../models/signoff_snapshot.dart';
 import '../providers/schools_providers.dart';
+import '../providers/auth_providers.dart';
+import '../providers/delivery_visit_provider.dart';
 import '../providers/repository_providers.dart';
 import '../providers/checklist_providers.dart';
 import '../providers/offline_delivery_providers.dart';
 import '../services/offline/connectivity_service.dart';
+import '../services/offline/evidence_upload_worker.dart';
 import 'sync_status_detail_sheet.dart';
+import 'delivery_visit_gate.dart';
 import '../services/date_utils.dart';
 import '../services/excel_export_service.dart';
 import '../models/school.dart';
@@ -34,22 +42,19 @@ final _signatureUrlProvider =
   },
 );
 
-final _serverSigningDraftProvider = FutureProvider.autoDispose
-    .family<SignOffSnapshot?, ({String schoolId, String? deliveryId})>(
-        (ref, scope) {
-  if (!ref.watch(isOnlineProvider)) return null;
-  return ref
-      .watch(baseSchoolsRepositoryProvider)
-      .readSignOffDraft(scope.schoolId,
-          server: true, deliveryId: scope.deliveryId)
-      .timeout(const Duration(seconds: 20));
-});
-
 class SignOffTab extends ConsumerStatefulWidget {
-  const SignOffTab({super.key, required this.schoolId, this.deliveryId});
+  const SignOffTab({
+    super.key,
+    required this.schoolId,
+    required this.schoolName,
+    this.deliveryId,
+    this.visitDate,
+  });
 
   final String schoolId;
+  final String schoolName;
   final String? deliveryId;
+  final DateTime? visitDate;
 
   @override
   ConsumerState<SignOffTab> createState() => _SignOffTabState();
@@ -62,20 +67,71 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     penColor: Colors.black,
     exportBackgroundColor: Colors.white,
   );
-  final _signerName = GlobalKey();
   final Map<String, GlobalKey> _noteKeys =
       {}; // Map of yearLevelId_classroomId -> GlobalKey
-  bool _isUploading = false;
+  MaterialPageRoute<void>? _captureRoute;
+  DialogRoute<bool>? _reviewRoute;
   bool _isCorrecting = false;
-
-  ({String schoolId, String? deliveryId}) get _scope =>
-      (schoolId: widget.schoolId, deliveryId: widget.deliveryId);
 
   @override
   void dispose() {
+    final capture = _captureRoute;
+    final review = _reviewRoute;
+    if (capture == null) {
+      _disposeControllers();
+    } else {
+      // The visit gate can remove this tab while the capture is still on the
+      // navigator. Keep the controllers alive through route removal.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (review?.isActive == true) review!.navigator?.removeRoute(review);
+        if (capture.isActive) capture.navigator?.removeRoute(capture);
+      });
+      unawaited(capture.completed.whenComplete(_disposeControllers));
+    }
+    super.dispose();
+  }
+
+  void _disposeControllers() {
     _nameController.dispose();
     _signatureController.dispose();
-    super.dispose();
+  }
+
+  void _openCapture() {
+    final uid = ref.read(authRepositoryProvider).currentUser?.uid;
+    final visit = ref.read(activeDeliveryVisitProvider);
+    if (_captureRoute != null) return;
+    if (uid == null || visit == null || !_canSaveCapture(uid, visit)) {
+      _showError(
+          'This visit is unavailable for signing. Check its saved work.');
+      return;
+    }
+
+    final capture = MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          if (ref.watch(authStateProvider).valueOrNull?.uid != uid) {
+            return const Scaffold();
+          }
+          return DeliveryVisitGate(
+            visit: visit,
+            child: _SignatureCaptureScreen(
+              schoolName: widget.schoolName,
+              visitId: visit.deliveryId,
+              visitDate: widget.visitDate,
+              name: _nameController,
+              signature: _signatureController,
+              onReview: (context) => _handleSignOff(context, uid, visit),
+            ),
+          );
+        },
+      ),
+    );
+    _captureRoute = capture;
+    Navigator.of(context, rootNavigator: true).push(capture);
+    unawaited(capture.completed.then((_) {
+      if (mounted && identical(_captureRoute, capture)) _captureRoute = null;
+    }));
   }
 
   void _scrollToNote(String yearLevelId, String classroomId) {
@@ -106,21 +162,18 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       schoolId: widget.schoolId,
       deliveryId: widget.deliveryId,
     )));
-    final uploads = ref.watch(evidenceUploadsProvider).valueOrNull;
-    final pending = uploads?.items
-        .where((item) =>
-            item.kind == EvidenceKind.signature &&
-            item.schoolId == widget.schoolId &&
-            item.deliveryId == widget.deliveryId)
-        .firstOrNull;
+    final uploadState = ref.watch(evidenceUploadsProvider);
+    final uploads = uploadState.valueOrNull;
+    final pending = _pendingSignature(uploads);
+    final signatureStatusLoading = !signed.hasValue && signed.isLoading ||
+        uploads == null && uploadState.isLoading;
+    final signatureStatusUnavailable = signed.hasError || uploadState.hasError;
     ref.watch(activeChecklistItemsProvider);
     final showForm = widget.deliveryId != null &&
+        !signatureStatusLoading &&
+        !signatureStatusUnavailable &&
         pending == null &&
         (signed.valueOrNull == null || _isCorrecting);
-    if (showForm) {
-      ref.watch(_serverSigningDraftProvider(_scope));
-    }
-
     return SingleChildScrollView(
       key: const PageStorageKey('school-signoff'),
       primary: true,
@@ -133,12 +186,15 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildOverviewCard(showForm: showForm),
+          _buildOverviewCard(
+            showForm: showForm,
+            signatureStatusLoading: signatureStatusLoading,
+            signatureStatusUnavailable: signatureStatusUnavailable,
+          ),
           const SizedBox(height: AppTokens.sectionGap),
           _buildNotesCard(),
           const SizedBox(height: AppTokens.sectionGap),
-          _buildSignOffCard(signed, pending, uploads?.activeId,
-              showForm: showForm),
+          _buildSignOffCard(signed, pending, uploads?.activeId),
           if (legacy != null) ...[
             const SizedBox(height: 16),
             AppPanel(
@@ -154,7 +210,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     );
   }
 
-  Widget _buildOverviewCard({required bool showForm}) {
+  Widget _buildOverviewCard({
+    required bool showForm,
+    required bool signatureStatusLoading,
+    required bool signatureStatusUnavailable,
+  }) {
     final schoolTotalAsync = ref.watch(schoolTotalProvider(widget.schoolId));
     final schoolConsumablesTotalsAsync =
         ref.watch(schoolConsumablesTotalsProvider(widget.schoolId));
@@ -172,14 +232,18 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               tooltip: 'Refresh',
             ),
           ),
-          if (showForm)
+          if (widget.deliveryId != null && signatureStatusUnavailable)
+            const Text(
+                'Signature status unavailable. Saved work may need attention.')
+          else if (widget.deliveryId != null && signatureStatusLoading)
+            const Text('Checking signature status…')
+          else if (showForm)
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
-                onPressed: () =>
-                    _scrollToSection(_signerName.currentContext),
-                icon: const Icon(Icons.arrow_downward_outlined),
-                label: const Text('Go to signature'),
+              child: FilledButton.icon(
+                onPressed: _openCapture,
+                icon: const Icon(Icons.draw_outlined),
+                label: const Text('Capture signature'),
               ),
             ),
           const Divider(height: 20),
@@ -193,7 +257,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 data: (total) => Text(
                   '$total',
                   style: typography.headlineMedium
-                      ?.copyWith(color: AppTone.blue.ink),
+                      ?.copyWith(color: AppTone.blue.inkFor(context)),
                 ),
                 loading: () => const SizedBox(
                   width: 18,
@@ -418,7 +482,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(_getConsumableIcon(item.itemName),
-                            size: 16, color: AppTone.blue.ink),
+                            size: 16, color: AppTone.blue.inkFor(context)),
                         const SizedBox(width: 6),
                         Expanded(child: Text(item.itemName)),
                         const SizedBox(width: 6),
@@ -441,7 +505,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 const Divider(height: 16),
                 Text(
                   'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
-                  style: typography.bodySmall?.copyWith(color: AppTokens.muted),
+                  style: typography.bodySmall
+                      ?.copyWith(color: AppPalette.of(context).muted),
                 ),
               ],
             ],
@@ -454,79 +519,51 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
   }
 
   Widget _buildNotesCard() {
-    final yearLevelsAsync = ref.watch(yearLevelsProvider(widget.schoolId));
+    final years = ref.watch(yearLevelsProvider(widget.schoolId));
+    var loading = years.isLoading;
+    var unavailable = years.hasError;
+    final sections = <Widget>[];
+    for (final year in years.valueOrNull ?? <YearLevel>[]) {
+      final rooms = ref.watch(classroomsProvider((
+        schoolId: widget.schoolId,
+        yearLevelId: year.id,
+      )));
+      loading = loading || rooms.isLoading;
+      unavailable = unavailable || rooms.hasError;
+      for (final room in rooms.valueOrNull ?? <Classroom>[]) {
+        final notes = ref.watch(classroomNotesProvider((
+          schoolId: widget.schoolId,
+          yearLevelId: year.id,
+          classroomId: room.id,
+        )));
+        loading = loading || notes.isLoading;
+        unavailable = unavailable || notes.hasError;
+        final entries = notes.valueOrNull;
+        if (entries != null && entries.isNotEmpty) {
+          sections.add(_buildClassroomNoteSection(
+            year.label,
+            room,
+            year.id,
+            room.id,
+            entries,
+          ));
+        }
+      }
+    }
 
     return AppPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const AppSectionHeading(title: 'Classroom Notes'),
-          const SizedBox(height: 16),
-          yearLevelsAsync.when(
-            data: (yearLevels) {
-              if (yearLevels.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Center(
-                    child: Text('No year levels found'),
-                  ),
-                );
-              }
-
-              return Column(
-                children: yearLevels.map((yearLevel) {
-                  return _buildYearLevelNotes(yearLevel);
-                }).toList(),
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Error loading notes: $error'),
-            ),
-          ),
+          const SizedBox(height: 12),
+          if (loading) const Text('Loading classroom notes…'),
+          if (unavailable) const Text('Some classroom notes are unavailable.'),
+          if (sections.isEmpty && !loading && !unavailable)
+            const Text('No classroom notes recorded.'),
+          ...sections,
         ],
       ),
-    );
-  }
-
-  Widget _buildYearLevelNotes(YearLevel yearLevel) {
-    final classroomsAsync = ref.watch(classroomsProvider((
-      schoolId: widget.schoolId,
-      yearLevelId: yearLevel.id,
-    )));
-
-    return classroomsAsync.when(
-      data: (classrooms) {
-        if (classrooms.isEmpty) return const SizedBox.shrink();
-
-        // Build widgets for classrooms with notes
-        final classroomNoteWidgets = <Widget>[];
-
-        for (final classroom in classrooms) {
-          final notesAsync = ref.watch(classroomNotesProvider((
-            schoolId: widget.schoolId,
-            yearLevelId: yearLevel.id,
-            classroomId: classroom.id,
-          )));
-
-          notesAsync.whenData((notes) {
-            if (notes.isNotEmpty) {
-              classroomNoteWidgets.add(_buildClassroomNoteSection(
-                yearLevel.label,
-                classroom,
-                yearLevel.id,
-                classroom.id,
-                notes,
-              ));
-            }
-          });
-        }
-
-        return Column(children: classroomNoteWidgets);
-      },
-      loading: () => const SizedBox.shrink(),
-      error: (error, _) => const SizedBox.shrink(),
     );
   }
 
@@ -545,7 +582,6 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
 
     final typography = Theme.of(context).textTheme;
     return Padding(
-      key: _noteKeys[key],
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -561,13 +597,13 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               'Last updated by ${classroom.lastUpdatedBy} on ${DateTimeUtils.formatDateTime(classroom.lastUpdatedAt!)}',
               style: typography.bodySmall,
             ),
-          for (final note in notes)
+          for (final (index, note) in notes.indexed)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(note.content),
+                  Text(note.content, key: index == 0 ? _noteKeys[key] : null),
                   if (note.author != null)
                     Text('by ${note.author}', style: typography.bodySmall),
                 ],
@@ -581,9 +617,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
   Widget _buildSignOffCard(
     AsyncValue<SignedEvidence?> signed,
     EvidenceUpload? pending,
-    String? activeId, {
-    required bool showForm,
-  }) {
+    String? activeId,
+  ) {
     final latest = signed.valueOrNull;
     return AppPanel(
       child: Column(
@@ -605,16 +640,13 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               ],
             ),
           if (latest != null && !_isCorrecting) _buildSignedEvidence(latest),
-          if (showForm) _buildSignOffForm(),
           if (widget.deliveryId == null && latest == null && pending == null)
             const Text('Open a scheduled delivery to create a sign-off.'),
           if (signed.hasError)
             const Text('Could not load earlier signed snapshots.'),
           if (pending == null && _isCorrecting)
             TextButton(
-              onPressed: _isUploading
-                  ? null
-                  : () => setState(() => _isCorrecting = false),
+              onPressed: () => setState(() => _isCorrecting = false),
               child: const Text('Cancel correction'),
             ),
           TextButton.icon(
@@ -734,94 +766,6 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     );
   }
 
-  Widget _buildSignOffForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const AppSectionHeading(title: 'Sign-off'),
-        const SizedBox(height: 8),
-        const Text('This signature will be linked to the selected delivery.'),
-        const SizedBox(height: 16),
-        Semantics(
-          container: true,
-          child: TextField(
-            key: _signerName,
-            controller: _nameController,
-            maxLength: 200,
-            decoration: const InputDecoration(
-              labelText: 'Name',
-              hintText: 'Enter your full name',
-              prefixIcon: Icon(Icons.person),
-            ),
-            enabled: !_isUploading,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Signature',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        Semantics(
-          container: true,
-          label: 'Signature drawing area',
-          child: AspectRatio(
-            aspectRatio: 2.0,
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: AppTokens.muted),
-                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-                child: Stack(
-                  children: [
-                    Signature(
-                      controller: _signatureController,
-                      backgroundColor: Colors.white,
-                    ),
-                    if (_isUploading)
-                      Container(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        child: const Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            TextButton.icon(
-              onPressed:
-                  _isUploading ? null : () => _signatureController.clear(),
-              icon: const Icon(Icons.clear),
-              label: const Text('Clear'),
-            ),
-            FilledButton.icon(
-              onPressed: _isUploading ? null : _handleSignOff,
-              icon: _isUploading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.check),
-              label: Text(_isUploading ? 'Saving…' : 'Review and save'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
   Widget _buildCompletedSignOff(SignOff signOff) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -829,14 +773,14 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       children: [
         Row(
           children: [
-            const Icon(Icons.check_circle, color: Colors.green),
+            Icon(Icons.check_circle, color: AppTone.green.inkFor(context)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'School-level record',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: Colors.green,
+                      color: AppTone.green.inkFor(context),
                     ),
               ),
             ),
@@ -881,7 +825,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
           aspectRatio: 2.5,
           child: Container(
             decoration: BoxDecoration(
-              border: Border.all(color: AppTokens.muted),
+              border: Border.all(color: AppPalette.of(context).muted),
               borderRadius: BorderRadius.circular(AppTokens.controlRadius),
             ),
             child: ClipRRect(
@@ -954,46 +898,81 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
     ref.invalidate(classroomTotalsProvider(widget.schoolId));
     ref.invalidate(schoolTotalProvider(widget.schoolId));
     ref.invalidate(signOffProvider(widget.schoolId));
-    ref.invalidate(_serverSigningDraftProvider(_scope));
   }
 
-  Future<void> _handleSignOff() async {
-    final deliveryId = widget.deliveryId;
-    if (deliveryId == null) return;
-    final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      _showError('Please enter your name');
-      return;
+  EvidenceUpload? _pendingSignature(EvidenceUploadStatus? uploads) => uploads
+      ?.items
+      .where((item) =>
+          item.kind == EvidenceKind.signature &&
+          item.schoolId == widget.schoolId &&
+          item.deliveryId == widget.deliveryId)
+      .firstOrNull;
+
+  bool _canSaveCapture(String uid, DeliveryVisit visit) {
+    if (!mounted ||
+        visit.deliveryId != widget.deliveryId ||
+        visit.schoolId != widget.schoolId ||
+        ref.read(activeDeliveryVisitProvider) != visit ||
+        ref.read(authRepositoryProvider).currentUser?.uid != uid ||
+        ref.read(authStateProvider).valueOrNull?.uid != uid) {
+      return false;
     }
-    if (_signatureController.isEmpty) {
-      _showError('Please provide your signature');
-      return;
-    }
-    final uid = ref.read(authRepositoryProvider).currentUser?.uid;
-    final worker = ref.read(evidenceUploadWorkerProvider).valueOrNull;
-    if (uid == null || worker == null) {
-      _showError('Saved signatures are unavailable. Try again.');
-      return;
-    }
+    final staff = ref.read(currentStaffProvider);
+    final access = ref.read(deliveryVisitReadinessProvider(visit));
+    final member = staff.valueOrNull;
+    final readiness = access.valueOrNull;
+    final uploads = ref.read(evidenceUploadsProvider);
+    final queue = uploads.valueOrNull ??
+        ref.read(evidenceUploadWorkerProvider).valueOrNull?.status;
+    final signed = ref.read(_signedEvidenceProvider((
+      schoolId: visit.schoolId,
+      deliveryId: visit.deliveryId,
+    )));
+    return member != null &&
+        member.uid == uid &&
+        !staff.hasError &&
+        (member.hasManagerAccess ||
+            member.assignedSchoolIds.contains(visit.schoolId)) &&
+        readiness != null &&
+        !access.hasError &&
+        readiness.uid == uid &&
+        readiness.status.canOpen(online: ref.read(isOnlineProvider)) &&
+        !uploads.hasError &&
+        queue != null &&
+        _pendingSignature(queue) == null &&
+        !signed.hasError &&
+        signed.hasValue &&
+        (signed.valueOrNull == null || _isCorrecting);
+  }
+
+  Future<({SignOffSnapshot snapshot, List<ChecklistItem> checklist})>
+      _readSigningReview(DeliveryVisit visit) async {
     final repository = ref.read(baseSchoolsRepositoryProvider);
-    final checklist = ref.read(activeChecklistItemsProvider).valueOrNull;
-    setState(() => _isUploading = true);
-    try {
-      var draft = ref.read(isOnlineProvider)
-          ? ref.read(_serverSigningDraftProvider(_scope)).asData?.value
-          : null;
-      if (draft == null) {
-        try {
-          draft = await repository.readSignOffDraft(
-            widget.schoolId,
-            server: false,
-            deliveryId: deliveryId,
-          );
-        } catch (_) {
-          draft = SignOffSnapshot.incomplete(widget.schoolId);
-        }
+    final checklist = ref.read(activeChecklistItemsProvider).asData?.value;
+    SignOffSnapshot? draft;
+    if (ref.read(isOnlineProvider)) {
+      try {
+        draft = await repository
+            .readSignOffDraft(visit.schoolId,
+                server: true, deliveryId: visit.deliveryId)
+            .timeout(const Duration(seconds: 20));
+      } catch (_) {
+        // A connection does not guarantee that the server read succeeds.
       }
-      final frozen = SignOffSnapshot(
+    }
+    if (draft == null) {
+      try {
+        draft = await repository
+            .readSignOffDraft(visit.schoolId,
+                server: false, deliveryId: visit.deliveryId)
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        draft = SignOffSnapshot.incomplete(visit.schoolId);
+      }
+    }
+    return (
+      checklist: checklist ?? [],
+      snapshot: SignOffSnapshot(
         sourceReadAt: draft.sourceReadAt,
         serverReviewed: draft.serverReviewed && checklist != null,
         summary: {
@@ -1003,129 +982,256 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               {'id': item.id, 'title': item.title},
           ],
         },
-      );
-      if (!mounted || !await _reviewSnapshot(frozen, checklist ?? [])) return;
-      if (!mounted) return;
-      final signature = await _signatureController.toPngBytes();
-      if (signature == null) {
-        _showError('Could not capture the signature. Try again.');
-        return;
+      ),
+    );
+  }
+
+  Future<bool> _handleSignOff(
+    BuildContext captureContext,
+    String uid,
+    DeliveryVisit visit,
+  ) async {
+    if (!_canSaveCapture(uid, visit)) {
+      _showError('This visit is no longer available for signing.',
+          displayContext: captureContext);
+      return false;
+    }
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      _showError('Please enter your name', displayContext: captureContext);
+      return false;
+    }
+    if (_signatureController.isEmpty) {
+      _showError('Please provide your signature',
+          displayContext: captureContext);
+      return false;
+    }
+    final worker = ref.read(evidenceUploadWorkerProvider).valueOrNull;
+    if (worker == null) {
+      _showError('Saved signatures are unavailable. Try again.',
+          displayContext: captureContext);
+      return false;
+    }
+
+    try {
+      var review = await _readSigningReview(visit);
+      var changed = false;
+      var photosChanged = false;
+      while (_canSaveCapture(uid, visit)) {
+        if (!captureContext.mounted) return false;
+        final confirmed = await _reviewSnapshot(
+          captureContext,
+          review.snapshot,
+          review.checklist,
+          changed: changed,
+          photosChanged: photosChanged,
+        );
+        if (!confirmed ||
+            !captureContext.mounted ||
+            !_canSaveCapture(uid, visit)) {
+          return false;
+        }
+        final current = await _readSigningReview(visit);
+        if (!captureContext.mounted || !_canSaveCapture(uid, visit)) {
+          return false;
+        }
+        if (!review.snapshot.hasSameReviewContent(current.snapshot) ||
+            !listEquals(review.checklist, current.checklist)) {
+          photosChanged = !listEquals(
+            review.snapshot.summary['photoUrls'] as List?,
+            current.snapshot.summary['photoUrls'] as List?,
+          );
+          review = current;
+          changed = true;
+          continue;
+        }
+
+        final signature = await _signatureController.toPngBytes();
+        if (!captureContext.mounted || !_canSaveCapture(uid, visit)) {
+          return false;
+        }
+        if (signature == null) {
+          _showError('Could not capture the signature. Try again.',
+              displayContext: captureContext);
+          return false;
+        }
+        await worker.enqueueSignature(
+          id: const Uuid().v4(),
+          ownerUid: uid,
+          schoolId: visit.schoolId,
+          deliveryId: visit.deliveryId,
+          bytes: signature,
+          payload: {'typedName': name, 'snapshot': review.snapshot.toJson()},
+        );
+        if (!mounted || !captureContext.mounted) return false;
+        _nameController.clear();
+        _signatureController.clear();
+        setState(() => _isCorrecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Signature saved on this device')),
+        );
+        return true;
       }
-      await worker.enqueueSignature(
-        id: const Uuid().v4(),
-        ownerUid: uid,
-        schoolId: widget.schoolId,
-        deliveryId: deliveryId,
-        bytes: signature,
-        payload: {'typedName': name, 'snapshot': frozen.toJson()},
-      );
-      if (!mounted) return;
-      _nameController.clear();
-      _signatureController.clear();
-      setState(() => _isCorrecting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Signature saved on this device')),
-      );
+      return false;
     } catch (_) {
-      _showError('Could not save the signature. Your entry is still open.');
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
+      if (captureContext.mounted) {
+        _showError('Could not save the signature. Your entry is still open.',
+            displayContext: captureContext);
+      }
+      return false;
     }
   }
 
   Future<bool> _reviewSnapshot(
-      SignOffSnapshot draft, List<ChecklistItem> checklist) async {
+    BuildContext captureContext,
+    SignOffSnapshot draft,
+    List<ChecklistItem> checklist, {
+    required bool changed,
+    required bool photosChanged,
+  }) async {
+    final summary = draft.summary;
+    final schoolNotes = summary['notes'] as String?;
+    final notesByRoom = summary['notesByClassroom'] as Map?;
+    final photoCount = (summary['photoUrls'] as List?)?.length ?? 0;
     final checked = <String>{};
-    return await showDialog<bool>(
-          context: context,
-          builder: (context) => StatefulBuilder(
-            builder: (context, setState) => AlertDialog(
-              title: const Text('Review delivery details'),
-              content: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (draft.serverReviewed)
-                      Text(
-                          'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
-                    else
-                      const Text(
-                        'Some delivery information is cached or unavailable. '
-                        'This signature will need another review after syncing.',
-                      ),
-                    if (draft.classrooms.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                          '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs recorded'),
-                      for (final row in draft.classrooms)
-                        ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          title: Text(
-                              '${row['yearLevel']} · ${row['classroomName']}'),
-                          subtitle: Text(row['expectedPacksUnavailable'] == true
-                              ? 'Expected pack count unavailable'
-                              : '${row['actualPacksDelivered'] ?? 'Unrecorded'} delivered of ${row['expectedPacks']} packs'),
-                          children: [
-                            for (final item
-                                in (row['consumables'] as Map).values)
-                              ListTile(
-                                dense: true,
-                                title: Text(item['itemName'] as String),
-                                subtitle: Text(
-                                  '${item['actualQuantityDelivered'] ?? 'Unrecorded'} '
-                                  'of ${item['expectedQuantity']} ${item['unit']}',
-                                ),
-                              ),
-                          ],
-                        ),
-                    ],
-                    for (final item in checklist)
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: checked.contains(item.id),
-                        title: Text(item.title),
-                        subtitle:
-                            item.subtitle == null ? null : Text(item.subtitle!),
-                        onChanged: (value) => setState(() {
-                          if (value == true) {
-                            checked.add(item.id);
-                          } else {
-                            checked.remove(item.id);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: checked.length == checklist.length
-                      ? () => Navigator.of(context).pop(true)
-                      : null,
-                  child: Text(draft.serverReviewed
-                      ? 'Save signature'
-                      : 'Save for review'),
-                ),
+    final route = DialogRoute<bool>(
+      context: captureContext,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Review delivery details'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (changed) ...[
+                  const Text(
+                      'Delivery information changed. Review the updated details.'),
+                  const SizedBox(height: 8),
+                ],
+                if (draft.serverReviewed)
+                  Text(
+                      'Data read ${DateTimeUtils.formatDateTime(draft.sourceReadAt.toLocal())}.')
+                else
+                  const Text(
+                    'Some delivery information is cached or unavailable. '
+                    'This signature will need another review after syncing.',
+                  ),
+                const SizedBox(height: 12),
+                if (schoolNotes?.isNotEmpty == true) ...[
+                  Text('School notes',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  Text(schoolNotes!),
+                  const SizedBox(height: 8),
+                ],
+                if (photoCount > 0 || photosChanged) ...[
+                  Text('$photoCount classroom photo attachments'),
+                  if (photosChanged)
+                    const Text(
+                      'Photo attachments changed. Return to the classroom to inspect them.',
+                    ),
+                  const SizedBox(height: 8),
+                ],
+                if (draft.classrooms.isEmpty)
+                  const Text(
+                      'No classroom quantities are available in this snapshot.')
+                else ...[
+                  Text(
+                    '${draft.classrooms.length} classrooms · ${draft.totalPacks} expected packs',
+                  ),
+                  for (final row in draft.classrooms)
+                    _buildSnapshotClassroom(row as Map, notesByRoom),
+                ],
+                for (final item in checklist)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: checked.contains(item.id),
+                    title: Text(item.title),
+                    subtitle:
+                        item.subtitle == null ? null : Text(item.subtitle!),
+                    onChanged: (value) => setState(() {
+                      if (value == true) {
+                        checked.add(item.id);
+                      } else {
+                        checked.remove(item.id);
+                      }
+                    }),
+                  ),
               ],
             ),
           ),
-        ) ??
-        false;
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: checked.length == checklist.length
+                  ? () => Navigator.of(context).pop(true)
+                  : null,
+              child: Text(
+                  draft.serverReviewed ? 'Save signature' : 'Save for review'),
+            ),
+          ],
+        ),
+      ),
+    );
+    _reviewRoute = route;
+    try {
+      return await Navigator.of(captureContext).push(route) ?? false;
+    } finally {
+      if (identical(_reviewRoute, route)) _reviewRoute = null;
+    }
   }
 
-  void _showError(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+  Widget _buildSnapshotClassroom(Map row, Map? notesByRoom) {
+    final level = row['yearLevel'];
+    final name = row['classroomName'];
+    final notes = (notesByRoom?[level] as Map?)?[name] as List? ?? const [];
+    final status = switch (row['status']) {
+      'complete' => 'Complete',
+      'incomplete' => 'Incomplete',
+      'notAttended' => 'Not attended',
+      _ => 'Unknown',
+    };
+    final expected = row['expectedPacksUnavailable'] == true
+        ? 'Expected packs unavailable'
+        : '${row['expectedPacks']} expected packs';
+    final actual = row['actualPacksDelivered'];
+
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text('$level · $name'),
+      subtitle: Text(
+        '$status\n$expected · ${actual == null ? 'No recorded pack count' : '$actual recorded packs'}',
+      ),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final note in notes)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(note as String),
+          ),
+        for (final item in (row['consumables'] as Map).values)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(item['itemName'] as String),
+            subtitle: Text(
+              '${item['actualQuantityDelivered'] ?? 'Unrecorded'} '
+              'of ${item['expectedQuantity']} ${item['unit']}',
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _showError(String message, {BuildContext? displayContext}) {
+    final target = displayContext ?? (mounted ? context : null);
+    if (target == null || !target.mounted) return;
+    ScaffoldMessenger.of(target).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _exportSummary({SignedEvidence? evidence}) async {
@@ -1133,7 +1239,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       // Show loading indicator
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Row(
               children: [
                 SizedBox(
@@ -1141,14 +1247,14 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                   height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    color: AppPalette.of(context).canvas,
                   ),
                 ),
-                SizedBox(width: 16),
-                Text('Generating Excel file...'),
+                const SizedBox(width: 16),
+                const Text('Generating Excel file...'),
               ],
             ),
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -1244,6 +1350,179 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
             label: Text(Platform.isIOS ? 'Share File' : 'Open File'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SignatureCaptureScreen extends StatefulWidget {
+  const _SignatureCaptureScreen({
+    required this.schoolName,
+    required this.visitId,
+    required this.visitDate,
+    required this.name,
+    required this.signature,
+    required this.onReview,
+  });
+
+  final String schoolName;
+  final String visitId;
+  final DateTime? visitDate;
+  final TextEditingController name;
+  final SignatureController signature;
+  final Future<bool> Function(BuildContext context) onReview;
+
+  @override
+  State<_SignatureCaptureScreen> createState() =>
+      _SignatureCaptureScreenState();
+}
+
+class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
+  bool _reviewing = false;
+
+  Future<void> _reviewAndSave(BuildContext captureContext) async {
+    if (_reviewing) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _reviewing = true);
+    final saved = await widget.onReview(captureContext);
+    if (!mounted) return;
+    setState(() => _reviewing = false);
+    if (saved && ModalRoute.of(context)?.isCurrent == true) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final typography = Theme.of(context).textTheme;
+    final colors = AppPalette.of(context);
+    final visitDate = widget.visitDate;
+    return PopScope(
+      canPop: !_reviewing,
+      child: ScaffoldMessenger(
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            toolbarHeight: MediaQuery.textScalerOf(context).scale(16) * 2 + 32,
+            titleSpacing: 8,
+            title: TextButton.icon(
+              onPressed: _reviewing ? null : () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back to review'),
+            ),
+          ),
+          body: Builder(
+              builder: (captureContext) => SafeArea(
+                    top: false,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(AppTokens.gutter),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Semantics(
+                                header: true,
+                                child: Text(
+                                  'Capture signature',
+                                  style: typography.headlineMedium,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(widget.schoolName,
+                                  style: typography.titleMedium),
+                              Text(
+                                visitDate == null
+                                    ? 'Delivery visit'
+                                    : DateTimeUtils.formatDate(visitDate),
+                                style: typography.bodyMedium
+                                    ?.copyWith(color: colors.muted),
+                              ),
+                              Text('Visit ${widget.visitId}',
+                                  style: typography.bodySmall),
+                              const SizedBox(height: AppTokens.sectionGap),
+                              Semantics(
+                                container: true,
+                                child: TextField(
+                                  controller: widget.name,
+                                  enabled: !_reviewing,
+                                  maxLength: 200,
+                                  textCapitalization: TextCapitalization.words,
+                                  textInputAction: TextInputAction.done,
+                                  decoration:
+                                      const InputDecoration(labelText: 'Name'),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Text('Signature', style: typography.titleMedium),
+                              const SizedBox(height: 8),
+                              Semantics(
+                                container: true,
+                                label: 'Signature drawing area',
+                                child: AbsorbPointer(
+                                  absorbing: _reviewing,
+                                  child: AspectRatio(
+                                    aspectRatio: 2,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(
+                                          AppTokens.controlRadius),
+                                      child: DecoratedBox(
+                                        position: DecorationPosition.foreground,
+                                        decoration: BoxDecoration(
+                                          border:
+                                              Border.all(color: colors.outline),
+                                          borderRadius: BorderRadius.circular(
+                                            AppTokens.controlRadius,
+                                          ),
+                                        ),
+                                        child: Signature(
+                                          controller: widget.signature,
+                                          backgroundColor: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: _reviewing
+                                        ? null
+                                        : widget.signature.clear,
+                                    icon: const Icon(Icons.clear),
+                                    label: const Text('Clear'),
+                                  ),
+                                  FilledButton.icon(
+                                    onPressed: _reviewing
+                                        ? null
+                                        : () => _reviewAndSave(captureContext),
+                                    icon: _reviewing
+                                        ? const SizedBox.square(
+                                            dimension: 16,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.check),
+                                    label: Text(
+                                      _reviewing
+                                          ? 'Checking…'
+                                          : 'Review and save',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  )),
+        ),
       ),
     );
   }

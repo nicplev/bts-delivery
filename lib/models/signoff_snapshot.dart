@@ -29,6 +29,11 @@ class SignOffSnapshot {
 
   List<dynamic> get classrooms => summary['classroomDeliveryDetails'] as List;
 
+  /// Compares what the signer reviewed, excluding the time of the read.
+  bool hasSameReviewContent(SignOffSnapshot other) =>
+      serverReviewed == other.serverReviewed &&
+      jsonEncode(_sorted(summary)) == jsonEncode(_sorted(other.summary));
+
   Map<String, dynamic> toJson() => {
         'sourceReadAt': sourceReadAt.toUtc().toIso8601String(),
         'serverReviewed': serverReviewed,

@@ -178,7 +178,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               icon: Icons.check_circle,
               label: 'Earlier school sign-off',
               value: _formatDate(school.lastSignOffDate!),
-              valueColor: AppTone.green.ink,
+              valueColor: AppTone.green.inkFor(context),
             ),
             if (school.signedBy?.isNotEmpty == true) ...[
               const SizedBox(height: 12),
@@ -211,9 +211,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             children: [
               Text(
                 label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppTokens.muted,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppPalette.of(context).muted,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -337,9 +337,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             ],
           ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
-            style: TextStyle(color: AppTokens.muted),
+            style: TextStyle(color: AppPalette.of(context).muted),
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
@@ -442,11 +442,11 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                     child: Column(
                       children: [
                         Icon(Icons.person_off,
-                            size: 48, color: Colors.grey[400]),
+                            size: 48, color: AppPalette.of(context).muted),
                         const SizedBox(height: 8),
-                        const Text(
+                        Text(
                           'No contacts added yet',
-                          style: TextStyle(color: AppTokens.muted),
+                          style: TextStyle(color: AppPalette.of(context).muted),
                         ),
                       ],
                     ),
@@ -536,13 +536,16 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                     ),
                   ),
                 if (canEdit)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'delete',
                     child: Row(
                       children: [
-                        Icon(Icons.delete, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Delete', style: TextStyle(color: Colors.red)),
+                        Icon(Icons.delete,
+                            color: Theme.of(context).colorScheme.error),
+                        const SizedBox(width: 8),
+                        Text('Delete',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error)),
                       ],
                     ),
                   ),
@@ -697,7 +700,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           ),
           FilledButton(
             onPressed: () => _deleteContact(contact.id),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError),
             child: const Text('Delete'),
           ),
         ],
@@ -710,7 +715,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a contact name'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -743,14 +747,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact added successfully'),
-            backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to add contact'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -763,7 +765,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a contact name'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -794,14 +795,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact updated successfully'),
-            backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to update contact'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -819,14 +818,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Contact deleted successfully'),
-            backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to delete contact'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -844,7 +841,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not open maps: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -860,7 +856,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not make call: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -876,7 +871,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not open email: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
@@ -940,7 +934,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a school name'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -968,14 +961,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('School updated successfully'),
-          backgroundColor: Colors.green,
         ),
       );
     } else {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to update school'),
-          backgroundColor: Colors.red,
         ),
       );
     }
@@ -987,26 +978,28 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     final storageRepository = ref.read(storageRepositoryProvider);
     final messenger = ScaffoldMessenger.of(context);
 
+    final indicatorColor = AppPalette.of(context).canvas;
+
     // Pick file (image or PDF)
     final file = await photoService.pickSchoolMapFile(context);
     if (file == null) return;
 
     // Show uploading indicator
     messenger.showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Row(
           children: [
             SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white),
+                  strokeWidth: 2, color: indicatorColor),
             ),
-            SizedBox(width: 16),
-            Text('Uploading school map...'),
+            const SizedBox(width: 16),
+            const Expanded(child: Text('Uploading school map...')),
           ],
         ),
-        duration: Duration(seconds: 30),
+        duration: const Duration(seconds: 30),
       ),
     );
 
@@ -1029,7 +1022,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         SnackBar(
           content:
               Text(uploadResult.errorOrNull ?? 'Failed to upload school map'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -1041,7 +1033,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to get download URL'),
-          backgroundColor: Colors.red,
         ),
       );
       return;
@@ -1061,14 +1052,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('School map uploaded successfully'),
-          backgroundColor: Colors.green,
         ),
       );
     } else {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to save school map'),
-          backgroundColor: Colors.red,
         ),
       );
     }
@@ -1088,7 +1077,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           ),
           FilledButton(
             onPressed: () => _deleteSchoolMap(dialogContext, school),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError),
             child: const Text('Delete'),
           ),
         ],
@@ -1117,7 +1108,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
               deleteResult.errorOrNull ??
                   'Failed to delete school map from storage',
             ),
-            backgroundColor: Colors.red,
           ),
         );
         return;
@@ -1138,14 +1128,12 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('School map deleted successfully'),
-          backgroundColor: Colors.green,
         ),
       );
     } else {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('Failed to delete school map'),
-          backgroundColor: Colors.red,
         ),
       );
     }

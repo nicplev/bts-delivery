@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/staff.dart';
 import '../providers/calendar_sync_providers.dart';
+import '../app/theme/app_tokens.dart';
 
 /// Dialog for subscribing to calendar via webcal:// URL
 class CalendarSubscriptionDialog extends ConsumerStatefulWidget {
@@ -89,14 +90,13 @@ class _CalendarSubscriptionDialogState
           const SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.white),
+                Icon(Icons.check_circle),
                 SizedBox(width: 12),
                 Expanded(
                   child: Text('Calendar subscription opened in Calendar app'),
                 ),
               ],
             ),
-            backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -142,8 +142,8 @@ class _CalendarSubscriptionDialogState
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.orange,
-            ),
+                backgroundColor: AppTone.yellow.accent,
+                foregroundColor: AppPalette.of(context).actionInk),
             child: const Text('Regenerate'),
           ),
         ],
@@ -176,7 +176,6 @@ class _CalendarSubscriptionDialogState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Calendar link regenerated successfully'),
-            backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -220,19 +219,23 @@ class _CalendarSubscriptionDialogState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
+                  border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    Icon(Icons.error_outline,
+                        color: Theme.of(context).colorScheme.onErrorContainer),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         _errorMessage!,
-                        style: TextStyle(color: Colors.red.shade700),
+                        style: TextStyle(
+                            color:
+                                Theme.of(context).colorScheme.onErrorContainer),
                       ),
                     ),
                   ],
@@ -255,22 +258,23 @@ class _CalendarSubscriptionDialogState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
+                  color: AppTone.blue.tintFor(context),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade200),
+                  border: Border.all(color: AppPalette.of(context).outline),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                        Icon(Icons.info_outline,
+                            color: AppTone.blue.inkFor(context), size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Auto-updates every hour',
                             style: TextStyle(
-                              color: Colors.blue.shade700,
+                              color: AppTone.blue.inkFor(context),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -282,7 +286,7 @@ class _CalendarSubscriptionDialogState
                       'Your calendar will automatically update when deliveries are added or changed.',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Colors.blue.shade700,
+                        color: AppTone.blue.inkFor(context),
                       ),
                     ),
                   ],
@@ -350,9 +354,9 @@ class _CalendarSubscriptionDialogState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: AppPalette.of(context).surfaceQuiet,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: AppPalette.of(context).outline),
                   ),
                   child: Row(
                     children: [
@@ -384,7 +388,7 @@ class _CalendarSubscriptionDialogState
                   icon: const Icon(Icons.refresh, size: 18),
                   label: const Text('Regenerate link'),
                   style: TextButton.styleFrom(
-                    foregroundColor: Colors.orange,
+                    foregroundColor: AppTone.yellow.inkFor(context),
                   ),
                 ),
               ],
@@ -421,14 +425,14 @@ class _CalendarSubscriptionDialogState
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: Theme.of(context).primaryColor,
+            color: AppTone.blue.tintFor(context),
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: AppTone.blue.inkFor(context),
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),

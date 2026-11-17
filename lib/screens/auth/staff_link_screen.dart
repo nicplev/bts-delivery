@@ -90,8 +90,8 @@ class _StaffLinkScreenState extends ConsumerState<StaffLinkScreen> {
                         state.hasError
                             ? state.error.toString()
                             : 'Unable to check your account link.',
-                        style:
-                            text.bodySmall?.copyWith(color: AppTone.pink.ink),
+                        style: text.bodySmall
+                            ?.copyWith(color: AppTone.pink.inkFor(context)),
                       ),
                       if (staff.hasError)
                         TextButton(

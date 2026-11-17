@@ -8,7 +8,6 @@ import '../../repositories/staff_repository.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../providers/staff_providers.dart';
 import '../design/design.dart';
-import '../../app/theme/brand_colors.dart';
 
 /// Dialog for admins to manage calendar subscriptions for staff members
 class CalendarManagementDialog extends ConsumerStatefulWidget {
@@ -82,12 +81,11 @@ class _CalendarManagementDialogState
           const SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.white),
+                Icon(Icons.check_circle),
                 SizedBox(width: 12),
                 Text('Calendar subscription created successfully'),
               ],
             ),
-            backgroundColor: BrandColors.greenDarker,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -120,20 +118,21 @@ class _CalendarManagementDialogState
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTone.yellow.tint,
+                color: AppTone.yellow.tintFor(context),
                 borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-                border: Border.all(color: AppTokens.outline),
+                border: Border.all(color: AppPalette.of(context).outline),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning_amber, color: AppTone.yellow.ink),
+                  Icon(Icons.warning_amber,
+                      color: AppTone.yellow.inkFor(context)),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       '${widget.staff.name} will need to re-subscribe in their calendar app.',
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppTone.yellow.ink,
+                        color: AppTone.yellow.inkFor(context),
                       ),
                     ),
                   ),
@@ -151,7 +150,7 @@ class _CalendarManagementDialogState
             onPressed: () => Navigator.of(context).pop(true),
             style: FilledButton.styleFrom(
               backgroundColor: AppTone.yellow.accent,
-              foregroundColor: AppTokens.ink,
+              foregroundColor: AppPalette.of(context).actionInk,
             ),
             child: const Text('Regenerate'),
           ),
@@ -194,12 +193,11 @@ class _CalendarManagementDialogState
           const SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.white),
+                Icon(Icons.check_circle),
                 SizedBox(width: 12),
                 Text('Calendar link regenerated successfully'),
               ],
             ),
-            backgroundColor: BrandColors.greenDarker,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -247,7 +245,7 @@ class _CalendarManagementDialogState
                 Text(
                   widget.staff.name,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTokens.muted,
+                        color: AppPalette.of(context).muted,
                       ),
                 ),
               ],
@@ -276,20 +274,21 @@ class _CalendarManagementDialogState
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: AppTone.pink.tint,
+                    color: AppTone.pink.tintFor(context),
                     borderRadius:
                         BorderRadius.circular(AppTokens.controlRadius),
-                    border: Border.all(color: AppTokens.outline),
+                    border: Border.all(color: AppPalette.of(context).outline),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.error_outline, color: AppTone.pink.ink),
+                      Icon(Icons.error_outline,
+                          color: AppTone.pink.inkFor(context)),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: TextStyle(color: AppTone.pink.ink),
+                          style: TextStyle(color: AppTone.pink.inkFor(context)),
                         ),
                       ),
                     ],
@@ -329,7 +328,7 @@ class _CalendarManagementDialogState
                   label: const Text('Generate Link'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTone.blue.accent,
-                    foregroundColor: AppTokens.ink,
+                    foregroundColor: AppPalette.of(context).actionInk,
                   ),
                 )
               else
@@ -339,7 +338,7 @@ class _CalendarManagementDialogState
                   label: const Text('Regenerate'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTone.yellow.accent,
-                    foregroundColor: AppTokens.ink,
+                    foregroundColor: AppPalette.of(context).actionInk,
                   ),
                 ),
             ],
@@ -351,15 +350,15 @@ class _CalendarManagementDialogState
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTokens.surfaceQuiet,
+          color: AppPalette.of(context).surfaceQuiet,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTokens.outline),
+          border: Border.all(color: AppPalette.of(context).outline),
         ),
-        child: const Row(
+        child: Row(
           children: [
             Icon(Icons.calendar_month_outlined,
-                color: AppTokens.muted, size: 32),
-            SizedBox(width: 16),
+                color: AppPalette.of(context).muted, size: 32),
+            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -369,15 +368,15 @@ class _CalendarManagementDialogState
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 16,
-                      color: AppTokens.ink,
+                      color: AppPalette.of(context).ink,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
                     'Generate a link to enable calendar sync',
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppTokens.muted,
+                      color: AppPalette.of(context).muted,
                     ),
                   ),
                 ],
@@ -394,17 +393,21 @@ class _CalendarManagementDialogState
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isActive ? AppTone.green.tint : AppTone.yellow.tint,
+            color: isActive
+                ? AppTone.green.tintFor(context)
+                : AppTone.yellow.tintFor(context),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isActive ? AppTokens.outline : AppTokens.outline,
+              color: AppPalette.of(context).outline,
             ),
           ),
           child: Row(
             children: [
               Icon(
                 isActive ? Icons.check_circle : Icons.schedule,
-                color: isActive ? AppTone.green.ink : AppTone.yellow.ink,
+                color: isActive
+                    ? AppTone.green.inkFor(context)
+                    : AppTone.yellow.inkFor(context),
                 size: 32,
               ),
               const SizedBox(width: 16),
@@ -417,8 +420,9 @@ class _CalendarManagementDialogState
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 16,
-                        color:
-                            isActive ? AppTone.green.ink : AppTone.yellow.ink,
+                        color: isActive
+                            ? AppTone.green.inkFor(context)
+                            : AppTone.yellow.inkFor(context),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -426,8 +430,9 @@ class _CalendarManagementDialogState
                       metadata?.lastAccessedText ?? 'Never accessed',
                       style: TextStyle(
                         fontSize: 13,
-                        color:
-                            isActive ? AppTone.green.ink : AppTone.yellow.ink,
+                        color: isActive
+                            ? AppTone.green.inkFor(context)
+                            : AppTone.yellow.inkFor(context),
                       ),
                     ),
                   ],
@@ -441,13 +446,14 @@ class _CalendarManagementDialogState
       error: (_, __) => Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTone.green.tint,
+          color: AppTone.green.tintFor(context),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTokens.outline),
+          border: Border.all(color: AppPalette.of(context).outline),
         ),
         child: Row(
           children: [
-            Icon(Icons.calendar_month, color: AppTone.green.ink, size: 32),
+            Icon(Icons.calendar_month,
+                color: AppTone.green.inkFor(context), size: 32),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -458,7 +464,7 @@ class _CalendarManagementDialogState
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 16,
-                      color: AppTone.green.ink,
+                      color: AppTone.green.inkFor(context),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -466,7 +472,7 @@ class _CalendarManagementDialogState
                     'Subscription link generated',
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppTone.green.ink,
+                      color: AppTone.green.inkFor(context),
                     ),
                   ),
                 ],
@@ -482,20 +488,20 @@ class _CalendarManagementDialogState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Subscription URL',
           style: TextStyle(
             fontWeight: FontWeight.w600,
-            color: AppTokens.ink,
+            color: AppPalette.of(context).ink,
           ),
         ),
         const SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTone.blue.tint,
+            color: AppTone.blue.tintFor(context),
             borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-            border: Border.all(color: AppTokens.outline),
+            border: Border.all(color: AppPalette.of(context).outline),
           ),
           child: Row(
             children: [
@@ -514,7 +520,7 @@ class _CalendarManagementDialogState
                 icon: const Icon(Icons.copy, size: 18),
                 onPressed: _copyUrl,
                 tooltip: 'Copy URL',
-                color: AppTone.blue.ink,
+                color: AppTone.blue.inkFor(context),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
               ),
@@ -524,9 +530,9 @@ class _CalendarManagementDialogState
         const SizedBox(height: 8),
         Text(
           'Share this URL with ${widget.staff.name} to subscribe',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
-            color: AppTokens.muted,
+            color: AppPalette.of(context).muted,
             fontStyle: FontStyle.italic,
           ),
         ),
@@ -541,20 +547,21 @@ class _CalendarManagementDialogState
           return Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppTokens.surfaceQuiet,
+              color: AppPalette.of(context).surfaceQuiet,
               borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-              border: Border.all(color: AppTokens.outline),
+              border: Border.all(color: AppPalette.of(context).outline),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.info_outline, color: AppTokens.muted, size: 20),
-                SizedBox(width: 12),
+                Icon(Icons.info_outline,
+                    color: AppPalette.of(context).muted, size: 20),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     'No usage data yet',
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppTokens.muted,
+                      color: AppPalette.of(context).muted,
                     ),
                   ),
                 ),
@@ -566,11 +573,11 @@ class _CalendarManagementDialogState
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Usage Statistics',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
-                color: AppTokens.ink,
+                color: AppPalette.of(context).ink,
               ),
             ),
             const SizedBox(height: 12),
@@ -608,7 +615,7 @@ class _CalendarManagementDialogState
   Widget _buildStatRow(String label, String value, IconData icon) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: AppTone.blue.ink),
+        Icon(icon, size: 18, color: AppTone.blue.inkFor(context)),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -616,9 +623,9 @@ class _CalendarManagementDialogState
             children: [
               Text(
                 label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: AppTokens.muted,
+                  color: AppPalette.of(context).muted,
                 ),
               ),
               const SizedBox(height: 2),

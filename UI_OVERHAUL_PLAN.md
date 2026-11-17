@@ -63,12 +63,13 @@ Keep truthful Saved on this device, Waiting to upload, Needs review and Download
 
 - [x] Review HIG, supplied PDF, existing screens and independent Astra recommendations.
 - [x] Recover disk space and save the plan before implementation.
-- [ ] Produce a coordinated prototype: Today, visit/classroom and sign-off review/capture, with offline, dark and large-text variants; Astra reviews before production changes.
-- [ ] Implement adaptive semantic colours, typography and shared components, including real dark/high-contrast modes and isolated accessibility semantics.
-- [ ] Simplify daily navigation, visit context and classroom Packs work.
-- [ ] Implement and validate focused sign-off capture with retained draft and final review safeguards.
-- [ ] Apply the system to secondary forms, recovery and media states; inspect remaining exceptions.
-- [ ] Run meaningful route/state tests, combined suite/analyzer, native build and visual walkthrough.
+- [x] Produce a coordinated prototype: Today, visit/classroom and sign-off review/capture, with offline, dark and large-text variants; Astra reviews before production changes.
+- [x] Implement adaptive semantic colours, typography and shared components, including real dark/high-contrast modes and isolated accessibility semantics.
+- [x] Simplify daily navigation, visit context and classroom Packs work.
+- [x] Implement and validate focused sign-off capture with retained draft and final review safeguards.
+- [x] Apply the system to secondary forms, recovery and media states; inspect remaining exceptions.
+- [x] Run meaningful route/state tests, combined suite/analyzer, native build and initial visual walkthrough.
+- [ ] Finish the new capture screen's native software-keyboard/final-dialog check after Mac unlock; complete the wider accessibility walkthrough.
 - [ ] Complete physical-device, two-device, representative performance and release acceptance separately.
 
 Retain Flutter/Firebase. Cupertino/adaptive widgets can improve iOS interaction, but Flutter does not automatically inherit native Liquid Glass behaviour. No speculative native bridge, heavy blur dependency or SwiftUI rewrite is planned. Implement bounded slices and keep app data contracts unchanged.
@@ -87,3 +88,19 @@ Retain Flutter/Firebase. Cupertino/adaptive widgets can improve iOS interaction,
 ## Work journal
 
 17 November: removed this task's regenerable 6.9 GB Xcode derived data and PDF preview images. User explicitly approved removal of the separate lumi_reading_tracker (8.4 GB) and parent-signup (4.3 GB) Xcode derived-data caches. Source projects, simulator data, supplied PDF and prior evidence exports are retained.
+
+17 November: completed the approved cache cleanup (about 20 GiB available immediately afterwards). Astra approved the revised prototype before production changes, requiring the existing three visit tabs, visible active timer controls, separate recovery/media wording and retained main navigation outside focused signature capture. Implementation and verification are in progress.
+
+Navigation assessment: retain the existing shell and main tabs for visit/classroom/review screens; focused signature capture alone uses a full-height modal. Independent per-tab navigation stacks are deliberately deferred: changing navigator and provider lifetimes alongside signature capture would broaden draft and account-isolation risk. This is not a claim that tab positions now persist.
+
+Final sign-off review is a bounded best-effort server reread with explicit cached fallback and renewed review when content changes. It does not provide an atomic multi-document snapshot or a server lock against later concurrent edits.
+
+Implementation: adaptive semantic colours and system typography now cover the main screens, forms, recovery/media panels, dialogs and native startup backgrounds. Exact brand colours are retained. Today has clearly labelled delivery options; classroom Packs groups expected/recorded quantities with explicit status, keeping null recorded quantities as Unrecorded. Full address remains in Info. Active timer and offline-file actions stay visible. A separate Next classroom action was not added because the existing scoped classroom navigation remains sufficient for this slice.
+
+Foundation evidence: 14 focused tests passed, including actual platform dark/increased-contrast startup and error views, text/brand/state contrast and a narrow recovery banner. Four actual-widget Today previews were rendered and inspected in light, dark/offline, dark/200% text and dark/increased contrast. Astra passed their visual review.
+
+Sign-off evidence: the focused route test verifies name and exact stroke retention on Back/reopen, hidden main navigation during capture, 320-point layout at 200% text with keyboard, visible missing-signature validation, changed frozen notes displayed during renewed review, exactly one correctly scoped PNG enqueue to a test worker, pending-signature isolation and assignment-revocation teardown. The real-worker regression suite separately checks persistence and upload behaviour.
+
+Combined checks: all 85 Flutter tests passed. Full analysis after cleaning new notices reports no errors or warnings and the original 26 informational notices. Native Debug build/install/launch passed on iPhone Air (iOS 26.5, isolated demo Firebase project); native dependency deprecation warnings remain. Walkthrough confirmed the Packs group, separate visit states, existing pending-signature protection, full-height capture without main tabs, and retained typed name and drawn stroke on Back/reopen. The Mac locked before the final software-keyboard/review check; unlock requested. No test signature was submitted to the demo backend during this walkthrough.
+
+Final review: Astra approved the completed source and the native Packs/retained-capture screenshots. Final-tree regression rerun passed all 85 tests after the minor analyzer cleanup. Screenshots are saved outside the repository in the task's `bts-overhaul-widgets` artifact folder. Temporary native build output was removed again after validation to recover space; source and installed simulator data remain. No production deployment or App Store submission was performed. The open keyboard/accessibility, physical-device, two-device, concurrency and measured-performance gates above remain requirements, not assumed passes.

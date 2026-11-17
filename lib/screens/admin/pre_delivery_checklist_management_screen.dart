@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/pre_delivery_checklist_item.dart';
 import '../../providers/pre_delivery_checklist_providers.dart';
 import '../../providers/auth_providers.dart';
-import '../../app/theme/brand_colors.dart';
 import '../../widgets/design/design.dart';
 
 class PreDeliveryChecklistManagementScreen extends ConsumerStatefulWidget {
@@ -175,13 +174,18 @@ class _PreDeliveryChecklistManagementScreenState
                           ],
                         ),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete, size: 20, color: Colors.red),
-                            SizedBox(width: 12),
-                            Text('Delete', style: TextStyle(color: Colors.red)),
+                            Icon(Icons.delete,
+                                size: 20,
+                                color: Theme.of(context).colorScheme.error),
+                            const SizedBox(width: 12),
+                            Text('Delete',
+                                style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.error)),
                           ],
                         ),
                       ),
@@ -262,7 +266,6 @@ class _PreDeliveryChecklistManagementScreenState
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Item added successfully'),
-                      backgroundColor: Colors.green,
                     ),
                   );
                 }
@@ -334,7 +337,6 @@ class _PreDeliveryChecklistManagementScreenState
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Item updated successfully'),
-                      backgroundColor: Colors.green,
                     ),
                   );
                 }
@@ -359,7 +361,6 @@ class _PreDeliveryChecklistManagementScreenState
         SnackBar(
           content:
               Text('Item ${updatedItem.isActive ? 'enabled' : 'disabled'}'),
-          backgroundColor: BrandColors.kakaGreen,
         ),
       );
     }
@@ -379,8 +380,8 @@ class _PreDeliveryChecklistManagementScreenState
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError),
             onPressed: () async {
               Navigator.of(dialogContext).pop();
 
@@ -392,7 +393,6 @@ class _PreDeliveryChecklistManagementScreenState
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Item deleted'),
-                    backgroundColor: Colors.red,
                   ),
                 );
               }

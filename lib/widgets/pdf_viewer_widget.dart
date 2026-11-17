@@ -4,6 +4,7 @@ import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import '../app/theme/app_tokens.dart';
 
 class PDFViewerWidget extends StatelessWidget {
   const PDFViewerWidget({
@@ -42,7 +43,6 @@ class PDFViewerWidget extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Failed to share PDF: $e'),
-                      backgroundColor: Colors.red,
                     ),
                   );
                 }
@@ -61,7 +61,6 @@ class PDFViewerWidget extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Failed to load PDF: ${details.error}'),
-              backgroundColor: Colors.red,
             ),
           );
         },
@@ -100,7 +99,6 @@ class LocalPDFViewerWidget extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Failed to share PDF: $e'),
-                      backgroundColor: Colors.red,
                     ),
                   );
                 }
@@ -119,7 +117,6 @@ class LocalPDFViewerWidget extends StatelessWidget {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Failed to load PDF: ${details.error}'),
-              backgroundColor: Colors.red,
             ),
           );
         },
@@ -151,7 +148,7 @@ class PDFThumbnail extends StatelessWidget {
         width: width,
         height: height,
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
+          border: Border.all(color: AppPalette.of(context).outline),
           borderRadius: BorderRadius.circular(8),
         ),
         child: ClipRRect(
@@ -161,20 +158,20 @@ class PDFThumbnail extends StatelessWidget {
             children: [
               // PDF icon placeholder
               Container(
-                color: Colors.red.shade50,
+                color: Theme.of(context).colorScheme.errorContainer,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
                       Icons.picture_as_pdf,
                       size: 40,
-                      color: Colors.red.shade700,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'PDF',
                       style: TextStyle(
-                        color: Colors.red.shade700,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
                         fontWeight: FontWeight.bold,
                       ),
                     ),

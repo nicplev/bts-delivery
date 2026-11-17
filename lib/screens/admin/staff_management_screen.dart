@@ -8,7 +8,6 @@ import '../../providers/repository_providers.dart';
 import '../../providers/staff_providers.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../models/staff.dart';
-import '../../app/theme/brand_colors.dart';
 import '../../widgets/design/design.dart';
 import '../../widgets/admin/calendar_management_dialog.dart';
 
@@ -76,7 +75,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error, size: 48, color: Colors.red),
+              Icon(Icons.error,
+                  size: 48, color: Theme.of(context).colorScheme.error),
               const SizedBox(height: 16),
               Text('Error loading staff: $error'),
               const SizedBox(height: 16),
@@ -89,17 +89,18 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
         ),
         data: (staffList) {
           if (staffList.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.people_outline, size: 48, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text('No staff members found'),
-                  SizedBox(height: 8),
+                  Icon(Icons.people_outline,
+                      size: 48, color: AppPalette.of(context).muted),
+                  const SizedBox(height: 16),
+                  const Text('No staff members found'),
+                  const SizedBox(height: 8),
                   Text(
                     'Tap the + button to add your first staff member.',
-                    style: TextStyle(color: Colors.grey),
+                    style: TextStyle(color: AppPalette.of(context).muted),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -214,8 +215,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                           break;
                       }
                     },
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
                         value: 'edit',
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -223,7 +224,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                           title: Text('Edit'),
                         ),
                       ),
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'issue_invite',
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -231,7 +232,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                           title: Text('Create invitation'),
                         ),
                       ),
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'manage_calendar',
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -244,9 +245,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.delete_outline,
-                              color: BrandColors.pinkDarker),
+                              color: Theme.of(context).colorScheme.error),
                           title: Text('Delete',
-                              style: TextStyle(color: BrandColors.pinkDarker)),
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error)),
                         ),
                       ),
                     ],
@@ -374,7 +376,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Staff member updated successfully'),
-              backgroundColor: BrandColors.greenDarker,
             ),
           );
         }
@@ -494,14 +495,16 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
             Text('Are you sure you want to delete "${staff.name}"?'),
             const SizedBox(height: 8),
             if (staff.uid != null)
-              const Text(
+              Text(
                 'Warning: This staff member is linked to a user account. Deleting will unlink their account.',
-                style: TextStyle(color: BrandColors.kakaBlue, fontSize: 12),
+                style: TextStyle(
+                    color: AppTone.blue.inkFor(context), fontSize: 12),
               ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'This action cannot be undone.',
-              style: TextStyle(color: Colors.red, fontSize: 12),
+              style: TextStyle(
+                  color: Theme.of(context).colorScheme.error, fontSize: 12),
             ),
           ],
         ),
@@ -518,8 +521,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
               await _deleteStaff(staff);
             },
             style: FilledButton.styleFrom(
-              backgroundColor: BrandColors.pinkDarker,
-              foregroundColor: Colors.white,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),
@@ -540,7 +543,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Staff member deleted successfully'),
-                backgroundColor: BrandColors.greenDarker,
               ),
             );
           }
@@ -563,7 +565,6 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: BrandColors.pinkDarker,
         ),
       );
     }

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/school_timer.dart';
 import '../providers/school_timer_providers.dart';
-import '../app/theme/brand_colors.dart';
 import 'design/design.dart';
 
 class SchoolTimerWidget extends ConsumerStatefulWidget {
@@ -133,7 +132,7 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
               MediaQuery.textScalerOf(context).scale(240);
           final display = Row(
             children: [
-              Icon(icon, size: 20, color: tone.ink),
+              Icon(icon, size: 20, color: tone.inkFor(context)),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -145,13 +144,13 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
                         style: textTheme.titleMedium?.copyWith(
                           fontFeatures: const [FontFeature.tabularFigures()],
                           fontWeight: FontWeight.w700,
-                          color: tone.ink,
+                          color: tone.inkFor(context),
                         ),
                       ),
                     Text(
                       label,
                       style: textTheme.bodySmall?.copyWith(
-                        color: AppTokens.muted,
+                        color: AppPalette.of(context).muted,
                       ),
                     ),
                   ],
@@ -200,7 +199,6 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
                     SnackBar(
                       content:
                           Text(error?.toString() ?? 'Failed to stop timer'),
-                      backgroundColor: BrandColors.error,
                     ),
                   );
                 }
@@ -212,19 +210,18 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
                     SnackBar(
                       content:
                           Text(error?.toString() ?? 'Failed to start timer'),
-                      backgroundColor: BrandColors.error,
                     ),
                   );
                 }
               }
             },
       icon: isLoading
-          ? const SizedBox(
+          ? SizedBox(
               width: 16,
               height: 16,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: AppTokens.muted,
+                color: AppPalette.of(context).muted,
               ),
             )
           : Icon(
@@ -233,8 +230,11 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
             ),
       label: Text(isRunning ? 'Stop' : 'Start'),
       style: FilledButton.styleFrom(
-        backgroundColor: isRunning ? AppTone.pink.tint : AppTone.green.accent,
-        foregroundColor: isRunning ? AppTone.pink.ink : AppTokens.ink,
+        backgroundColor:
+            isRunning ? AppTone.pink.tintFor(context) : AppTone.green.accent,
+        foregroundColor: isRunning
+            ? AppTone.pink.inkFor(context)
+            : AppPalette.of(context).actionInk,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         minimumSize: const Size(64, 48),
       ),

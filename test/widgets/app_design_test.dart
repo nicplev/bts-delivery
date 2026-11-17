@@ -1,3 +1,6 @@
+import 'package:bts_delivery_app/app/app.dart';
+import 'package:bts_delivery_app/services/offline/offline_storage_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:bts_delivery_app/app/theme/app_theme.dart';
 import 'package:bts_delivery_app/widgets/design/design.dart';
 import 'package:flutter/material.dart';
@@ -10,16 +13,73 @@ void main() {
     expect(AppTone.pink.accent, const Color(0xFFEC008C));
     expect(AppTone.yellow.accent, const Color(0xFFF9ED32));
 
-    final colors = AppTheme.lightTheme.colorScheme;
-    expect(
-        _contrast(colors.primary, colors.onPrimary), greaterThanOrEqualTo(4.5));
-    expect(_contrast(colors.secondary, colors.onSecondary),
-        greaterThanOrEqualTo(4.5));
-    expect(_contrast(colors.tertiary, colors.onTertiary),
-        greaterThanOrEqualTo(4.5));
-    for (final tone in AppTone.values) {
-      expect(_contrast(tone.tint, tone.ink), greaterThanOrEqualTo(4.5));
+    for (final theme in [
+      AppTheme.lightTheme,
+      AppTheme.darkTheme,
+      AppTheme.highContrastLightTheme,
+      AppTheme.highContrastDarkTheme,
+    ]) {
+      final scheme = theme.colorScheme;
+      final colors = theme.extension<AppPalette>()!;
+      expect(theme.textTheme.bodyMedium?.fontSize, 17);
+      expect(theme.brightness, colors.brightness);
+      expect(theme.scaffoldBackgroundColor, colors.canvas);
+      expect(_contrast(scheme.primary, scheme.onPrimary),
+          greaterThanOrEqualTo(4.5));
+      expect(_contrast(scheme.secondary, scheme.onSecondary),
+          greaterThanOrEqualTo(4.5));
+      expect(_contrast(scheme.tertiary, scheme.onTertiary),
+          greaterThanOrEqualTo(4.5));
+      expect(
+          _contrast(scheme.error, scheme.onError), greaterThanOrEqualTo(4.5));
+      final textMinimum = colors.highContrast ? 7.0 : 4.5;
+      expect(_contrast(colors.surfaceQuiet, colors.muted),
+          greaterThanOrEqualTo(textMinimum));
+      for (final tone in AppTone.values) {
+        expect(
+          _contrast(tone.tintOn(colors), tone.inkOn(colors)),
+          greaterThanOrEqualTo(textMinimum),
+          reason:
+              '$tone, dark=${colors.dark}, high contrast=${colors.highContrast}',
+        );
+      }
+      if (colors.highContrast) {
+        expect(
+            _contrast(colors.outline, colors.surface), greaterThanOrEqualTo(3));
+      }
     }
+    expect(AppTheme.lightTheme.scaffoldBackgroundColor,
+        isNot(AppTheme.darkTheme.scaffoldBackgroundColor));
+  });
+
+  testWidgets('startup follows system dark and high contrast settings',
+      (tester) async {
+    final platform = tester.platformDispatcher;
+    platform.platformBrightnessTestValue = Brightness.dark;
+    platform.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(
+        highContrast: true, disableAnimations: true);
+    addTearDown(platform.clearPlatformBrightnessTestValue);
+    addTearDown(platform.clearAccessibilityFeaturesTestValue);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        offlineStorageInitProvider.overrideWith(
+          (_) => Future<void>.error(StateError('storage unavailable')),
+        ),
+      ],
+      child: const BTSDeliveryApp(),
+    ));
+    final loading = find.text('Initializing app...');
+    expect(loading, findsOneWidget);
+    expect(AppPalette.of(tester.element(loading)).dark, isTrue);
+    expect(AppPalette.of(tester.element(loading)).highContrast, isTrue);
+
+    await tester.pumpAndSettle();
+    final error = find.textContaining('Initialization failed');
+    expect(error, findsOneWidget);
+    expect(AppPalette.of(tester.element(error)).dark, isTrue);
+    expect(AppPalette.of(tester.element(error)).highContrast, isTrue);
+    expect(find.text('Retry').hitTestable(), findsOneWidget);
   });
 
   testWidgets('section action and status pills fit narrow large-text layouts',
@@ -31,10 +91,10 @@ void main() {
     var pressed = false;
 
     await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.lightTheme,
+      theme: AppTheme.highContrastDarkTheme,
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context)
-            .copyWith(textScaler: const TextScaler.linear(1.8)),
+            .copyWith(textScaler: const TextScaler.linear(2)),
         child: child!,
       ),
       home: Scaffold(
@@ -67,7 +127,12 @@ void main() {
         ),
       ),
     ));
-    await tester.tap(find.text('Add Year Level'));
+    final button = find.widgetWithText(OutlinedButton, 'Add Year Level');
+    expect(tester.getSize(button).height, greaterThanOrEqualTo(44));
+    final offline = tester.widget<Text>(find.text('Offline'));
+    expect(offline.style?.color,
+        AppTone.yellow.inkOn(const AppPalette(dark: true, highContrast: true)));
+    await tester.tap(button);
     expect(pressed, isTrue);
     expect(find.text('Pending changes need review'), findsOneWidget);
     expect(tester.takeException(), isNull);

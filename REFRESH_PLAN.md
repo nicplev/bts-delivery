@@ -337,3 +337,7 @@ Physical-device, representative performance, historical migration and production
 ## Apple HIG overhaul continuation — 17 November 2026
 
 User confirmed native Sign-Off scrolling works normally. Saved the reviewed direction and implementation checklist in [UI_OVERHAUL_PLAN.md](UI_OVERHAUL_PLAN.md). User authorised cleanup and implementation; Astra reviews and Sol 6.1 implements. Existing release gates remain separate.
+
+Implemented adaptive light/dark/increased-contrast styling, a quieter hierarchy across main and supporting screens, a unified classroom Packs section and focused signature capture. Capture preserves name/strokes when returning to review and rechecks changed delivery details before queueing. The final snapshot reread is best-effort, not atomic.
+
+All 85 Flutter tests pass; analyzer reports zero errors/warnings and 26 existing informational notices. Native iPhone Air build/install/launch and retained-handwriting walkthrough passed. Astra approved source, actual-widget variants and native Packs/capture images. Mac unlock is still needed to finish the new capture screen's native keyboard/final-dialog check; broader release checks remain open in the linked plan. Approved build caches were removed, and this task's rebuilt temporary native output was removed again after verification. No production deployment.

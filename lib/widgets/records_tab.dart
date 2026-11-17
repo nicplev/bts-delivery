@@ -155,8 +155,9 @@ class _YearLevelCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final classroomsAsync = ref.watch(
         classroomsProvider((schoolId: schoolId, yearLevelId: yearLevel.id)));
-    final backgroundColor = YearLevelColors.getBackgroundColor(yearLevel.label);
-    final iconColor = YearLevelColors.getIconColor(yearLevel.label);
+    final backgroundColor =
+        YearLevelColors.getBackgroundColor(context, yearLevel.label);
+    final iconColor = YearLevelColors.getIconColor(context, yearLevel.label);
     final needsBorder = YearLevelColors.needsBorder(yearLevel.label);
 
     return AppPanel(
@@ -174,7 +175,9 @@ class _YearLevelCard extends ConsumerWidget {
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: BorderRadius.circular(12),
-              border: needsBorder ? Border.all(color: AppTokens.outline) : null,
+              border: needsBorder
+                  ? Border.all(color: AppPalette.of(context).outline)
+                  : null,
             ),
             child: Icon(Icons.class_outlined, size: 21, color: iconColor),
           ),
@@ -191,13 +194,13 @@ class _YearLevelCard extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 classroomsAsync.when(
-                  loading: () => const Text('Loading classrooms...',
-                      style: TextStyle(color: AppTokens.muted)),
+                  loading: () => Text('Loading classrooms...',
+                      style: TextStyle(color: AppPalette.of(context).muted)),
                   error: (_, __) => Text('Error loading classrooms',
-                      style: TextStyle(color: AppTone.pink.ink)),
+                      style: TextStyle(color: AppTone.pink.inkFor(context))),
                   data: (classrooms) => Text(
                     '${classrooms.length} classroom${classrooms.length != 1 ? 's' : ''}',
-                    style: const TextStyle(color: AppTokens.muted),
+                    style: TextStyle(color: AppPalette.of(context).muted),
                   ),
                 ),
               ],
@@ -227,14 +230,14 @@ class _YearLevelCard extends ConsumerWidget {
                       Icon(
                         Icons.edit_outlined,
                         size: 20,
-                        color: Colors.grey.shade700,
+                        color: AppPalette.of(context).muted,
                       ),
                       const SizedBox(width: 12),
                       Text(
                         'Edit',
                         style: TextStyle(
                           fontSize: 15,
-                          color: Colors.grey.shade900,
+                          color: AppPalette.of(context).ink,
                         ),
                       ),
                     ],
@@ -246,17 +249,17 @@ class _YearLevelCard extends ConsumerWidget {
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.delete_outline,
                         size: 20,
-                        color: Colors.red,
+                        color: AppPalette.of(context).error,
                       ),
                       const SizedBox(width: 12),
                       Text(
                         'Delete',
                         style: TextStyle(
                           fontSize: 15,
-                          color: Colors.red.shade700,
+                          color: AppPalette.of(context).error,
                         ),
                       ),
                     ],
@@ -265,7 +268,7 @@ class _YearLevelCard extends ConsumerWidget {
               ],
             )
           else
-            const Icon(Icons.chevron_right, color: AppTokens.muted),
+            Icon(Icons.chevron_right, color: AppPalette.of(context).muted),
         ],
       ),
     );
@@ -323,7 +326,6 @@ class _YearLevelCard extends ConsumerWidget {
                     content: Text(success
                         ? 'Year level updated successfully'
                         : 'Failed to update year level'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
@@ -366,13 +368,13 @@ class _YearLevelCard extends ConsumerWidget {
                     content: Text(success
                         ? 'Year level deleted successfully'
                         : 'Failed to delete year level'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),

@@ -118,7 +118,7 @@ class ClassroomsScreen extends ConsumerWidget {
                         minHeight: 6,
                         borderRadius: BorderRadius.circular(99),
                         color: AppTone.green.accent,
-                        backgroundColor: AppTone.green.tint,
+                        backgroundColor: AppTone.green.tintFor(context),
                         semanticsLabel: 'Pack delivery completion',
                       ),
                     ],
@@ -242,7 +242,6 @@ class ClassroomsScreen extends ConsumerWidget {
                     content: Text(success
                         ? 'Classroom created successfully'
                         : 'Failed to create classroom'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
 
@@ -286,8 +285,9 @@ class _ClassroomCard extends ConsumerWidget {
       classroomId: classroom.id,
     )));
 
-    final backgroundColor = YearLevelColors.getBackgroundColor(yearLevelLabel);
-    final iconColor = YearLevelColors.getIconColor(yearLevelLabel);
+    final backgroundColor =
+        YearLevelColors.getBackgroundColor(context, yearLevelLabel);
+    final iconColor = YearLevelColors.getIconColor(context, yearLevelLabel);
     final needsBorder = YearLevelColors.needsBorder(yearLevelLabel);
 
     final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
@@ -331,8 +331,9 @@ class _ClassroomCard extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: backgroundColor,
                   borderRadius: BorderRadius.circular(12),
-                  border:
-                      needsBorder ? Border.all(color: AppTokens.outline) : null,
+                  border: needsBorder
+                      ? Border.all(color: AppPalette.of(context).outline)
+                      : null,
                 ),
                 child: Icon(Icons.meeting_room_outlined,
                     size: 21, color: iconColor),
@@ -364,14 +365,14 @@ class _ClassroomCard extends ConsumerWidget {
                         Icon(
                           Icons.edit_outlined,
                           size: 20,
-                          color: Colors.grey.shade700,
+                          color: AppPalette.of(context).muted,
                         ),
                         const SizedBox(width: 12),
                         Text(
                           'Edit',
                           style: TextStyle(
                             fontSize: 15,
-                            color: Colors.grey.shade900,
+                            color: AppPalette.of(context).ink,
                           ),
                         ),
                       ],
@@ -383,17 +384,17 @@ class _ClassroomCard extends ConsumerWidget {
                         horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.delete_outline,
                           size: 20,
-                          color: Colors.red,
+                          color: AppPalette.of(context).error,
                         ),
                         const SizedBox(width: 12),
                         Text(
                           'Delete',
                           style: TextStyle(
                             fontSize: 15,
-                            color: Colors.red.shade700,
+                            color: AppPalette.of(context).error,
                           ),
                         ),
                       ],
@@ -424,13 +425,15 @@ class _ClassroomCard extends ConsumerWidget {
                   ? 'Pack total: Not set'
                   : 'Pack total: ${total.total}',
             ),
-            style: typography.bodyMedium?.copyWith(color: AppTokens.muted),
+            style: typography.bodyMedium
+                ?.copyWith(color: AppPalette.of(context).muted),
           ),
           if (breakdowns != null && breakdowns.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
               '${breakdowns.fold<int>(0, (sum, item) => sum + item.studentCount)} students',
-              style: typography.bodyMedium?.copyWith(color: AppTone.blue.ink),
+              style: typography.bodyMedium
+                  ?.copyWith(color: AppTone.blue.inkFor(context)),
             ),
             if (breakdowns.length > 1)
               Text(
@@ -438,7 +441,8 @@ class _ClassroomCard extends ConsumerWidget {
                     .map(
                         (item) => '${item.studentCount} ${item.yearLevelLabel}')
                     .join(', '),
-                style: typography.bodySmall?.copyWith(color: AppTokens.muted),
+                style: typography.bodySmall
+                    ?.copyWith(color: AppPalette.of(context).muted),
               ),
           ],
         ],
@@ -519,7 +523,6 @@ class _ClassroomCard extends ConsumerWidget {
                     content: Text(success
                         ? 'Classroom deleted successfully'
                         : 'Failed to delete classroom'),
-                    backgroundColor: success ? Colors.green : Colors.red,
                   ),
                 );
 
@@ -530,7 +533,8 @@ class _ClassroomCard extends ConsumerWidget {
               }
             },
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),

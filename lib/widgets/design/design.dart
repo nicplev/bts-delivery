@@ -23,12 +23,13 @@ class AppPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const radius = BorderRadius.all(Radius.circular(AppTokens.cardRadius));
+    final colors = AppPalette.of(context);
     final content = Padding(padding: padding, child: child);
     final panel = Material(
-      color: tone?.tint ?? AppTokens.surface,
-      shape: const RoundedRectangleBorder(
+      color: tone?.tintOn(colors) ?? colors.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: radius,
-        side: BorderSide(color: AppTokens.outline),
+        side: BorderSide(color: colors.outline),
       ),
       clipBehavior: Clip.antiAlias,
       child: onTap == null ? content : InkWell(onTap: onTap, child: content),
@@ -55,12 +56,12 @@ class AppIconTile extends StatelessWidget {
       dimension: size,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: tone.tint,
+          color: tone.tintFor(context),
           borderRadius: BorderRadius.circular(AppTokens.controlRadius),
         ),
         child: Icon(
           icon,
-          color: tone.ink,
+          color: tone.inkFor(context),
           size: size >= 60 ? 30 : 20,
         ),
       ),
@@ -84,7 +85,7 @@ class AppStatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: tone.tint,
+        color: tone.tintFor(context),
         borderRadius: BorderRadius.circular(AppTokens.pillRadius),
       ),
       child: Padding(
@@ -93,14 +94,14 @@ class AppStatusPill extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon, color: tone.ink, size: 15),
+              Icon(icon, color: tone.inkFor(context), size: 15),
               const SizedBox(width: 5),
             ],
             Flexible(
               child: Text(
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: tone.ink,
+                      color: tone.inkFor(context),
                       fontWeight: FontWeight.w600,
                     ),
               ),

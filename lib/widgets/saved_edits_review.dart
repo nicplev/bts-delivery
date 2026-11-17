@@ -24,8 +24,12 @@ class SavedEditsBanner extends ConsumerWidget {
         0;
     if (count == 0 && !state.hasError) return const SizedBox.shrink();
     return MaterialBanner(
-      backgroundColor: state.hasError ? AppTone.pink.tint : AppTone.blue.tint,
-      dividerColor: AppTokens.outline,
+      forceActionsBelow: MediaQuery.sizeOf(context).width < 375 ||
+          MediaQuery.textScalerOf(context).scale(17) > 21,
+      backgroundColor: state.hasError
+          ? AppTone.pink.tintFor(context)
+          : AppTone.blue.tintFor(context),
+      dividerColor: AppPalette.of(context).outline,
       padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 6, 8),
       leadingPadding: const EdgeInsetsDirectional.only(end: 8),
       leading: AppIconTile(

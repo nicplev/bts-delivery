@@ -6,7 +6,6 @@ import '../../models/staff.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../providers/staff_providers.dart';
-import '../../app/theme/brand_colors.dart';
 import '../../widgets/design/design.dart';
 
 class SchoolStaffAllocationScreen extends ConsumerStatefulWidget {
@@ -213,7 +212,6 @@ class _SchoolStaffAllocationScreenState
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Staff assignments saved successfully'),
-                backgroundColor: BrandColors.greenDarker,
               ),
             );
 
@@ -227,7 +225,6 @@ class _SchoolStaffAllocationScreenState
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Failed to save: $message'),
-                backgroundColor: BrandColors.pinkDarker,
               ),
             );
           }
@@ -239,7 +236,6 @@ class _SchoolStaffAllocationScreenState
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
-            backgroundColor: BrandColors.pinkDarker,
           ),
         );
       }

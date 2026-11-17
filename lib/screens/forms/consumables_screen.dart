@@ -79,12 +79,14 @@ class ConsumablesScreen extends ConsumerWidget {
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'delete',
                         child: ListTile(
-                          leading: Icon(Icons.delete, color: Colors.red),
+                          leading: Icon(Icons.delete,
+                              color: Theme.of(context).colorScheme.error),
                           title: Text('Delete',
-                              style: TextStyle(color: Colors.red)),
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error)),
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
@@ -225,7 +227,6 @@ class ConsumablesScreen extends ConsumerWidget {
                       content: Text(isEditing
                           ? 'Consumable updated successfully'
                           : 'Consumable added successfully'),
-                      backgroundColor: Colors.green,
                     ),
                   );
 
@@ -241,7 +242,6 @@ class ConsumablesScreen extends ConsumerWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(errorMessage),
-                      backgroundColor: Colors.red,
                       duration: const Duration(seconds: 4),
                     ),
                   );
@@ -270,8 +270,8 @@ class ConsumablesScreen extends ConsumerWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () async {
               final success = await ref

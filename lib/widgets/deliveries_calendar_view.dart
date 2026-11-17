@@ -86,34 +86,36 @@ class DeliveriesCalendarView extends ConsumerWidget {
               onPageChanged: onPageChanged,
               onFormatChanged: onFormatChanged,
               eventLoader: deliveriesOn,
+              pageAnimationEnabled: !MediaQuery.disableAnimationsOf(context),
               calendarStyle: CalendarStyle(
                 outsideDaysVisible: false,
-                defaultTextStyle: const TextStyle(color: AppTokens.ink),
-                weekendTextStyle: const TextStyle(color: AppTokens.muted),
+                defaultTextStyle: TextStyle(color: AppPalette.of(context).ink),
+                weekendTextStyle:
+                    TextStyle(color: AppPalette.of(context).muted),
                 selectedDecoration: BoxDecoration(
                   color: AppTone.blue.accent,
                   shape: BoxShape.circle,
                 ),
-                selectedTextStyle: const TextStyle(
-                  color: AppTokens.ink,
+                selectedTextStyle: TextStyle(
+                  color: AppPalette.of(context).actionInk,
                   fontWeight: FontWeight.w700,
                 ),
                 todayDecoration: BoxDecoration(
-                  color: AppTone.green.tint,
+                  color: AppTone.green.tintFor(context),
                   shape: BoxShape.circle,
                 ),
                 todayTextStyle: TextStyle(
-                  color: AppTone.green.ink,
+                  color: AppTone.green.inkFor(context),
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              daysOfWeekStyle: const DaysOfWeekStyle(
+              daysOfWeekStyle: DaysOfWeekStyle(
                 weekdayStyle: TextStyle(
-                    color: AppTokens.muted,
+                    color: AppPalette.of(context).muted,
                     fontWeight: FontWeight.w600,
                     fontSize: 11),
                 weekendStyle: TextStyle(
-                    color: AppTokens.muted,
+                    color: AppPalette.of(context).muted,
                     fontWeight: FontWeight.w600,
                     fontSize: 11),
               ),
@@ -127,12 +129,12 @@ class DeliveriesCalendarView extends ConsumerWidget {
                 rightChevronMargin: EdgeInsets.zero,
                 titleTextStyle: Theme.of(context).textTheme.titleMedium!,
                 formatButtonTextStyle: TextStyle(
-                  color: AppTone.blue.ink,
+                  color: AppTone.blue.inkFor(context),
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
                 formatButtonDecoration: BoxDecoration(
-                  color: AppTone.blue.tint,
+                  color: AppTone.blue.tintFor(context),
                   borderRadius: BorderRadius.circular(AppTokens.pillRadius),
                 ),
               ),

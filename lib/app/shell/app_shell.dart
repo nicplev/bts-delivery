@@ -24,9 +24,9 @@ class AppShell extends ConsumerWidget {
             const SavedEditsBanner(),
             DecoratedBox(
               decoration: BoxDecoration(
-                color: AppTokens.surface,
+                color: AppPalette.of(context).surface,
                 borderRadius: BorderRadius.circular(32),
-                border: Border.all(color: AppTokens.outline),
+                border: Border.all(color: AppPalette.of(context).outline),
                 boxShadow: AppTokens.panelShadow,
               ),
               child: ClipRRect(
@@ -46,20 +46,26 @@ class AppShell extends ConsumerWidget {
                     }
                   },
                   selectedIndex: currentIndex,
+                  animationDuration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : null,
                   destinations: [
                     _destination(
+                      context,
                       icon: Icons.local_shipping_outlined,
                       selectedIcon: Icons.local_shipping,
                       label: 'Deliveries',
                       tone: AppTone.blue,
                     ),
                     _destination(
+                      context,
                       icon: Icons.school_outlined,
                       selectedIcon: Icons.school,
                       label: 'Schools',
                       tone: AppTone.green,
                     ),
                     _destination(
+                      context,
                       icon: Icons.person_outline_rounded,
                       selectedIcon: Icons.person_rounded,
                       label: 'Profile',
@@ -75,15 +81,16 @@ class AppShell extends ConsumerWidget {
     );
   }
 
-  NavigationDestination _destination({
+  NavigationDestination _destination(
+    BuildContext context, {
     required IconData icon,
     required IconData selectedIcon,
     required String label,
     required AppTone tone,
   }) {
     return NavigationDestination(
-      icon: Icon(icon, color: AppTokens.muted),
-      selectedIcon: Icon(selectedIcon, color: tone.ink),
+      icon: Icon(icon, color: AppPalette.of(context).muted),
+      selectedIcon: Icon(selectedIcon, color: tone.inkFor(context)),
       label: label,
     );
   }

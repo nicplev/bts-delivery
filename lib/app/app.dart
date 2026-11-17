@@ -12,6 +12,10 @@ class BTSDeliveryApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final themeAnimationStyle =
+        MediaQuery.maybeDisableAnimationsOf(context) == true
+            ? AnimationStyle.noAnimation
+            : null;
     final offlineStorageInit = ref.watch(offlineStorageInitProvider);
 
     return offlineStorageInit.when(
@@ -25,6 +29,9 @@ class BTSDeliveryApp extends ConsumerWidget {
           title: 'BTS Delivery App',
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
+          highContrastTheme: AppTheme.highContrastLightTheme,
+          highContrastDarkTheme: AppTheme.highContrastDarkTheme,
+          themeAnimationStyle: themeAnimationStyle,
           routerConfig: router,
           debugShowCheckedModeBanner: false,
         );
@@ -32,37 +39,60 @@ class BTSDeliveryApp extends ConsumerWidget {
       loading: () => MaterialApp(
         title: 'BTS Delivery App',
         theme: AppTheme.lightTheme,
-        home: const Scaffold(
-          body: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Initializing app...'),
-              ],
-            ),
-          ),
+        darkTheme: AppTheme.darkTheme,
+        highContrastTheme: AppTheme.highContrastLightTheme,
+        highContrastDarkTheme: AppTheme.highContrastDarkTheme,
+        themeAnimationStyle: themeAnimationStyle,
+        home: const _StartupScreen(
+          icon: CircularProgressIndicator(),
+          message: 'Initializing app...',
         ),
       ),
       error: (error, stack) => MaterialApp(
         title: 'BTS Delivery App',
         theme: AppTheme.lightTheme,
-        home: Scaffold(
-          body: Center(
+        darkTheme: AppTheme.darkTheme,
+        highContrastTheme: AppTheme.highContrastLightTheme,
+        highContrastDarkTheme: AppTheme.highContrastDarkTheme,
+        themeAnimationStyle: themeAnimationStyle,
+        home: _StartupScreen(
+          icon: const Icon(Icons.error_outline, size: 48),
+          message: 'Initialization failed: $error',
+          onRetry: () => ref.invalidate(offlineStorageInitProvider),
+        ),
+      ),
+    );
+  }
+}
+
+class _StartupScreen extends StatelessWidget {
+  const _StartupScreen({
+    required this.icon,
+    required this.message,
+    this.onRetry,
+  });
+
+  final Widget icon;
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error, size: 64, color: Colors.red),
+                icon,
                 const SizedBox(height: 16),
-                Text('Initialization failed: $error'),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    ref.invalidate(offlineStorageInitProvider);
-                  },
-                  child: const Text('Retry'),
-                ),
+                Text(message, textAlign: TextAlign.center),
+                if (onRetry != null) ...[
+                  const SizedBox(height: 16),
+                  FilledButton(onPressed: onRetry, child: const Text('Retry')),
+                ],
               ],
             ),
           ),

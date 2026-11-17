@@ -46,7 +46,7 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
     final showAllDeliveries = ref.watch(allDeliveriesProvider);
     final connectivityAsync = ref.watch(connectivityStatusProvider);
     final compactSegments = MediaQuery.sizeOf(context).width <= 360 ||
-        MediaQuery.textScalerOf(context).scale(14) > 18;
+        MediaQuery.textScalerOf(context).scale(16) > 20;
 
     return Scaffold(
       appBar: AppBar(
@@ -65,7 +65,8 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
                       )
                     : Icon(
                         isOffline ? Icons.wifi_off : Icons.refresh,
-                        color: isOffline ? AppTone.yellow.ink : null,
+                        color:
+                            isOffline ? AppTone.yellow.inkFor(context) : null,
                       ),
                 tooltip: isOffline ? 'Reconnect to WiFi' : 'Refresh connection',
                 onPressed: _isRefreshing ? null : () => _refreshConnectivity(),
@@ -75,8 +76,8 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
             error: (_, __) => const SizedBox(width: 48),
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.calendar_today),
-            tooltip: 'Calendar options',
+            icon: const Icon(Icons.more_horiz),
+            tooltip: 'Delivery options',
             onSelected: (value) {
               if (value == 'subscribe') {
                 _showCalendarSubscriptionDialog();
@@ -87,11 +88,11 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
             itemBuilder: (context) => const [
               PopupMenuItem(
                 value: 'subscribe',
-                child: Text('Subscribe to Calendar'),
+                child: Text('Subscribe to delivery calendar'),
               ),
               PopupMenuItem(
                 value: 'manual_sync',
-                child: Text('Manual Sync (Legacy)'),
+                child: Text('Sync external calendar (legacy)'),
               ),
             ],
           ),
@@ -263,14 +264,16 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
               children: [
                 Icon(
                   isOnline ? Icons.wifi : Icons.wifi_off,
-                  color: Colors.white,
+                  color: AppPalette.of(context).canvas,
                   size: 20,
                 ),
                 const SizedBox(width: 12),
-                Text(isOnline ? 'Connected to internet' : 'Still offline'),
+                Expanded(
+                  child: Text(
+                      isOnline ? 'Connected to internet' : 'Still offline'),
+                ),
               ],
             ),
-            backgroundColor: isOnline ? Colors.green : Colors.orange,
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
           ),
@@ -282,12 +285,11 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                const Icon(Icons.error_outline, size: 20),
                 const SizedBox(width: 12),
-                Text('Error checking connection: $e'),
+                Expanded(child: Text('Error checking connection: $e')),
               ],
             ),
-            backgroundColor: AppTone.pink.ink,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
@@ -375,7 +377,9 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
                     Icon(
                       _isSuccess ?? false ? Icons.check_circle : Icons.error,
                       size: 48,
-                      color: _isSuccess ?? false ? Colors.green : Colors.red,
+                      color: _isSuccess ?? false
+                          ? AppTone.green.inkFor(context)
+                          : Theme.of(context).colorScheme.error,
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -384,23 +388,25 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
                     ),
                   ],
                 )
-              : const Column(
+              : Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'This will sync all your deliveries to Apple Calendar.',
                       style: TextStyle(fontSize: 15),
                     ),
-                    SizedBox(height: 16),
+                    const SizedBox(height: 16),
                     Text(
                       'A new calendar called "BTS Deliveries" will be created.',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                      style: TextStyle(
+                          fontSize: 13, color: AppPalette.of(context).muted),
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
                       'You can view and manage these events in the Apple Calendar app.',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                      style: TextStyle(
+                          fontSize: 13, color: AppPalette.of(context).muted),
                     ),
                   ],
                 ),

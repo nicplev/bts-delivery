@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_providers.dart';
+import '../../services/date_utils.dart';
 import '../../providers/schools_providers.dart';
 import '../../providers/delivery_visit_provider.dart';
 import '../../services/delivery_visit_access.dart';
@@ -15,10 +16,16 @@ import '../../widgets/offline_visit_media_panel.dart';
 import '../../widgets/school_timer_widget.dart';
 
 class SchoolHubScreen extends ConsumerStatefulWidget {
-  const SchoolHubScreen({super.key, required this.schoolId, this.deliveryId});
+  const SchoolHubScreen({
+    super.key,
+    required this.schoolId,
+    this.deliveryId,
+    this.visitDate,
+  });
 
   final String schoolId;
   final String? deliveryId;
+  final DateTime? visitDate;
 
   @override
   ConsumerState<SchoolHubScreen> createState() => _SchoolHubScreenState();
@@ -43,6 +50,7 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
   @override
   Widget build(BuildContext context) {
     final isVisit = widget.deliveryId != null;
+    final colors = AppPalette.of(context);
     final visit = ref.watch(activeDeliveryVisitProvider);
     if (isVisit &&
         (visit?.deliveryId != widget.deliveryId ||
@@ -83,7 +91,7 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: AppTokens.surfaceQuiet,
+                      color: colors.surfaceQuiet,
                       borderRadius: BorderRadius.circular(28),
                     ),
                     child: TabBar(
@@ -91,11 +99,11 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                       dividerHeight: 0,
                       padding: const EdgeInsets.all(4),
                       labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-                      labelColor: AppTokens.ink,
-                      unselectedLabelColor: AppTokens.muted,
+                      labelColor: colors.ink,
+                      unselectedLabelColor: colors.muted,
                       indicatorSize: TabBarIndicatorSize.tab,
                       indicator: BoxDecoration(
-                        color: AppTokens.surface,
+                        color: colors.surface,
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: AppTokens.panelShadow,
                       ),
@@ -175,29 +183,27 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (school.address?.isNotEmpty == true ||
-                              readiness != null)
+                          if (isVisit)
                             Padding(
                               padding: const EdgeInsets.fromLTRB(
                                 AppTokens.gutter,
                                 12,
                                 AppTokens.gutter,
-                                8,
+                                4,
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  if (school.address?.isNotEmpty == true)
-                                    Text(
-                                      school.address!,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(color: AppTokens.muted),
-                                    ),
+                                  Text(
+                                    widget.visitDate == null
+                                        ? 'Delivery visit'
+                                        : DateTimeUtils.formatDate(
+                                            widget.visitDate!),
+                                    style:
+                                        Theme.of(context).textTheme.titleSmall,
+                                  ),
                                   if (readiness != null) ...[
-                                    if (school.address?.isNotEmpty == true)
-                                      const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     Row(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -210,8 +216,8 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                                           size: 18,
                                           color: readiness ==
                                                   DeliveryVisitReadiness.ready
-                                              ? AppTone.green.ink
-                                              : AppTokens.muted,
+                                              ? AppTone.green.inkFor(context)
+                                              : colors.muted,
                                         ),
                                         const SizedBox(width: 8),
                                         Expanded(
@@ -266,7 +272,9 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                         ),
                       SignOffTab(
                         schoolId: widget.schoolId,
+                        schoolName: school.name,
                         deliveryId: widget.deliveryId,
+                        visitDate: widget.visitDate,
                       ),
                       InfoTab(schoolId: widget.schoolId),
                     ],

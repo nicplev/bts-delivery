@@ -251,7 +251,7 @@ class _SchoolsBulkImportScreenState
                   const SizedBox(height: 8),
                   DecoratedBox(
                     decoration: BoxDecoration(
-                      color: AppTokens.surfaceQuiet,
+                      color: AppPalette.of(context).surfaceQuiet,
                       borderRadius:
                           BorderRadius.circular(AppTokens.controlRadius),
                     ),

@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/school_timer.dart';
 import '../providers/school_timer_providers.dart';
 import '../providers/auth_providers.dart';
-import '../app/theme/brand_colors.dart';
+import '../app/theme/app_tokens.dart';
 
 class SchoolTimerHistory extends ConsumerWidget {
   final String schoolId;
@@ -39,25 +39,25 @@ class SchoolTimerHistory extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.history,
                     size: 48,
-                    color: BrandColors.gray6,
+                    color: AppPalette.of(context).muted,
                   ),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'No timer history yet',
                     style: TextStyle(
                       fontSize: 16,
-                      color: BrandColors.gray5,
+                      color: AppPalette.of(context).muted,
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'Completed timers will appear here',
                     style: TextStyle(
                       fontSize: 13,
-                      color: BrandColors.gray6,
+                      color: AppPalette.of(context).muted,
                     ),
                   ),
                   if (isAdmin) ...[
@@ -78,9 +78,9 @@ class SchoolTimerHistory extends ConsumerWidget {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: timers.length,
-          separatorBuilder: (context, index) => const Divider(
+          separatorBuilder: (context, index) => Divider(
             height: 1,
-            color: BrandColors.gray8,
+            color: AppPalette.of(context).outline,
           ),
           itemBuilder: (context, index) {
             final timer = timers[index];
@@ -103,21 +103,21 @@ class SchoolTimerHistory extends ConsumerWidget {
       ),
       error: (error, _) => Container(
         padding: const EdgeInsets.all(24),
-        child: const Center(
+        child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.error_outline,
                 size: 48,
-                color: BrandColors.error,
+                color: Theme.of(context).colorScheme.error,
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Text(
                 'Failed to load timer history',
                 style: TextStyle(
                   fontSize: 16,
-                  color: BrandColors.gray5,
+                  color: AppPalette.of(context).muted,
                 ),
               ),
             ],
@@ -127,7 +127,8 @@ class SchoolTimerHistory extends ConsumerWidget {
     );
   }
 
-  void _showAddEditDialog(BuildContext context, WidgetRef ref, SchoolTimer? timer) {
+  void _showAddEditDialog(
+      BuildContext context, WidgetRef ref, SchoolTimer? timer) {
     showDialog(
       context: context,
       builder: (dialogContext) => TimerEntryDialog(
@@ -138,7 +139,8 @@ class SchoolTimerHistory extends ConsumerWidget {
     );
   }
 
-  void _showDeleteConfirmation(BuildContext context, WidgetRef ref, SchoolTimer timer) {
+  void _showDeleteConfirmation(
+      BuildContext context, WidgetRef ref, SchoolTimer timer) {
     final dateFormat = DateFormat('MMM d, yyyy h:mm a');
 
     showDialog(
@@ -157,17 +159,19 @@ class SchoolTimerHistory extends ConsumerWidget {
             onPressed: () async {
               Navigator.of(dialogContext).pop();
               final notifier = ref.read(schoolTimerNotifierProvider.notifier);
-              final success = await notifier.deleteTimerEntry(schoolId, timer.id);
+              final success =
+                  await notifier.deleteTimerEntry(schoolId, timer.id);
               if (!success && context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Failed to delete timer entry'),
-                    backgroundColor: BrandColors.error,
                   ),
                 );
               }
             },
-            style: FilledButton.styleFrom(backgroundColor: BrandColors.error),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError),
             child: const Text('Delete'),
           ),
         ],
@@ -211,18 +215,18 @@ class _TimerHistoryTile extends StatelessWidget {
               children: [
                 Text(
                   dateFormat.format(timer.startedAt),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: BrandColors.gray3,
+                    color: AppPalette.of(context).ink,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   timeFormat.format(timer.startedAt),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: BrandColors.gray5,
+                    color: AppPalette.of(context).muted,
                   ),
                 ),
               ],
@@ -235,17 +239,17 @@ class _TimerHistoryTile extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: BrandColors.greenLightest,
+                color: AppTone.green.tintFor(context),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
                 formatDuration(timer.elapsed),
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                  color: BrandColors.kakaGreen,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: AppTone.green.inkFor(context),
                 ),
               ),
             ),
@@ -260,18 +264,18 @@ class _TimerHistoryTile extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.play_arrow,
                       size: 14,
-                      color: BrandColors.kakaGreen,
+                      color: AppTone.green.inkFor(context),
                     ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         timer.startedByName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: BrandColors.gray4,
+                          color: AppPalette.of(context).muted,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -282,18 +286,18 @@ class _TimerHistoryTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.stop,
                         size: 14,
-                        color: BrandColors.error,
+                        color: Theme.of(context).colorScheme.error,
                       ),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           timer.stoppedByName!,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: BrandColors.gray4,
+                            color: AppPalette.of(context).muted,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -308,10 +312,10 @@ class _TimerHistoryTile extends StatelessWidget {
           // Admin menu
           if (isAdmin)
             PopupMenuButton<String>(
-              icon: const Icon(
+              icon: Icon(
                 Icons.more_vert,
                 size: 20,
-                color: BrandColors.gray5,
+                color: AppPalette.of(context).muted,
               ),
               onSelected: (value) {
                 if (value == 'edit') {
@@ -331,13 +335,16 @@ class _TimerHistoryTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'delete',
                   child: Row(
                     children: [
-                      Icon(Icons.delete, size: 18, color: BrandColors.error),
-                      SizedBox(width: 8),
-                      Text('Delete', style: TextStyle(color: BrandColors.error)),
+                      Icon(Icons.delete,
+                          size: 18, color: Theme.of(context).colorScheme.error),
+                      const SizedBox(width: 8),
+                      Text('Delete',
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error)),
                     ],
                   ),
                 ),
@@ -379,11 +386,13 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
       _startDate = widget.timer!.startedAt;
       _startTime = TimeOfDay.fromDateTime(widget.timer!.startedAt);
       _stopDate = widget.timer!.stoppedAt ?? DateTime.now();
-      _stopTime = TimeOfDay.fromDateTime(widget.timer!.stoppedAt ?? DateTime.now());
+      _stopTime =
+          TimeOfDay.fromDateTime(widget.timer!.stoppedAt ?? DateTime.now());
     } else {
       final now = DateTime.now();
       _startDate = now;
-      _startTime = TimeOfDay.fromDateTime(now.subtract(const Duration(hours: 1)));
+      _startTime =
+          TimeOfDay.fromDateTime(now.subtract(const Duration(hours: 1)));
       _stopDate = now;
       _stopTime = TimeOfDay.fromDateTime(now);
     }
@@ -451,7 +460,6 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Stop time must be after start time'),
-          backgroundColor: BrandColors.error,
         ),
       );
       return;
@@ -484,8 +492,8 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to ${widget.timer != null ? 'update' : 'create'} timer entry'),
-            backgroundColor: BrandColors.error,
+            content: Text(
+                'Failed to ${widget.timer != null ? 'update' : 'create'} timer entry'),
           ),
         );
       }
@@ -506,12 +514,12 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Start Time
-            const Text(
+            Text(
               'Start Time',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
-                color: BrandColors.gray5,
+                color: AppPalette.of(context).muted,
               ),
             ),
             const SizedBox(height: 8),
@@ -529,7 +537,8 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
                   child: OutlinedButton.icon(
                     onPressed: () => _selectTime(context, true),
                     icon: const Icon(Icons.access_time, size: 16),
-                    label: Text(timeFormat.format(_combineDateAndTime(_startDate, _startTime))),
+                    label: Text(timeFormat
+                        .format(_combineDateAndTime(_startDate, _startTime))),
                   ),
                 ),
               ],
@@ -537,12 +546,12 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
             const SizedBox(height: 16),
 
             // Stop Time
-            const Text(
+            Text(
               'Stop Time',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
-                color: BrandColors.gray5,
+                color: AppPalette.of(context).muted,
               ),
             ),
             const SizedBox(height: 8),
@@ -560,7 +569,8 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
                   child: OutlinedButton.icon(
                     onPressed: () => _selectTime(context, false),
                     icon: const Icon(Icons.access_time, size: 16),
-                    label: Text(timeFormat.format(_combineDateAndTime(_stopDate, _stopTime))),
+                    label: Text(timeFormat
+                        .format(_combineDateAndTime(_stopDate, _stopTime))),
                   ),
                 ),
               ],
@@ -572,17 +582,19 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _duration.isNegative ? BrandColors.pinkLightest : BrandColors.greenLightest,
+                color: _duration.isNegative
+                    ? AppTone.pink.tintFor(context)
+                    : AppTone.green.tintFor(context),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text(
+                  Text(
                     'Duration: ',
                     style: TextStyle(
                       fontSize: 14,
-                      color: BrandColors.gray4,
+                      color: AppPalette.of(context).muted,
                     ),
                   ),
                   Text(
@@ -591,7 +603,9 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                       fontFeatures: const [FontFeature.tabularFigures()],
-                      color: _duration.isNegative ? BrandColors.error : BrandColors.kakaGreen,
+                      color: _duration.isNegative
+                          ? Theme.of(context).colorScheme.error
+                          : AppTone.green.inkFor(context),
                     ),
                   ),
                 ],
@@ -608,10 +622,11 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
         FilledButton(
           onPressed: _isLoading || _duration.isNegative ? null : _save,
           child: _isLoading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppPalette.of(context).ink),
                 )
               : Text(isEditing ? 'Save' : 'Add'),
         ),

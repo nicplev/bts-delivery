@@ -5,7 +5,6 @@ import '../../providers/schools_providers.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../models/school.dart';
-import '../../app/theme/brand_colors.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
 
@@ -209,7 +208,7 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                             onPressed: _clearSearch,
                           )
                         : null,
-                    fillColor: AppTokens.surface,
+                    fillColor: AppPalette.of(context).surface,
                   ),
                   onChanged: (value) => setState(() => _searchQuery = value),
                 ),
@@ -346,7 +345,6 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                         content: Text(school == null
                             ? 'School added successfully'
                             : 'School updated successfully'),
-                        backgroundColor: BrandColors.greenDarker,
                       ),
                     );
                   }
@@ -356,7 +354,6 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(message),
-                        backgroundColor: BrandColors.pinkDarker,
                       ),
                     );
                   }
@@ -423,18 +420,21 @@ class _SchoolCard extends ConsumerWidget {
                     _showDeleteDialog(context, ref, school);
                 }
               },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'edit', child: Text('Edit')),
-                PopupMenuItem(value: 'staff', child: Text('Manage Staff')),
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                const PopupMenuItem(
+                    value: 'staff', child: Text('Manage Staff')),
                 PopupMenuItem(
                   value: 'delete',
                   child: Text('Delete',
-                      style: TextStyle(color: BrandColors.pinkDarker)),
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error)),
                 ),
               ],
             )
           else
-            const Icon(Icons.chevron_right_rounded, color: AppTokens.muted),
+            Icon(Icons.chevron_right_rounded,
+                color: AppPalette.of(context).muted),
         ],
       ),
     );
@@ -510,7 +510,6 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('School updated successfully'),
-                        backgroundColor: BrandColors.greenDarker,
                       ),
                     );
                   }
@@ -520,7 +519,6 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(message),
-                        backgroundColor: BrandColors.pinkDarker,
                       ),
                     );
                   }
@@ -545,15 +543,16 @@ class _SchoolCard extends ConsumerWidget {
           children: [
             Text('Are you sure you want to delete "${school.name}"?'),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Warning: This will delete all associated data including year levels, classrooms, deliveries, and records.',
-              style: TextStyle(color: BrandColors.kakaBlue, fontSize: 12),
+              style:
+                  TextStyle(color: AppTone.blue.inkFor(context), fontSize: 12),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'This action cannot be undone.',
               style: TextStyle(
-                  color: BrandColors.pinkDarker,
+                  color: Theme.of(context).colorScheme.error,
                   fontSize: 12,
                   fontWeight: FontWeight.bold),
             ),
@@ -578,7 +577,6 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('School deleted successfully'),
-                        backgroundColor: BrandColors.greenDarker,
                       ),
                     );
                   }
@@ -588,7 +586,6 @@ class _SchoolCard extends ConsumerWidget {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(message),
-                        backgroundColor: BrandColors.pinkDarker,
                       ),
                     );
                   }
@@ -596,8 +593,8 @@ class _SchoolCard extends ConsumerWidget {
               );
             },
             style: FilledButton.styleFrom(
-              backgroundColor: BrandColors.pinkDarker,
-              foregroundColor: AppTokens.surface,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Delete'),
           ),

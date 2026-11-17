@@ -41,8 +41,8 @@ class ConnectivityIndicator extends ConsumerWidget {
     return Center(
       child: TextButton.icon(
         style: TextButton.styleFrom(
-          foregroundColor: tone.ink,
-          backgroundColor: tone.tint,
+          foregroundColor: tone.inkFor(context),
+          backgroundColor: tone.tintFor(context),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           shape: const StadiumBorder(),
         ),

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:bts_delivery_app/app/router/app_router.dart';
 import 'package:bts_delivery_app/app/theme/app_theme.dart';
 import 'package:bts_delivery_app/models/delivery.dart';
 import 'package:bts_delivery_app/models/delivery_visit.dart';
+import 'package:bts_delivery_app/models/offline/evidence_upload.dart';
 import 'package:bts_delivery_app/models/school.dart';
 import 'package:bts_delivery_app/models/school_timer.dart';
 import 'package:bts_delivery_app/models/signoff_snapshot.dart';
@@ -34,6 +36,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:signature/signature.dart';
 
 void main() {
   testWidgets('stale visit readiness cannot bypass connectivity or assignment',
@@ -133,6 +136,7 @@ void main() {
         fieldDraftStoreProvider.overrideWith((_) async => drafts),
         savedEditsProvider.overrideWith((_) => Stream.value(const [])),
         offlineMediaOwnerProvider.overrideWith((_, __) => null),
+        connectivityServiceProvider.overrideWithValue(_VisitOfflineConnectivity()),
         connectivityStatusProvider.overrideWith(
           (_) => Stream.value(ConnectivityStatus.offline),
         ),
@@ -194,6 +198,9 @@ void main() {
         find.byType(ClassroomDetailScreen),
       );
       expect(room.deliveryId, visit.deliveryId);
+      expect(find.text('Expected packs'), findsOneWidget);
+      expect(find.text('Recorded packs'), findsOneWidget);
+      expect(find.text('Unrecorded'), findsOneWidget);
     }
 
     await openRoom(
@@ -239,11 +246,11 @@ void main() {
   });
 
   testWidgets(
-      'visit tabs and signature stay reachable with large text and keyboard',
+      'capture retains handwriting and name and rechecks the visit review',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(320, 640);
-    tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
     tester.view.padding = const FakeViewPadding(top: 32, bottom: 24);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
@@ -260,9 +267,20 @@ void main() {
       notes: [Note(id: 'note', content: noteText, createdAt: DateTime(2025))],
     );
     addTearDown(school.dispose);
+    final membership = StateProvider((_) => _staff);
+    const emptyQueue = EvidenceUploadStatus(
+      items: [],
+      activeId: null,
+      legacyReviewCount: 0,
+      localError: false,
+    );
+    final queue = StateProvider((_) => emptyQueue);
+    final worker = _VisitEvidenceWorker();
     final container = ProviderContainer(
       overrides: [
-        currentStaffProvider.overrideWith((_) => Stream.value(_staff)),
+        currentStaffProvider.overrideWith(
+          (ref) => Stream.value(ref.watch(membership)),
+        ),
         authStateProvider.overrideWith((_) => Stream.value(_FieldUser())),
         authRepositoryProvider.overrideWithValue(_VisitAuth()),
         deliveryTodayProvider.overrideWith((_) => DateTime(2025)),
@@ -291,22 +309,18 @@ void main() {
         baseSchoolsRepositoryProvider.overrideWithValue(school),
         visitSchoolsRepositoryFactoryProvider.overrideWithValue((_) => school),
         offlineMediaOwnerProvider.overrideWith((_, __) => null),
+        connectivityServiceProvider.overrideWithValue(_VisitOfflineConnectivity()),
         connectivityStatusProvider.overrideWith(
           (_) => Stream.value(ConnectivityStatus.offline),
         ),
+        evidenceUploadWorkerProvider.overrideWith((_) async => worker),
         evidenceUploadsProvider.overrideWith(
-          (_) => Stream.value(
-            const EvidenceUploadStatus(
-              items: [],
-              activeId: null,
-              legacyReviewCount: 0,
-              localError: false,
-            ),
-          ),
+          (ref) => Stream.value(ref.watch(queue)),
         ),
       ],
     );
     addTearDown(container.dispose);
+    await container.read(evidenceUploadWorkerProvider.future);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
@@ -357,22 +371,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Expected pack total'), findsOneWidget);
     expect(find.text('10 expected packs'), findsOneWidget);
-    final signerName = find.byType(TextField);
-    final jumpToSignature = find.text('Go to signature');
-    await scrollVisitTo(jumpToSignature);
-    expect(signerName.hitTestable(), findsNothing);
-    await tester.tap(jumpToSignature);
-    await tester.pumpAndSettle();
-    expect(signerName.hitTestable(), findsOneWidget);
-
-    await scrollVisitTo(jumpToSignature, delta: 160);
     final viewNotes = find.text('View notes');
     await scrollVisitTo(viewNotes);
     await tester.tap(viewNotes);
     await tester.pumpAndSettle();
     expect(find.text(noteText).hitTestable(), findsOneWidget);
 
-    await scrollVisitTo(signerName);
+    final capture = find.text('Capture signature');
+    final back = find.text('Back to review');
+    Future<void> openCapture() async {
+      await scrollVisitTo(capture, delta: 160);
+      await tester.tap(capture.hitTestable());
+      await tester.pumpAndSettle();
+      expect(back, findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
+    }
+
+    await openCapture();
+    expect(find.text('Visit first'), findsOneWidget);
+    Future<void> scrollCaptureTo(Finder target) async {
+      final scroll = find.byType(SingleChildScrollView);
+      for (var attempt = 0;
+          attempt < 18 && target.hitTestable().evaluate().isEmpty;
+          attempt++) {
+        final viewport = tester.getRect(scroll);
+        await tester.dragFrom(
+          Offset(viewport.left + 12, viewport.center.dy),
+          const Offset(0, -130),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(target.hitTestable(), findsOneWidget);
+    }
+
+    final signerName = find.byType(TextField);
+    await scrollCaptureTo(signerName);
     final semantics = tester.ensureSemantics();
     try {
       await tester.pump();
@@ -391,13 +424,111 @@ void main() {
     await tester.pumpAndSettle();
 
     final review = find.text('Review and save');
-    await scrollVisitTo(review);
+    await scrollCaptureTo(review);
     expect(tester.testTextInput.isVisible, isTrue);
     expect(find.text('Example Visitor'), findsOneWidget);
-    tester.testTextInput.hide();
+    FocusManager.instance.primaryFocus?.unfocus();
     tester.view.resetViewInsets();
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+
+    await scrollCaptureTo(review);
+    await tester.tap(review.hitTestable());
+    await tester.pumpAndSettle();
+    expect(find.text('Please provide your signature').hitTestable(),
+        findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    final canvas = find.byType(Signature);
+    await scrollCaptureTo(canvas);
+    await tester.dragFrom(
+        tester.getCenter(canvas) - const Offset(26, 8), const Offset(53, 19));
+    await tester.pumpAndSettle();
+    final signature = tester.widget<Signature>(canvas).controller;
+    expect(signature.points, isNotEmpty);
+    final points = [...signature.points];
+
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(find.byType(Signature), findsNothing);
+    await openCapture();
+    expect(tester.widget<TextField>(signerName).controller?.text,
+        'Example Visitor');
+    expect(tester.widget<Signature>(canvas).controller.points, points);
+
+    await scrollCaptureTo(review);
+    await tester.tap(review.hitTestable());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Review delivery details'), findsOneWidget);
+    expect(find.textContaining('cached or unavailable'), findsOneWidget);
+    school.reviewChanged = true;
+    await tester.tap(find.text('Save for review'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(
+        find.text('Delivery information changed. Review the updated details.'),
+        findsOneWidget);
+    expect(find.text('Use the west entrance.'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Signature>(canvas).controller.points, points);
+
+    await scrollCaptureTo(review);
+    await tester.tap(review.hitTestable());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Save for review'));
+    // The actual signature encoder rasterizes through the engine. Pump Dart
+    // work and allow its raster callback to complete outside the test clock.
+    for (var attempt = 0; attempt < 80 && worker.saved.isEmpty; attempt++) {
+      await tester.pump(const Duration(milliseconds: 30));
+      await tester.runAsync(() => Future<void>.delayed(
+            const Duration(milliseconds: 20),
+          ));
+    }
+    await tester.pumpAndSettle();
+    expect(worker.saved, hasLength(1));
+    final saved = worker.saved.single;
+    expect(saved.ownerUid, 'field-owner');
+    expect(saved.schoolId, 'school');
+    expect(saved.deliveryId, 'first');
+    expect(saved.payload['typedName'], 'Example Visitor');
+    expect(saved.payload['snapshot']['serverReviewed'], isFalse);
+    expect(saved.payload['snapshot']['summary']['notes'],
+        'Use the west entrance.');
+    expect(saved.bytes.take(4), [0x89, 0x50, 0x4e, 0x47]);
+    expect(find.byType(Signature), findsNothing);
+    expect(find.text('Signature saved on this device'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    EvidenceUploadStatus pendingFor(String visitId) => EvidenceUploadStatus(
+          items: [
+            EvidenceUpload(
+              id: 'saved',
+              kind: EvidenceKind.signature,
+              ownerUid: 'field-owner',
+              schoolId: 'school',
+              deliveryId: visitId,
+              localFileName: 'pending_evidence/saved.png',
+              storagePath: 'schools/school/signoffs/saved.png',
+              createdAt: DateTime(2025),
+            ),
+          ],
+          activeId: 'saved',
+          legacyReviewCount: 0,
+          localError: false,
+        );
+    container.read(queue.notifier).state = pendingFor('second');
+    await tester.pumpAndSettle();
+    expect(capture, findsOneWidget);
+    container.read(queue.notifier).state = pendingFor('first');
+    await tester.pumpAndSettle();
+    expect(find.text('Signature saved on this device'), findsOneWidget);
+    expect(capture, findsNothing);
+    container.read(queue.notifier).state = emptyQueue;
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
@@ -420,6 +551,15 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Year 1').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('Sign-Off'));
+    await tester.pumpAndSettle();
+    await openCapture();
+    container.read(membership.notifier).state =
+        _staff.copyWith(assignedSchoolIds: const []);
+    await tester.pumpAndSettle();
+    expect(back, findsNothing);
+    expect(find.text('Example Visitor'), findsNothing);
+    expect(find.byType(Signature), findsNothing);
     expect(tester.takeException(), isNull);
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 }
@@ -474,6 +614,7 @@ class _VisitSchools implements SchoolsRepository {
   final String schoolName;
   final String? schoolAddress;
   final List<Note> notes;
+  bool reviewChanged = false;
   final _classroomChanges = StreamController<List<Classroom>>.broadcast();
   String? lastEditId;
   Classroom room =
@@ -533,6 +674,25 @@ class _VisitSchools implements SchoolsRepository {
   Stream<SignOff?> watchSignOff(String schoolId) => Stream.value(null);
 
   @override
+  Future<SignOffSnapshot> readSignOffDraft(
+    String schoolId, {
+    required bool server,
+    String? deliveryId,
+  }) async {
+    final empty = SignOffSnapshot.incomplete(schoolId);
+    return SignOffSnapshot(
+      sourceReadAt: DateTime.now(),
+      serverReviewed: server,
+      summary: {
+        ...empty.summary,
+        'totalPacks': 10,
+        'notes':
+            reviewChanged ? 'Use the west entrance.' : 'Use the main entrance.',
+      },
+    );
+  }
+
+  @override
   Stream<SignedEvidence?> watchSignedEvidence(
     String schoolId,
     String? deliveryId,
@@ -582,6 +742,52 @@ class _VisitSchools implements SchoolsRepository {
   }
 
   Future<void> dispose() => _classroomChanges.close();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _VisitEvidenceWorker implements EvidenceUploadWorker {
+  final saved = <({
+    String ownerUid,
+    String schoolId,
+    String? deliveryId,
+    Uint8List bytes,
+    Map<String, dynamic> payload,
+  })>[];
+
+  @override
+  Future<void> enqueueSignature({
+    required String id,
+    required String ownerUid,
+    required String schoolId,
+    String? deliveryId,
+    required Uint8List bytes,
+    required Map<String, dynamic> payload,
+  }) async {
+    saved.add((
+      ownerUid: ownerUid,
+      schoolId: schoolId,
+      deliveryId: deliveryId,
+      bytes: bytes,
+      payload: payload,
+    ));
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+
+class _VisitOfflineConnectivity implements ConnectivityService {
+  @override
+  ConnectivityStatus get currentStatus => ConnectivityStatus.offline;
+
+  @override
+  Stream<ConnectivityStatus> get statusStream => const Stream.empty();
+
+  @override
+  Future<void> checkConnectivity() async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

@@ -21,6 +21,7 @@ import '../../screens/admin/pre_delivery_checklist_management_screen.dart';
 import '../../screens/admin/season_export_screen.dart';
 import '../../screens/main/profile_screen.dart';
 import '../../models/school.dart';
+import '../../models/delivery.dart';
 import '../../models/delivery_visit.dart';
 import '../../widgets/delivery_visit_gate.dart';
 
@@ -33,6 +34,9 @@ Page<dynamic> _buildPageWithFadeTransition({
   required GoRouterState state,
   required Widget child,
 }) {
+  if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+    return NoTransitionPage(key: state.pageKey, child: child);
+  }
   return CustomTransitionPage(
     key: state.pageKey,
     child: child,
@@ -52,6 +56,9 @@ Page<dynamic> _buildPageWithSlideTransition({
   required GoRouterState state,
   required Widget child,
 }) {
+  if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+    return NoTransitionPage(key: state.pageKey, child: child);
+  }
   return CustomTransitionPage(
     key: state.pageKey,
     child: child,
@@ -248,10 +255,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) => _buildVisitPage(
               context,
               state,
-              (visit) => SchoolHubScreen(
-                schoolId: visit.schoolId,
-                deliveryId: visit.deliveryId,
-              ),
+              (visit) {
+                final delivery = state.extra;
+                return SchoolHubScreen(
+                  schoolId: visit.schoolId,
+                  deliveryId: visit.deliveryId,
+                  visitDate: delivery is Delivery &&
+                          delivery.id == visit.deliveryId &&
+                          delivery.schoolId == visit.schoolId
+                      ? delivery.date
+                      : null,
+                );
+              },
             ),
             routes: [
               GoRoute(

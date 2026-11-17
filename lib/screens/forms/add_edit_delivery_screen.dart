@@ -6,7 +6,6 @@ import '../../providers/schools_providers.dart';
 import '../../services/date_utils.dart';
 import '../../models/delivery.dart';
 import '../../models/school.dart';
-import '../../app/theme/brand_colors.dart';
 import '../../widgets/design/design.dart';
 
 class AddEditDeliveryScreen extends ConsumerStatefulWidget {
@@ -92,7 +91,8 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                Icon(Icons.error_outline,
+                    size: 64, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text('Error loading delivery: $error'),
                 const SizedBox(height: 16),
@@ -174,7 +174,7 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
                           const InputDecoration(hintText: 'Select a school'),
                       borderRadius:
                           BorderRadius.circular(AppTokens.controlRadius),
-                      dropdownColor: AppTokens.surface,
+                      dropdownColor: AppPalette.of(context).surface,
                       icon: const Icon(Icons.expand_more),
                       itemHeight: null,
                       isExpanded: true,
@@ -304,7 +304,7 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
         initialValue: value,
         decoration: const InputDecoration(hintText: 'Optional'),
         borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-        dropdownColor: AppTokens.surface,
+        dropdownColor: AppPalette.of(context).surface,
         icon: const Icon(Icons.expand_more),
         itemHeight: null,
         isExpanded: true,
@@ -354,7 +354,6 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please select a school'),
-          backgroundColor: BrandColors.pinkDarker,
         ),
       );
       return;
@@ -405,7 +404,6 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
               content: Text(widget.isEditing
                   ? 'Delivery updated successfully'
                   : 'Delivery created successfully'),
-              backgroundColor: BrandColors.greenDarker,
             ),
           );
           // Navigate back to deliveries page
@@ -418,7 +416,6 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(errorMessage),
-              backgroundColor: BrandColors.pinkDarker,
               duration: const Duration(seconds: 4),
             ),
           );
@@ -429,7 +426,6 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: $e'),
-            backgroundColor: BrandColors.pinkDarker,
             duration: const Duration(seconds: 4),
           ),
         );

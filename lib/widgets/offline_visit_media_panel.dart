@@ -39,7 +39,7 @@ class OfflineVisitMediaPanel extends ConsumerWidget {
     final tone = mapChanged ? AppTone.yellow : AppTone.blue;
     return TextButton.icon(
       style: TextButton.styleFrom(
-        foregroundColor: tone.ink,
+        foregroundColor: tone.inkFor(context),
         padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
       ),
       icon: const Icon(Icons.download_outlined, size: 18),

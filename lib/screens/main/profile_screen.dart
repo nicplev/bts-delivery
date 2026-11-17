@@ -230,8 +230,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: AppTone.pink.ink,
-              foregroundColor: AppTokens.surface,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () {
               Navigator.pop(context);
@@ -326,7 +326,7 @@ class _ProfileSection extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .labelLarge
-                    ?.copyWith(color: AppTokens.muted)),
+                    ?.copyWith(color: AppPalette.of(context).muted)),
           ),
           AppGroupedList(children: children),
         ],
@@ -357,7 +357,8 @@ class _ProfileRow extends StatelessWidget {
       title: Text(title),
       subtitle: detail != null ? Text(detail!) : null,
       trailing: onTap != null
-          ? const Icon(Icons.chevron_right_rounded, color: AppTokens.muted)
+          ? Icon(Icons.chevron_right_rounded,
+              color: AppPalette.of(context).muted)
           : null,
       onTap: onTap,
     );

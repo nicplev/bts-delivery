@@ -35,7 +35,10 @@ class DeliveryDayList extends ConsumerWidget {
     final loaded = deliveries.asData?.value;
     final showSummary = calendar == null && loaded != null && loaded.isNotEmpty;
     final text = Theme.of(context).textTheme;
-    final day = MaterialLocalizations.of(context).formatFullDate(date);
+    final localizations = MaterialLocalizations.of(context);
+    final day = calendar == null
+        ? localizations.formatMediumDate(date)
+        : localizations.formatFullDate(date);
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 700),
@@ -55,7 +58,7 @@ class DeliveryDayList extends ConsumerWidget {
                   children: [
                     Semantics(
                       header: true,
-                      child: Text(day, style: text.titleLarge),
+                      child: Text(day, style: text.titleMedium),
                     ),
                     if (showSummary) ...[
                       const SizedBox(height: 4),
@@ -269,7 +272,11 @@ class _DeliveryCard extends ConsumerWidget {
           ],
           if (delivery.notes?.isNotEmpty == true) ...[
             const SizedBox(height: 8),
-            _DeliveryFact(icon: Icons.notes_outlined, label: delivery.notes!),
+            _DeliveryFact(
+              icon: Icons.notes_outlined,
+              label: delivery.notes!,
+              isInstruction: true,
+            ),
           ],
           const SizedBox(height: 12),
           Wrap(
@@ -280,17 +287,20 @@ class _DeliveryCard extends ConsumerWidget {
               FilledButton.icon(
                 icon: const Icon(Icons.arrow_forward_rounded, size: 18),
                 label: const Text('Open school'),
-                onPressed: () => context.push(schoolWorkPath(
-                  delivery.schoolId,
-                  visit: DeliveryVisit(
-                      deliveryId: delivery.id, schoolId: delivery.schoolId),
-                )),
+                onPressed: () => context.push(
+                  schoolWorkPath(
+                    delivery.schoolId,
+                    visit: DeliveryVisit(
+                        deliveryId: delivery.id, schoolId: delivery.schoolId),
+                  ),
+                  extra: delivery,
+                ),
               ),
               TextButton.icon(
                 icon: Icon(checklistIcon, size: 18),
                 label: Text(checklistLabel),
                 style: TextButton.styleFrom(
-                  foregroundColor: checklistTone.ink,
+                  foregroundColor: checklistTone.inkFor(context),
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                 ),
@@ -350,8 +360,8 @@ class _DeliveryCard extends ConsumerWidget {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: AppTone.pink.ink,
-              foregroundColor: AppTokens.surface,
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
@@ -376,21 +386,31 @@ class _DeliveryCard extends ConsumerWidget {
 }
 
 class _DeliveryFact extends StatelessWidget {
-  const _DeliveryFact({required this.icon, required this.label});
+  const _DeliveryFact({
+    required this.icon,
+    required this.label,
+    this.isInstruction = false,
+  });
 
   final IconData icon;
   final String label;
+  final bool isInstruction;
 
   @override
   Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: AppTokens.muted),
+        Icon(icon, size: 18, color: AppPalette.of(context).muted),
         const SizedBox(width: 6),
         Flexible(
-            child: Text(label, style: Theme.of(context).textTheme.bodySmall)),
+          child: Text(
+            label,
+            style: isInstruction ? text.bodyMedium : text.bodySmall,
+          ),
+        ),
       ],
     );
   }

@@ -119,7 +119,7 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
                 error: (error, _) => Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text('Error: $error',
-                      style: TextStyle(color: AppTone.pink.ink)),
+                      style: TextStyle(color: AppTone.pink.inkFor(context))),
                 ),
                 data: (preview) => Padding(
                   padding: const EdgeInsets.all(16),
@@ -294,8 +294,8 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-              child:
-                  Text(label, style: const TextStyle(color: AppTokens.muted))),
+              child: Text(label,
+                  style: TextStyle(color: AppPalette.of(context).muted))),
           const SizedBox(width: 12),
           Flexible(
             child: Text(

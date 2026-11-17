@@ -398,7 +398,7 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
                   const SizedBox(height: 10),
                   DecoratedBox(
                     decoration: BoxDecoration(
-                      color: AppTokens.surfaceQuiet,
+                      color: AppPalette.of(context).surfaceQuiet,
                       borderRadius:
                           BorderRadius.circular(AppTokens.controlRadius),
                     ),
