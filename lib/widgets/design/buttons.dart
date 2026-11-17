@@ -55,12 +55,17 @@ class AppSecondaryButton extends StatelessWidget {
     this.expand = true,
     this.large = true,
     this.loading = false,
+    this.destructive = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool expand;
+
+  /// Error-coloured label and icon on the same grey capsule, for the one
+  /// destructive action in a group (its confirmation dialog stays red).
+  final bool destructive;
 
   /// 50 pt tall when true, 44 pt otherwise (inline "Stop", "Edit").
   final bool large;
@@ -75,12 +80,15 @@ class AppSecondaryButton extends StatelessWidget {
       style: TextButton.styleFrom(
         minimumSize: Size(44,
             large ? AppTokens.primaryButtonHeight : AppTokens.minTouchTarget),
+        foregroundColor: destructive ? colors.error : null,
+        disabledForegroundColor:
+            destructive ? colors.error.withValues(alpha: 0.4) : null,
       ),
       child: _ButtonContent(
         label: label,
         icon: icon,
         loading: loading,
-        spinnerColor: colors.ink,
+        spinnerColor: destructive ? colors.error : colors.ink,
       ),
     );
     return expand ? SizedBox(width: double.infinity, child: button) : button;

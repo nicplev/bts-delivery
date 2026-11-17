@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../models/delivery.dart';
 import '../models/delivery_visit.dart';
@@ -14,9 +13,8 @@ import '../services/offline/connectivity_service.dart';
 import 'design/design.dart';
 import 'pre_delivery_checklist_dialog.dart';
 
-/// "Tuesday 17 November" — the day line used by the deliveries screens.
-String deliveryDayLabel(DateTime date) =>
-    DateFormat('EEEE d MMMM').format(date);
+/// "Tue 17 Nov 2026" — the day line used by the deliveries screens.
+String deliveryDayLabel(DateTime date) => DateTimeUtils.formatWeekdayDate(date);
 
 /// "1 visit" / "2 visits".
 String deliveryVisitCount(int count) =>

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import '../../services/date_utils.dart';
 import '../../providers/season_export_providers.dart';
 import '../../models/season_export_models.dart';
 import '../../widgets/design/design.dart';
@@ -27,8 +27,6 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
   bool _includeConsumables = true;
   bool _includeTimerAggregate = true;
   bool _includeTimerDetails = true;
-
-  static final _date = DateFormat('dd/MM/yyyy');
 
   @override
   Widget build(BuildContext context) {
@@ -92,15 +90,16 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
                   icon: AppIcons.calendar,
                   title: 'Start date',
                   subtitle: _startDate != null
-                      ? _date.format(_startDate!)
+                      ? DateTimeUtils.formatDate(_startDate!)
                       : 'Not set',
                   onTap: () => _selectDate(true),
                 ),
                 AppListRow(
                   icon: AppIcons.calendar,
                   title: 'End date',
-                  subtitle:
-                      _endDate != null ? _date.format(_endDate!) : 'Not set',
+                  subtitle: _endDate != null
+                      ? DateTimeUtils.formatDate(_endDate!)
+                      : 'Not set',
                   onTap: () => _selectDate(false),
                 ),
               ],
@@ -132,7 +131,7 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
                 if (preview.earliestDate != null && preview.latestDate != null)
                   _PreviewRow(
                     'Date range',
-                    '${_date.format(preview.earliestDate!)} - ${_date.format(preview.latestDate!)}',
+                    '${DateTimeUtils.formatDate(preview.earliestDate!)} – ${DateTimeUtils.formatDate(preview.latestDate!)}',
                   ),
               ],
             ),

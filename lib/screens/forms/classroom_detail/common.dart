@@ -60,20 +60,8 @@ String? _validateCount(String value, {bool optional = false}) {
   return null;
 }
 
-String _formatDate(DateTime date) {
-  final now = DateTime.now();
-  final difference = now.difference(date);
-
-  if (difference.inDays == 0) {
-    return 'Today at ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-  } else if (difference.inDays == 1) {
-    return 'Yesterday at ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-  } else if (difference.inDays < 7) {
-    return '${difference.inDays} days ago';
-  } else {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-}
+/// "17 Nov 2026, 10:40 AM" (the app-wide date-time format).
+String _formatDate(DateTime date) => DateTimeUtils.formatDateTime(date);
 
 String _plural(int count, String one, [String? many]) =>
     '$count ${count == 1 ? one : many ?? '${one}s'}';
@@ -296,8 +284,9 @@ typedef _InlineAction = ({
   VoidCallback? onPressed,
 });
 
-/// Small grey capsule actions inside a row; they stack full width when the
-/// text is large so labels never clip.
+/// A compact row of 44 pt grey capsules side by side under an item; they
+/// stack full width only at large text sizes. Labels wrap between words,
+/// never inside one.
 class _InlineActions extends StatelessWidget {
   const _InlineActions({required this.actions});
 
@@ -305,15 +294,13 @@ class _InlineActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stack = MediaQuery.textScalerOf(context).scale(17) > 24;
+    final stack = MediaQuery.textScalerOf(context).scale(15) > 20;
     final buttons = [
       for (final action in actions)
-        AppSecondaryButton(
+        _CompactCapsule(
           label: action.label,
           icon: action.icon,
           onPressed: action.onPressed,
-          expand: stack,
-          large: false,
         ),
     ];
     if (stack) {
@@ -327,6 +314,68 @@ class _InlineActions extends StatelessWidget {
         ],
       );
     }
-    return Wrap(spacing: 8, runSpacing: 8, children: buttons);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < buttons.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(child: buttons[i]),
+        ],
+      ],
+    );
+  }
+}
+
+/// A 44 pt grey capsule with a small icon and a 15 pt semibold ink label.
+class _CompactCapsule extends StatelessWidget {
+  const _CompactCapsule({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final enabled = onPressed != null;
+    final ink = enabled ? colors.ink : colors.ink.withValues(alpha: 0.35);
+    return AppPressable(
+      onTap: onPressed,
+      semanticLabel: label,
+      excludeChildSemantics: true,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: AppTokens.minTouchTarget),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.fill,
+            borderRadius: BorderRadius.circular(AppTokens.pillRadius),
+            border:
+                colors.highContrast ? Border.all(color: colors.outline) : null,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 18, color: ink),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: AppTypography.subheadline
+                        .copyWith(fontWeight: FontWeight.w600, color: ink),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

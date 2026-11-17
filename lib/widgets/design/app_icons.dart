@@ -76,7 +76,7 @@ abstract final class AppIcons {
 
   // Accounts and roles.
   static const IconData admin = HeroiconsOutline.shieldCheck;
-  static const IconData manager = HeroiconsOutline.shieldExclamation;
+  static const IconData manager = HeroiconsOutline.briefcase;
   static const IconData role = HeroiconsOutline.identification;
   static const IconData invitation = HeroiconsOutline.key;
   static const IconData verificationCode = HeroiconsOutline.shieldCheck;

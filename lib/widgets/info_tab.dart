@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import 'offline_media_view.dart';
 import 'school_timer_history.dart';
 import 'design/design.dart';
+import '../services/date_utils.dart';
 
 /// Visit hub › Info: grouped cards for the school's details, map, contacts,
 /// classroom import and timer history.
@@ -156,7 +157,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
 
     return [
       _label(
-        'School Information',
+        'School information',
         action: isAdmin
             ? _smallAction(
                 'Edit', AppIcons.edit, () => _showEditSchoolDialog(school),
@@ -750,9 +751,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     }
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
+  String _formatDate(DateTime date) => DateTimeUtils.formatDate(date);
 
   void _showEditSchoolDialog(School school) {
     _schoolNameController.text = school.name;

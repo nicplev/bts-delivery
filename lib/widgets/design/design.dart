@@ -12,6 +12,7 @@ export 'buttons.dart';
 export 'cards.dart';
 export 'glass.dart';
 export 'navigation.dart';
+export 'segmented.dart';
 export 'status.dart';
 export 'tab_bar.dart';
 export 'year.dart';

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -96,9 +98,16 @@ class DeliveriesCalendarView extends ConsumerWidget {
               onFormatChanged: onFormatChanged,
               eventLoader: deliveriesOn,
               pageAnimationEnabled: !MediaQuery.disableAnimationsOf(context),
+              // Only horizontal swipes change the page, so a vertical scroll
+              // of the screen never collapses the month.
+              availableGestures: AvailableGestures.horizontalSwipe,
               daysOfWeekHeight: textScaler.scale(18) + 4,
+              rowHeight: math.max(52, textScaler.scale(22) + 30),
               calendarStyle: CalendarStyle(
                 outsideDaysVisible: false,
+                // The day circle sits a little high in its cell so the
+                // delivery dots below never touch it.
+                cellMargin: const EdgeInsets.fromLTRB(7, 2, 7, 14),
                 defaultTextStyle: dayText,
                 weekendTextStyle: dayText,
                 disabledTextStyle: dayText.copyWith(color: colors.inactive),
@@ -143,7 +152,7 @@ class DeliveriesCalendarView extends ConsumerWidget {
                 markerBuilder: (context, day, events) {
                   if (events.isEmpty) return null;
                   return Positioned(
-                    bottom: 3,
+                    bottom: 2,
                     child: _DeliveryDots(count: events.length),
                   );
                 },

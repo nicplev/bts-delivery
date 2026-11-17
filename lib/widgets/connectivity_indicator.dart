@@ -6,12 +6,13 @@ import '../services/offline/connectivity_service.dart';
 import 'sync_status_detail_sheet.dart';
 import 'design/design.dart';
 
-/// Neutral glass status capsule for the nav area: "Offline", evidence waiting
+/// Neutral glass status capsule shown under a screen's title: "Offline", evidence waiting
 /// on this device, uploads in progress or needing review. Tapping it opens the
 /// evidence upload sheet. Hidden when there is nothing to report.
 ///
-/// Placement: centred directly under the screen's large title. [padding] is
-/// applied only while the capsule is shown.
+/// Placement: directly under the screen's large title, aligned with it at the
+/// leading edge (when it wraps, the text stays left-aligned with the icon on
+/// the first line). [padding] is applied only while the capsule is shown.
 class ConnectivityIndicator extends ConsumerWidget {
   const ConnectivityIndicator({super.key, this.padding = EdgeInsets.zero});
 
@@ -40,7 +41,10 @@ class ConnectivityIndicator extends ConsumerWidget {
         active
             ? 'Syncing evidence ($pending)'
             : '$pending saved on this device',
-      if (needsReview + legacy > 0) '${needsReview + legacy} need review',
+      if (needsReview + legacy > 0)
+        needsReview + legacy == 1
+            ? '1 needs review'
+            : '${needsReview + legacy} need review',
     ].join(' · ');
 
     final icon = hasError || needsReview + legacy > 0
@@ -52,10 +56,12 @@ class ConnectivityIndicator extends ConsumerWidget {
                 : AppIcons.savedOnDevice;
     return Padding(
       padding: padding,
-      child: Center(
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
         child: AppGlassStatus(
           label: label,
           icon: icon,
+          leadingAligned: true,
           onTap: () => SyncStatusDetailSheet.show(context),
           semanticLabel: '$label. Show evidence uploads',
         ),

@@ -45,17 +45,6 @@ class AppTokens {
 
   /// Backdrop blur sigma used by glass surfaces.
   static const glassBlur = 20.0;
-
-  /// Very soft drop shadow under glass surfaces. Painted outside the shape
-  /// only, so it never darkens the translucent fill.
-  static const glassShadow = [
-    BoxShadow(
-      color: Color(0x1F000000),
-      blurRadius: 20,
-      offset: Offset(0, 4),
-      blurStyle: BlurStyle.outer,
-    ),
-  ];
 }
 
 /// The spec type scale (SF on iOS). Colours come from the theme.
@@ -152,6 +141,14 @@ class AppPalette extends ThemeExtension<AppPalette> {
           ? const Color(0x3D767680)
           : const Color(0x1F767680);
 
+  /// Track of a segmented control.
+  Color get segmentTrack => fill;
+
+  /// Selected segment: white on the grey track in light themes, a lighter
+  /// grey than the track in dark themes (as on iOS), so selection never reads
+  /// inverted.
+  Color get segmentThumb => dark ? const Color(0xFF636366) : surface;
+
   /// Opaque hairline / border colour. Visible (≥3:1) in high contrast.
   Color get outline => switch ((dark, highContrast)) {
         (true, true) => const Color(0xFF8E8E93),
@@ -229,6 +226,14 @@ class AppPalette extends ThemeExtension<AppPalette> {
   /// Clear glass fill (tab bar, nav buttons, sheets).
   Color get glassFill =>
       dark ? const Color(0x8C28282A) : const Color(0x9EFFFFFF);
+
+  /// Glass sheets: [surface] at ~90 % over the blur, so only a hint of what is
+  /// behind shows through and text never sits on a visible smudge.
+  Color get sheetGlassFill => surface.withValues(alpha: 0.92);
+
+  /// Peak opacity colour of the soft shadow drawn outside glass controls.
+  Color get glassShadow =>
+      dark ? const Color(0x33000000) : const Color(0x14000000);
 
   /// 0.5 pt hairline around glass.
   Color get glassEdge =>

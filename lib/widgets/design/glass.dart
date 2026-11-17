@@ -5,12 +5,52 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../app/theme/app_tokens.dart';
+import '../../utils/year_level_colors.dart';
 import 'app_icons.dart';
 
 /// Whether glass should render as an opaque surface (high contrast).
 bool appGlassIsOpaque(BuildContext context) =>
     AppPalette.of(context).highContrast ||
     (MediaQuery.maybeHighContrastOf(context) ?? false);
+
+/// Recolours the clear glass controls below it (nav buttons, status
+/// capsules) for a coloured backdrop, such as an [AppNavBar] over a
+/// year-coloured header.
+class AppGlassTint extends InheritedWidget {
+  const AppGlassTint({
+    super.key,
+    required this.foreground,
+    required this.fill,
+    required super.child,
+  });
+
+  /// Glass that follows a year header: glyphs in the header's label colour,
+  /// on a light wash of white (over dark headers) or the usual light glass
+  /// (over light headers) so the glyph keeps its contrast in both themes.
+  factory AppGlassTint.forYearHeader(YearLevelStyle style,
+      {Key? key, required Widget child}) {
+    final lightGlyph = style.onFill.computeLuminance() > 0.5;
+    return AppGlassTint(
+      key: key,
+      foreground: style.onFill,
+      fill: lightGlyph ? const Color(0x33FFFFFF) : const Color(0x9EFFFFFF),
+      child: child,
+    );
+  }
+
+  /// Glyph and label colour.
+  final Color foreground;
+
+  /// Clear glass fill.
+  final Color fill;
+
+  static AppGlassTint? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppGlassTint>();
+
+  @override
+  bool updateShouldNotify(AppGlassTint oldWidget) =>
+      foreground != oldWidget.foreground || fill != oldWidget.fill;
+}
 
 /// A Liquid Glass surface: blur + translucent fill + hairline + soft shadow.
 ///
@@ -26,9 +66,13 @@ class AppGlass extends StatelessWidget {
     this.tinted = false,
     this.padding = EdgeInsets.zero,
     this.shadow = true,
+    this.fill,
   });
 
   final Widget child;
+
+  /// Overrides the translucent fill (sheets use a nearly opaque surface).
+  final Color? fill;
 
   /// Shape of the glass; the default is a capsule.
   final BorderRadius borderRadius;
@@ -56,28 +100,77 @@ class AppGlass extends StatelessWidget {
         child: content,
       );
     }
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: borderRadius,
-        boxShadow: shadow ? AppTokens.glassShadow : null,
-      ),
-      child: ClipRRect(
-        borderRadius: borderRadius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(
-              sigmaX: AppTokens.glassBlur, sigmaY: AppTokens.glassBlur),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: tinted ? colors.tintedGlassFill : colors.glassFill,
-              borderRadius: borderRadius,
-              border: Border.all(color: colors.glassEdge, width: 0.5),
-            ),
-            child: content,
+    final glass = ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(
+            sigmaX: AppTokens.glassBlur, sigmaY: AppTokens.glassBlur),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: fill ??
+                (tinted
+                    ? colors.tintedGlassFill
+                    : AppGlassTint.maybeOf(context)?.fill ?? colors.glassFill),
+            borderRadius: borderRadius,
+            border: Border.all(color: colors.glassEdge, width: 0.5),
           ),
+          child: content,
         ),
       ),
     );
+    if (!shadow) return glass;
+    // The shadow is painted in the foreground, after the backdrop filter has
+    // sampled what is behind the glass, and only outside the shape, so it can
+    // never smear into or darken the control.
+    return CustomPaint(
+      foregroundPainter: AppGlassShadowPainter(
+        borderRadius: borderRadius,
+        color: colors.glassShadow,
+      ),
+      child: glass,
+    );
   }
+}
+
+/// A soft drop shadow drawn outside a rounded shape only: concentric rings
+/// whose opacity falls off with distance (no mask blur, so it renders the
+/// same on every backend and never covers the shape itself).
+class AppGlassShadowPainter extends CustomPainter {
+  const AppGlassShadowPainter(
+      {required this.borderRadius, required this.color});
+
+  final BorderRadius borderRadius;
+  final Color color;
+
+  static const double _spread = 14;
+  static const double _offsetY = 3;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final shape = borderRadius.toRRect(Offset.zero & size);
+    final outside = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect((Offset.zero & size).inflate(_spread * 2 + _offsetY))
+      ..addRRect(shape);
+    canvas.save();
+    canvas.clipPath(outside);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    final alpha = color.a;
+    for (var i = 0; i < _spread; i++) {
+      final t = 1 - i / _spread;
+      paint.color = color.withValues(alpha: alpha * t * t);
+      canvas.drawRRect(
+          shape.inflate(i + 0.5).shift(const Offset(0, _offsetY)), paint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(AppGlassShadowPainter oldDelegate) =>
+      borderRadius != oldDelegate.borderRadius || color != oldDelegate.color;
 }
 
 /// Tap target with an iOS-style dim-on-press highlight (no ripple), button
@@ -246,7 +339,10 @@ class AppGlassCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink = AppPalette.of(context).ink;
+    final ink = appGlassIsOpaque(context)
+        ? AppPalette.of(context).ink
+        : AppGlassTint.maybeOf(context)?.foreground ??
+            AppPalette.of(context).ink;
     return SizedBox.square(
       dimension: size,
       child: AppGlass(
@@ -395,11 +491,17 @@ class AppGlassStatus extends StatelessWidget {
     this.icon,
     this.onTap,
     this.semanticLabel,
+    this.leadingAligned = false,
   });
 
   final String label;
   final IconData? icon;
   final VoidCallback? onTap;
+
+  /// For a capsule in content: the label is start-aligned and, when it wraps,
+  /// the icon stays beside the first line (default: centred, for the nav
+  /// area).
+  final bool leadingAligned;
 
   /// Replaces [label] for screen readers (e.g. "Offline. Show uploads").
   final String? semanticLabel;
@@ -407,23 +509,45 @@ class AppGlassStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
+    final ink = appGlassIsOpaque(context)
+        ? colors.ink
+        : AppGlassTint.maybeOf(context)?.foreground ?? colors.ink;
     final capsule = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: AppTokens.minTouchTarget),
       child: AppGlass(
+        // In content the capsule may wrap: a 22 pt radius keeps one line a
+        // capsule and several lines a rounded rectangle, not an oval.
+        borderRadius: leadingAligned
+            ? const BorderRadius.all(
+                Radius.circular(AppTokens.minTouchTarget / 2))
+            : const BorderRadius.all(Radius.circular(AppTokens.pillRadius)),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: leadingAligned
+              ? CrossAxisAlignment.start
+              : CrossAxisAlignment.center,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 18, color: colors.ink),
+              Padding(
+                // Centre the icon on the first line of a wrapped label.
+                padding: EdgeInsets.only(
+                    top: leadingAligned
+                        ? math.max(
+                            0,
+                            (MediaQuery.textScalerOf(context).scale(20) - 18) /
+                                2)
+                        : 0),
+                child: Icon(icon, size: 18, color: ink),
+              ),
               const SizedBox(width: 6),
             ],
             Flexible(
               child: Text(
                 label,
-                textAlign: TextAlign.center,
+                textAlign: leadingAligned ? TextAlign.start : TextAlign.center,
                 style: AppTypography.subheadline
-                    .copyWith(fontWeight: FontWeight.w600, color: colors.ink),
+                    .copyWith(fontWeight: FontWeight.w600, color: ink),
               ),
             ),
           ],
@@ -692,6 +816,7 @@ class AppGlassSheetFrame extends StatelessWidget {
         constraints: BoxConstraints(maxHeight: media.size.height * 0.9),
         child: AppGlass(
           borderRadius: BorderRadius.circular(AppTokens.sheetRadius),
+          fill: colors.sheetGlassFill,
           child: Semantics(
             scopesRoute: true,
             namesRoute: true,

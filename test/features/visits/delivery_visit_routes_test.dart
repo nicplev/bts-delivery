@@ -403,7 +403,8 @@ void main() {
     final capture = find.text('Continue to signature');
     final back = find.byTooltip('Back to review');
     Future<void> openCapture() async {
-      await scrollVisitTo(capture, delta: 320);
+      // At large text the action follows the review content.
+      await scrollVisitTo(capture, delta: -320);
       await tester.tap(capture.hitTestable());
       await tester.pumpAndSettle();
       expect(back, findsOneWidget);
@@ -411,7 +412,9 @@ void main() {
     }
 
     await openCapture();
-    expect(find.textContaining('Visit first'), findsOneWidget);
+    // The subtitle names the school and date, never an internal id.
+    expect(find.textContaining('Visit first'), findsNothing);
+    expect(find.textContaining('$schoolName · '), findsOneWidget);
     Future<void> scrollCaptureTo(Finder target) async {
       final scroll = find.byType(SingleChildScrollView);
       for (var attempt = 0;
@@ -433,7 +436,7 @@ void main() {
     try {
       await tester.pump();
       final nameSemantics = tester.getSemantics(signerName).getSemanticsData();
-      expect(nameSemantics.label, contains('Name'));
+      expect(nameSemantics.label, contains('Receiver name'));
       expect(nameSemantics.label, isNot(contains('Signature')));
     } finally {
       semantics.dispose();
@@ -582,10 +585,10 @@ void main() {
     container.read(queue.notifier).state = emptyQueue;
     await tester.pumpAndSettle();
 
-    await scrollVisitTo(find.text('Info'), delta: 160);
+    await scrollVisitTo(find.text('Info'), delta: 320);
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
-    await scrollVisitTo(find.text('School Information'));
+    await scrollVisitTo(find.text('School information'));
     await scrollVisitTo(find.text('Open in Maps'));
     final infoPage = find.byKey(const PageStorageKey('school-info'));
     expect(

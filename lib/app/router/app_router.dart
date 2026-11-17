@@ -51,6 +51,14 @@ Page<dynamic> _buildPageWithFadeTransition({
 }
 
 /// Custom page transition for forward navigation (slide from right)
+/// The delivery's day at its scheduled time (or midnight when it has none).
+DateTime _visitDateTime(Delivery delivery) {
+  final date = delivery.date;
+  final time = delivery.time;
+  if (time == null) return date;
+  return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+}
+
 Page<dynamic> _buildPageWithSlideTransition({
   required BuildContext context,
   required GoRouterState state,
@@ -260,10 +268,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 return SchoolHubScreen(
                   schoolId: visit.schoolId,
                   deliveryId: visit.deliveryId,
+                  // The scheduled time when there is one, so the hub can
+                  // show it beside the date.
                   visitDate: delivery is Delivery &&
                           delivery.id == visit.deliveryId &&
                           delivery.schoolId == visit.schoolId
-                      ? delivery.date
+                      ? _visitDateTime(delivery)
                       : null,
                 );
               },

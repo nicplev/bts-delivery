@@ -251,13 +251,8 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 const SizedBox(height: AppTokens.sectionGap),
                 const AppSectionLabel('Current visit records'),
                 const SizedBox(height: 8),
-              ] else ...[
+              ] else
                 ..._gap(status, after: 16),
-                if (inlineAction != null) ...[
-                  inlineAction,
-                  const SizedBox(height: 16),
-                ],
-              ],
               _PackSummaryCard(progress: progress, onRefresh: _refreshTotals),
               const SizedBox(height: 16),
               _buildAttentionCard(progress),
@@ -270,6 +265,11 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               const SizedBox(height: AppTokens.sectionGap),
               _buildNotesCard(),
               _buildSchoolNotes(),
+              // At large text the action follows the review it confirms.
+              if (record == null && inlineAction != null) ...[
+                const SizedBox(height: AppTokens.sectionGap),
+                inlineAction,
+              ],
               if (record == null) ...[
                 const SizedBox(height: AppTokens.sectionGap),
                 AppSecondaryButton(

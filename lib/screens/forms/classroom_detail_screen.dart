@@ -16,6 +16,7 @@ import '../../providers/repository_providers.dart';
 import '../../providers/saved_edit_providers.dart';
 import '../../providers/schools_providers.dart';
 import '../../repositories/classroom_edit.dart';
+import '../../services/date_utils.dart';
 import '../../services/offline/connectivity_service.dart';
 import '../../services/offline/field_draft_store.dart';
 import '../../widgets/design/design.dart';
@@ -106,80 +107,98 @@ class ClassroomDetailScreen extends ConsumerWidget {
     ].join(' · ');
     final canRecord = deliveryId != null && classroom != null;
     final expected = packTotalAsync.valueOrNull;
+    // At large text sizes a floating action plus the tab bar would cover
+    // half the screen, so "Record packs" follows the packs card instead
+    // (the same rule as the sign-off tab).
+    final inlineRecord = MediaQuery.textScalerOf(context).scale(17) > 26;
+    void recordPacks() => _showRecordPacksSheet(
+          context,
+          ref,
+          classroom: classroom!,
+          yearLabel: yearLevel?.label,
+          composite: composite,
+        );
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppNavBar(
-        actions: [
-          if (offline)
-            const AppGlassStatus(label: 'Offline', icon: AppIcons.offline),
-          if (isAdmin)
-            AppGlassIconButton(
-              icon: AppIcons.more,
-              semanticLabel: 'Classroom options',
-              onPressed: () => _showOptions(context, ref, expected?.total),
+    return _HeaderKey(
+      builder: (headerKey) => Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppNavBar(
+          yearHeaderKey: headerKey,
+          yearLabel: composite ? '' : yearLevel?.label ?? '',
+          actions: [
+            if (offline)
+              const AppGlassStatus(label: 'Offline', icon: AppIcons.offline),
+            if (isAdmin)
+              AppGlassIconButton(
+                icon: AppIcons.more,
+                semanticLabel: 'Classroom options',
+                onPressed: () => _showOptions(context, ref, expected?.total),
+              ),
+          ],
+        ),
+        body: AppFloatingActionArea(
+          action: canRecord && !inlineRecord
+              ? AppGlassPrimaryButton(
+                  key: const ValueKey('record-packs'),
+                  label: 'Record packs',
+                  onPressed: recordPacks,
+                )
+              : null,
+          child: Builder(
+            builder: (context) => ListView(
+              padding: EdgeInsets.only(bottom: AppInsets.bottom(context)),
+              children: [
+                AppYearHeader(
+                  key: headerKey,
+                  title: classroom?.name ?? 'Classroom',
+                  // Composite and unknown year levels get the neutral header.
+                  yearLabel: composite ? '' : yearLevel?.label ?? '',
+                  subtitle: subtitle.isEmpty ? null : subtitle,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppTokens.gutter, 16, AppTokens.gutter, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _PacksCard(
+                        classroomsAsync: classroomsAsync,
+                        classroom: classroom,
+                        packTotalAsync: packTotalAsync,
+                        showRecorded: deliveryId != null,
+                        onStatusSelected: (status) {
+                          if (status == ClassroomCompletionStatus.incomplete) {
+                            _showRecordPacksSheet(
+                              context,
+                              ref,
+                              classroom: classroom!,
+                              yearLabel: yearLevel?.label,
+                              composite: composite,
+                            );
+                          } else {
+                            _saveClassroomStatus(context, ref, status);
+                          }
+                        },
+                      ),
+                      if (canRecord && inlineRecord) ...[
+                        const SizedBox(height: 16),
+                        AppPrimaryButton(
+                          key: const ValueKey('record-packs'),
+                          label: 'Record packs',
+                          onPressed: recordPacks,
+                        ),
+                      ],
+                      _DistributionSection(
+                          room: room, breakdownsAsync: breakdownsAsync),
+                      _ConsumablesSection(room: room),
+                      _PhotosSection(room: room),
+                      _NotesSection(room: room),
+                      _SavedStateLine(room: room, offline: offline),
+                    ],
+                  ),
+                ),
+              ],
             ),
-        ],
-      ),
-      body: AppFloatingActionArea(
-        action: canRecord
-            ? AppGlassPrimaryButton(
-                key: const ValueKey('record-packs'),
-                label: 'Record packs',
-                onPressed: () => _showRecordPacksSheet(
-                  context,
-                  ref,
-                  classroom: classroom,
-                  yearLabel: yearLevel?.label,
-                  composite: composite,
-                ),
-              )
-            : null,
-        child: Builder(
-          builder: (context) => ListView(
-            padding: EdgeInsets.only(bottom: AppInsets.bottom(context)),
-            children: [
-              AppYearHeader(
-                title: classroom?.name ?? 'Classroom',
-                // Composite and unknown year levels get the neutral header.
-                yearLabel: composite ? '' : yearLevel?.label ?? '',
-                subtitle: subtitle.isEmpty ? null : subtitle,
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppTokens.gutter, 16, AppTokens.gutter, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _PacksCard(
-                      classroomsAsync: classroomsAsync,
-                      classroom: classroom,
-                      packTotalAsync: packTotalAsync,
-                      showRecorded: deliveryId != null,
-                      onStatusSelected: (status) {
-                        if (status == ClassroomCompletionStatus.incomplete) {
-                          _showRecordPacksSheet(
-                            context,
-                            ref,
-                            classroom: classroom!,
-                            yearLabel: yearLevel?.label,
-                            composite: composite,
-                          );
-                        } else {
-                          _saveClassroomStatus(context, ref, status);
-                        }
-                      },
-                    ),
-                    _DistributionSection(
-                        room: room, breakdownsAsync: breakdownsAsync),
-                    _ConsumablesSection(room: room),
-                    _PhotosSection(room: room),
-                    _NotesSection(room: room),
-                    _SavedStateLine(room: room, offline: offline),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
       ),
@@ -318,4 +337,22 @@ class ClassroomDetailScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Keeps one [GlobalKey] for the year header across rebuilds, so the nav bar
+/// can tell whether the header is still beneath it.
+class _HeaderKey extends StatefulWidget {
+  const _HeaderKey({required this.builder});
+
+  final Widget Function(GlobalKey headerKey) builder;
+
+  @override
+  State<_HeaderKey> createState() => _HeaderKeyState();
+}
+
+class _HeaderKeyState extends State<_HeaderKey> {
+  final _key = GlobalKey(debugLabel: 'year-header');
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_key);
 }

@@ -281,45 +281,54 @@ class AppListRow extends StatelessWidget {
       constraints: BoxConstraints(minHeight: subtitle == null ? 52 : 68),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            if (lead != null) ...[lead, const SizedBox(width: 12)],
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: titleStyle ??
-                          AppTypography.body.copyWith(color: colors.ink)),
-                  if (subtitle != null)
-                    Text(subtitle!,
-                        style: AppTypography.subheadline
-                            .copyWith(color: colors.muted)),
-                ],
-              ),
-            ),
-            if (detail != null) ...[
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  detail!,
-                  textAlign: TextAlign.end,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.body.copyWith(color: colors.muted),
+        child: LayoutBuilder(builder: (context, constraints) {
+          final detailMaxWidth = constraints.hasBoundedWidth
+              ? constraints.maxWidth * 0.6
+              : double.infinity;
+          return Row(
+            children: [
+              if (lead != null) ...[lead, const SizedBox(width: 12)],
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: titleStyle ??
+                            AppTypography.body.copyWith(color: colors.ink)),
+                    if (subtitle != null)
+                      Text(subtitle!,
+                          style: AppTypography.subheadline
+                              .copyWith(color: colors.muted)),
+                  ],
                 ),
               ),
+              if (detail != null) ...[
+                const SizedBox(width: 8),
+                // Sized to its text (up to 60 % of the row) so the value always
+                // sits at the trailing edge, whatever the title's length.
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: detailMaxWidth),
+                  child: Text(
+                    detail!,
+                    textAlign: TextAlign.end,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.body.copyWith(color: colors.muted),
+                  ),
+                ),
+              ],
+              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
+              if (chevron) ...[
+                const SizedBox(width: 6),
+                ExcludeSemantics(
+                  child:
+                      Icon(AppIcons.chevron, size: 16, color: colors.chevron),
+                ),
+              ],
             ],
-            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-            if (chevron) ...[
-              const SizedBox(width: 6),
-              ExcludeSemantics(
-                child: Icon(AppIcons.chevron, size: 16, color: colors.chevron),
-              ),
-            ],
-          ],
-        ),
+          );
+        }),
       ),
     );
     if (onTap == null) {

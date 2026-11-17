@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/schools_providers.dart';
 import '../../providers/delivery_visit_provider.dart';
@@ -13,6 +12,7 @@ import '../../widgets/records_tab.dart';
 import '../../widgets/signoff_tab.dart';
 import '../../widgets/info_tab.dart';
 import '../forms/year_levels_screen.dart';
+import '../../services/date_utils.dart';
 
 class SchoolHubScreen extends ConsumerStatefulWidget {
   const SchoolHubScreen({
@@ -52,8 +52,8 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
     if (date == null) return 'Delivery visit';
     final hasTime = date.hour != 0 || date.minute != 0;
     return [
-      DateFormat('EEE d MMM yyyy').format(date),
-      if (hasTime) DateFormat('h:mm a').format(date),
+      DateTimeUtils.formatWeekdayDate(date),
+      if (hasTime) DateTimeUtils.formatTime(date),
       'Delivery visit',
     ].join(' · ');
   }
@@ -316,7 +316,7 @@ class _VisitSubtitle extends StatelessWidget {
   }
 }
 
-/// The hub's three-way switch: grey track, white selected capsule, ink label.
+/// The hub's three-way switch: grey track, raised selected thumb, ink label.
 /// Drives the existing [TabController] (tabs still swipe).
 class _HubSegmentedControl extends StatelessWidget {
   const _HubSegmentedControl({required this.controller, required this.labels});
@@ -326,92 +326,16 @@ class _HubSegmentedControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppPalette.of(context);
-    return Semantics(
-      container: true,
-      label: 'Visit section',
-      explicitChildNodes: true,
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) => DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.fill,
-            borderRadius: BorderRadius.circular(AppTokens.pillRadius),
-            border: colors.highContrast
-                ? Border.all(color: colors.outline, width: 1.5)
-                : null,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(2),
-            child: Row(
-              children: [
-                for (var i = 0; i < labels.length; i++)
-                  Expanded(
-                    child: AppPressable(
-                      key: ValueKey('hub-tab-$i'),
-                      onTap: () => controller.animateTo(i),
-                      semanticLabel: labels[i],
-                      selected: controller.index == i,
-                      excludeChildSemantics: true,
-                      child: _segment(
-                        context,
-                        colors,
-                        labels[i],
-                        selected: controller.index == i,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _segment(
-    BuildContext context,
-    AppPalette colors,
-    String label, {
-    required bool selected,
-  }) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 40),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: selected ? colors.surface : null,
-          borderRadius: BorderRadius.circular(AppTokens.pillRadius),
-          border: selected && colors.highContrast
-              ? Border.all(color: colors.ink, width: 1.5)
-              : null,
-          boxShadow: selected && !colors.highContrast
-              ? [
-                  BoxShadow(
-                    color: colors.shadow,
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ]
-              : null,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-          child: Center(
-            // A single word at very large text sizes scales down rather
-            // than breaking mid-word.
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1,
-                style: AppTypography.subheadline.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: selected ? colors.ink : colors.muted,
-                ),
-              ),
-            ),
-          ),
-        ),
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => AppSegmentedControl<int>(
+        semanticLabel: 'Visit section',
+        selected: controller.index,
+        onChanged: controller.animateTo,
+        segments: [
+          for (var i = 0; i < labels.length; i++)
+            AppSegment(value: i, label: labels[i], key: ValueKey('hub-tab-$i')),
+        ],
       ),
     );
   }

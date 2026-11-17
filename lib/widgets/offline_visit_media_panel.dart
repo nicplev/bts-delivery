@@ -12,6 +12,7 @@ import '../services/media/visit_media_inventory.dart';
 import '../services/offline/connectivity_service.dart';
 import 'offline_media_view.dart';
 import 'design/design.dart';
+import '../services/date_utils.dart';
 
 /// Counts derived from the visit media state, split into the school map and
 /// classroom photos. Purely presentational: it adds no state of its own.
@@ -134,19 +135,19 @@ class OfflineVisitMediaPanel extends ConsumerWidget {
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: AppTokens.minTouchTarget),
+        // Full-width row: the chevron sits at the trailing edge.
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 18, color: colors.ink),
             const SizedBox(width: 6),
-            Flexible(
+            Expanded(
               child: Text(
                 label,
                 style: AppTypography.subheadline
                     .copyWith(fontWeight: FontWeight.w600, color: colors.ink),
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 8),
             Icon(AppIcons.chevron, size: 16, color: colors.chevron),
           ],
         ),
@@ -192,9 +193,7 @@ class _VisitMediaSheetState extends ConsumerState<_VisitMediaSheet> {
     final discovering = state?.discovering ?? false;
     final clearing = state?.clearing ?? false;
     final date = inventory?.checkedAt.toLocal();
-    final checked = date == null
-        ? null
-        : MaterialLocalizations.of(context).formatShortDate(date);
+    final checked = date == null ? null : DateTimeUtils.formatDate(date);
     final currentMap = allowed
         ? _assetMap(
             widget.school, widget.visit, ref.watch(offlineMediaBucketProvider))
@@ -509,9 +508,11 @@ class _VisitMediaSheetState extends ConsumerState<_VisitMediaSheet> {
               ? null
               : () => _remove(cache),
         ),
+      // The destructive one of the two: removes every visit's media.
       AppSecondaryButton(
-        label: 'Clear downloaded media on this device',
+        label: 'Clear all downloaded media',
         icon: AppIcons.delete,
+        destructive: true,
         large: false,
         onPressed: cache == null || clearing
             ? null

@@ -163,7 +163,7 @@ void main() {
         scrollable: find.byType(Scrollable).last);
     expect(find.text('Download 4 photos'), findsOneWidget);
     await tester.scrollUntilVisible(
-        find.text('Clear downloaded media on this device'), 200,
+        find.text('Clear all downloaded media'), 200,
         scrollable: find.byType(Scrollable).last);
     expect(find.text('Remove downloads'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -282,7 +282,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    const label = 'Offline · 2 saved on this device · 1 need review';
+    const label = 'Offline · 2 saved on this device · 1 needs review';
     expect(find.text(label), findsOneWidget);
     expect(
         find.bySemanticsLabel('$label. Show evidence uploads'), findsOneWidget);

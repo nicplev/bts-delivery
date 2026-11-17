@@ -45,7 +45,7 @@ void main() {
       final date = DateTime(2024, 3, 15);
       final formatted = DateTimeUtils.formatDate(date);
       
-      expect(formatted, 'Mar 15, 2024');
+      expect(formatted, '15 Mar 2024');
     });
 
     test('should format time correctly', () {
@@ -59,7 +59,7 @@ void main() {
       final date = DateTime(2024, 3, 15, 9, 15);
       final formatted = DateTimeUtils.formatDateTime(date);
       
-      expect(formatted, 'Mar 15, 2024 9:15 AM');
+      expect(formatted, '15 Mar 2024, 9:15 AM');
     });
   });
 }

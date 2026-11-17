@@ -44,11 +44,14 @@ class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
+    // "Oakfield Primary · 17 Nov 2026 · 9:00 AM" (never an internal id).
     final visitDate = widget.visitDate;
+    final hasTime =
+        visitDate != null && (visitDate.hour != 0 || visitDate.minute != 0);
     final subtitle = [
       widget.schoolName,
       if (visitDate != null) DateTimeUtils.formatDate(visitDate),
-      'Visit ${widget.visitId}',
+      if (hasTime) DateTimeUtils.formatTime(visitDate),
     ].join(' · ');
     return PopScope(
       canPop: !_reviewing,
@@ -100,6 +103,8 @@ class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
     );
   }
 
+  static const _nameLabel = 'Receiver name';
+
   String get _reviewLabel => _reviewing ? 'Checking…' : 'Review and save';
 
   Widget _buildForm(
@@ -135,18 +140,36 @@ class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (inlineAction) ...[...summary, const SizedBox(height: 16)],
+              // A fixed label above the field (a floating label would
+              // overlap the field's top edge once filled).
+              ExcludeSemantics(
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 16),
+                  child: Text(
+                    _nameLabel,
+                    style: AppTypography.footnote.copyWith(color: colors.muted),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
               Semantics(
                 container: true,
+                label: _nameLabel,
                 child: TextField(
                   controller: widget.name,
                   enabled: !_reviewing,
+                  // The limit stays; the "0/200" counter is hidden.
                   maxLength: 200,
+                  buildCounter: (context,
+                          {required currentLength,
+                          required isFocused,
+                          maxLength}) =>
+                      null,
                   textCapitalization: TextCapitalization.words,
                   textInputAction: TextInputAction.done,
                   // Keep the field clear of the floating action.
                   scrollPadding: EdgeInsets.fromLTRB(20, 20, 20, reserved + 20),
                   decoration: InputDecoration(
-                    labelText: 'Name',
                     filled: true,
                     fillColor: colors.surface,
                     border: OutlineInputBorder(
@@ -166,7 +189,7 @@ class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(

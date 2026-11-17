@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../models/delivery_visit.dart';
 import '../models/offline/saved_edit.dart';
 import '../providers/auth_providers.dart';
 import '../providers/saved_edit_providers.dart';
+import '../services/date_utils.dart';
 import '../services/offline/saved_edit_recovery.dart';
 import 'design/design.dart';
 
@@ -121,16 +121,21 @@ class _CompactNotice extends StatelessWidget {
     const radius = BorderRadius.all(Radius.circular(26));
     const padding = EdgeInsets.fromLTRB(14, 4, 4, 4);
     final Widget shell = warning
-        ? DecoratedBox(
-            decoration: BoxDecoration(
-              color: colors.warningTint,
-              borderRadius: radius,
-              boxShadow: colors.highContrast ? null : AppTokens.glassShadow,
-              border: colors.highContrast
-                  ? Border.all(color: colors.outline, width: 1.5)
-                  : null,
+        ? CustomPaint(
+            foregroundPainter: colors.highContrast
+                ? null
+                : AppGlassShadowPainter(
+                    borderRadius: radius, color: colors.glassShadow),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.warningTint,
+                borderRadius: radius,
+                border: colors.highContrast
+                    ? Border.all(color: colors.outline, width: 1.5)
+                    : null,
+              ),
+              child: Padding(padding: padding, child: content),
             ),
-            child: Padding(padding: padding, child: content),
           )
         : AppGlass(borderRadius: radius, padding: padding, child: content);
     return Semantics(
@@ -268,7 +273,7 @@ class _SavedEditCard extends StatelessWidget {
     final intent = edit.intent;
     final review = _needsReview(edit.state);
     final icon = _kindIcon(intent.kind);
-    final date = DateFormat.MMMd().add_jm().format(intent.capturedAt.toLocal());
+    final date = DateTimeUtils.formatDateTime(intent.capturedAt.toLocal());
     final status = _status(edit.state);
     return AppPanel(
       padding: const EdgeInsets.all(20),
@@ -277,7 +282,9 @@ class _SavedEditCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            // A neutral card is one tappable row: its chevron is centred.
+            crossAxisAlignment:
+                review ? CrossAxisAlignment.start : CrossAxisAlignment.center,
             children: [
               review
                   ? AppIconTile.warning(icon: icon)

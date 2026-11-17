@@ -9,6 +9,7 @@ import '../models/delivery_visit.dart';
 import '../providers/offline_media_providers.dart';
 import '../services/offline/connectivity_service.dart';
 import 'design/design.dart';
+import '../services/date_utils.dart';
 
 class OfflineMediaPreview extends ConsumerWidget {
   const OfflineMediaPreview({
@@ -438,7 +439,5 @@ class _MediaMessage extends StatelessWidget {
 }
 
 String _checkedAt(BuildContext context, DateTime date) {
-  final local = date.toLocal();
-  final strings = MaterialLocalizations.of(context);
-  return '${strings.formatShortDate(local)}, ${strings.formatTimeOfDay(TimeOfDay.fromDateTime(local))}';
+  return DateTimeUtils.formatDateTime(date.toLocal());
 }

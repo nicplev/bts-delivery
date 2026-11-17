@@ -222,6 +222,13 @@ class _PreDeliveryChecklistDialogState
                 title: Text(item.title),
                 subtitle: _buildItemSubtitle(item),
                 controlAffinity: ListTileControlAffinity.leading,
+                // The app's round check: an empty grey ring that becomes a
+                // solid ink check-circle; the whole row toggles it.
+                checkboxShape: const CircleBorder(),
+                checkboxScaleFactor: 1.3,
+                side: BorderSide(color: colors.inactive, width: 1.5),
+                activeColor: colors.action,
+                checkColor: colors.onAction,
               ),
           ],
         ),

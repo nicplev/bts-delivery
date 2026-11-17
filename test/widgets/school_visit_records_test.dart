@@ -188,7 +188,7 @@ void main() {
 
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
-    expect(find.text('School Information'), findsOneWidget);
+    expect(find.text('School information'), findsOneWidget);
     await tester.tap(find.text('Records'));
     await tester.pumpAndSettle();
     expect(find.text('Room 1A'), findsOneWidget);
@@ -236,7 +236,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('hub-tab-2')));
     await tester.pumpAndSettle();
-    expect(find.text('School Information'), findsOneWidget);
+    expect(find.text('School information'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const ValueKey('hub-options')));

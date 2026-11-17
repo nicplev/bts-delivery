@@ -81,11 +81,15 @@ class AppTheme {
       padding: buttonPadding,
       textStyle: buttonText,
     );
+    // A disabled secondary button keeps the enabled grey fill and fades its
+    // label, so it never looks stronger than an enabled one.
+    final secondaryDisabledInk =
+        colors.ink.withValues(alpha: colors.highContrast ? 0.55 : 0.35);
     final secondaryStyle = TextButton.styleFrom(
       backgroundColor: colors.fill,
       foregroundColor: colors.ink,
-      disabledBackgroundColor: disabledFill,
-      disabledForegroundColor: disabledInk,
+      disabledBackgroundColor: colors.fill,
+      disabledForegroundColor: secondaryDisabledInk,
       minimumSize: buttonSize,
       elevation: 0,
       shape: pill,
@@ -176,8 +180,8 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           backgroundColor: colors.fill,
           foregroundColor: colors.ink,
-          disabledBackgroundColor: disabledFill,
-          disabledForegroundColor: disabledInk,
+          disabledBackgroundColor: colors.fill,
+          disabledForegroundColor: secondaryDisabledInk,
           minimumSize: buttonSize,
           side: colors.highContrast
               ? BorderSide(color: colors.outline)
@@ -198,7 +202,8 @@ class AppTheme {
         style: ButtonStyle(
           minimumSize: const WidgetStatePropertyAll(Size(44, 44)),
           shape: const WidgetStatePropertyAll(pill),
-          // iOS-style: grey track, the selected segment is a white capsule.
+          // iOS-style: grey track, the selected segment is a white capsule
+          // (a lighter grey than the track in dark themes).
           side: WidgetStatePropertyAll(BorderSide(
             color: colors.highContrast ? colors.outline : colors.surfaceQuiet,
             width: 2,
@@ -207,7 +212,7 @@ class AppTheme {
               fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: -0.23)),
           backgroundColor: WidgetStateProperty.resolveWith(
             (states) => states.contains(WidgetState.selected)
-                ? colors.surface
+                ? colors.segmentThumb
                 : colors.surfaceQuiet,
           ),
           foregroundColor: WidgetStateProperty.resolveWith(

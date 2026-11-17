@@ -151,8 +151,8 @@ void main() {
   });
 
   testWidgets(
-      '320 pt at 200 % text: no overflow and nothing ends under the '
-      'floating action', (tester) async {
+      '320 pt at 200 % text: no overflow and Record packs sits inline '
+      'after the packs card', (tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -174,13 +174,22 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Could not load synced photos'), findsOneWidget);
 
+    // At large text "Record packs" follows the packs card instead of
+    // floating over the content.
+    expect(find.byType(AppGlassPrimaryButton), findsNothing);
+    final packs = tester.getRect(find.text('Pack delivery status'));
+    final inline = tester.getRect(find.byKey(const ValueKey('record-packs')));
+    expect(inline.top, greaterThan(packs.bottom));
+
     await tester.drag(find.byType(ListView), const Offset(0, -6000));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    final lastRow = tester.getRect(find.text('No notes yet'));
-    final action = tester.getRect(find.byKey(const ValueKey('record-packs')));
-    expect(lastRow.bottom, lessThanOrEqualTo(action.top));
+    expect(find.text('No notes yet'), findsOneWidget);
 
+    await tester.drag(find.byType(ListView), const Offset(0, 6000));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('record-packs')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('record-packs')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

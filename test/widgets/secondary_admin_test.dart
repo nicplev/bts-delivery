@@ -154,8 +154,13 @@ void main() {
     );
 
     expect(find.text('Profile'), findsOneWidget);
-    await _reveal(tester, find.text('robin.administrator@example.test'));
-    expect(find.text('robin.administrator@example.test'), findsOneWidget);
+    // At large text the long email stacks under its label and wraps after
+    // "@" and "." (zero-width breaks), never inside a word.
+    final email = find.textContaining('administrator@');
+    await _reveal(tester, email);
+    expect(email, findsOneWidget);
+    expect(find.bySemanticsLabel('Email, robin.administrator@example.test'),
+        findsOneWidget);
     final signOut = find.widgetWithText(AdminDestructiveButton, 'Sign out');
     await _reveal(tester, find.text('Season report'));
     expect(find.text('Pre-delivery checklist'), findsOneWidget);

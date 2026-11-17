@@ -182,21 +182,15 @@ class _PacksCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
+        // One segmented control (stacks vertically at large text sizes).
+        AppSegmentedControl<ClassroomCompletionStatus>(
+          semanticLabel: 'Pack delivery status',
+          allowVertical: true,
+          selected: room.completionStatus,
+          onChanged: onStatusSelected,
+          segments: [
             for (final status in ClassroomCompletionStatus.values)
-              _StatusChoice(
-                label: _statusLabel(status),
-                icon: switch (status) {
-                  ClassroomCompletionStatus.notAttended => AppIcons.notAttended,
-                  ClassroomCompletionStatus.incomplete => AppIcons.packs,
-                  ClassroomCompletionStatus.complete => AppIcons.check,
-                },
-                selected: room.completionStatus == status,
-                onTap: () => onStatusSelected(status),
-              ),
+              AppSegment(value: status, label: _statusLabel(status)),
           ],
         ),
       ]);
@@ -207,57 +201,6 @@ class _PacksCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: children,
-      ),
-    );
-  }
-}
-
-/// One pack delivery status option: grey capsule, ink when selected.
-class _StatusChoice extends StatelessWidget {
-  const _StatusChoice({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppPalette.of(context);
-    final ink = selected ? colors.onAction : colors.ink;
-    return AppPressable(
-      onTap: onTap,
-      selected: selected,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: AppTokens.minTouchTarget),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: selected ? colors.action : colors.fill,
-            borderRadius: BorderRadius.circular(AppTokens.pillRadius),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(selected ? AppIcons.complete : icon, size: 18, color: ink),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    style: AppTypography.subheadline
-                        .copyWith(fontWeight: FontWeight.w600, color: ink),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

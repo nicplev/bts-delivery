@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import '../services/date_utils.dart';
 import '../models/school_timer.dart';
 import '../providers/school_timer_providers.dart';
 import '../providers/auth_providers.dart';
@@ -101,14 +101,12 @@ class SchoolTimerHistory extends ConsumerWidget {
 
   void _showDeleteConfirmation(
       BuildContext context, WidgetRef ref, SchoolTimer timer) {
-    final dateFormat = DateFormat('MMM d, yyyy h:mm a');
-
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete timer entry'),
         content: Text(
-          'Are you sure you want to delete the timer entry from ${dateFormat.format(timer.startedAt)}?',
+          'Are you sure you want to delete the timer entry from ${DateTimeUtils.formatDateTime(timer.startedAt)}?',
         ),
         actions: [
           TextButton(
@@ -203,8 +201,6 @@ class _TimerHistoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dateFormat = DateFormat('MMM d, yyyy');
-    final timeFormat = DateFormat('h:mm a');
     final colors = AppPalette.of(context);
     final people = [
       'Started by ${timer.startedByName}',
@@ -225,7 +221,7 @@ class _TimerHistoryTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${dateFormat.format(timer.startedAt)} · ${timeFormat.format(timer.startedAt)}',
+                    '${DateTimeUtils.formatDate(timer.startedAt)} · ${DateTimeUtils.formatTime(timer.startedAt)}',
                     style: AppTypography.body.copyWith(color: colors.ink),
                   ),
                   const SizedBox(height: 2),
@@ -450,8 +446,6 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final dateFormat = DateFormat('MMM d, yyyy');
-    final timeFormat = DateFormat('h:mm a');
     final isEditing = widget.timer != null;
     final colors = AppPalette.of(context);
     final invalid = _duration.isNegative;
@@ -465,18 +459,18 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
           children: [
             _dateTimeFields(
               label: 'Start time',
-              date: dateFormat.format(_startDate),
-              time: timeFormat
-                  .format(_combineDateAndTime(_startDate, _startTime)),
+              date: DateTimeUtils.formatDate(_startDate),
+              time: DateTimeUtils.formatTime(
+                  _combineDateAndTime(_startDate, _startTime)),
               onDate: () => _selectDate(context, true),
               onTime: () => _selectTime(context, true),
             ),
             const SizedBox(height: 16),
             _dateTimeFields(
               label: 'Stop time',
-              date: dateFormat.format(_stopDate),
-              time:
-                  timeFormat.format(_combineDateAndTime(_stopDate, _stopTime)),
+              date: DateTimeUtils.formatDate(_stopDate),
+              time: DateTimeUtils.formatTime(
+                  _combineDateAndTime(_stopDate, _stopTime)),
               onDate: () => _selectDate(context, false),
               onTime: () => _selectTime(context, false),
             ),

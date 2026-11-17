@@ -60,11 +60,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
         AdminSection(
           label: 'Account information',
-          child: AppGroupedList(
-            children: [
-              _InfoRow(
-                  label: 'Email', value: account?.email ?? 'Not available'),
-              _InfoRow(
+          child: _InfoList(
+            rows: [
+              (label: 'Email', value: account?.email ?? 'Not available'),
+              (
                 label: 'Role',
                 value: isAdmin
                     ? 'Administrator'
@@ -72,14 +71,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         ? 'Manager'
                         : 'Staff member',
               ),
-              _InfoRow(
+              (
                 label: 'Account created',
                 value: account == null
                     ? 'Not available'
                     : DateTimeUtils.formatDateTime(account.createdAt),
               ),
               if (account?.lastLoginAt != null)
-                _InfoRow(
+                (
                   label: 'Last login',
                   value: DateTimeUtils.formatDateTime(account!.lastLoginAt!),
                 ),
@@ -89,18 +88,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         if (staff != null)
           AdminSection(
             label: 'Staff information',
-            child: AppGroupedList(
-              children: [
-                _InfoRow(label: 'Name', value: staff.name),
-                _InfoRow(
+            child: _InfoList(
+              rows: [
+                (label: 'Name', value: staff.name),
+                (
                   label: 'Position',
                   value: staff.hasManagerAccess ? 'Manager' : 'Staff member',
                 ),
-                _InfoRow(
+                (
                   label: 'Staff since',
                   value: DateTimeUtils.formatDate(staff.createdAt),
                 ),
-                _InfoRow(label: 'Role', value: staff.role),
+                (label: 'Role', value: _roleName(staff.role)),
               ],
             ),
           ),
@@ -269,22 +268,73 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-/// Label–value row. Side by side when there is room; the value moves under
-/// the label on narrow screens or with large text so nothing is truncated.
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+/// Display name of a staff role key ("admin" → "Administrator").
+String _roleName(String role) => switch (role) {
+      'admin' => 'Administrator',
+      'manager' => 'Manager',
+      'staff' => 'Staff member',
+      _ => role.isEmpty ? 'Not set' : role,
+    };
 
-  final String label;
-  final String value;
+/// A card of label–value rows. Values sit at the trailing edge when every
+/// row fits on one line; otherwise (a long email, a narrow screen, large
+/// text) every row in the card stacks the value under its label, so the
+/// alignment stays uniform and nothing breaks mid-word.
+class _InfoList extends StatelessWidget {
+  const _InfoList({required this.rows});
+
+  final List<({String label, String value})> rows;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
-      final stacked = constraints.maxWidth < 340 ||
-          MediaQuery.textScalerOf(context).scale(17) > 22;
-      return stacked
-          ? AppListRow(title: label, subtitle: value)
-          : AppListRow(title: label, detail: value);
+      final stacked = _needsStacking(context, constraints.maxWidth);
+      return AppGroupedList(
+        children: [
+          for (final row in rows)
+            stacked
+                ? AppListRow(
+                    title: row.label,
+                    subtitle: _breakable(row.value),
+                    semanticLabel: '${row.label}, ${row.value}',
+                  )
+                : AppListRow(title: row.label, detail: row.value),
+        ],
+      );
     });
   }
+
+  bool _needsStacking(BuildContext context, double width) {
+    if (!width.isFinite) return true;
+    final scaler = MediaQuery.textScalerOf(context);
+    if (scaler.scale(17) > 22) return true;
+    final style = DefaultTextStyle.of(context).style.merge(AppTypography.body);
+    final direction = Directionality.of(context);
+    double measure(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: direction,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      final w = painter.width;
+      painter.dispose();
+      return w;
+    }
+
+    // Row padding 16 + 16, an 8 pt gap; the value may take up to 60 %.
+    final inner = width - 32;
+    for (final row in rows) {
+      final value = measure(row.value);
+      if (value > inner * 0.6 || measure(row.label) + 8 + value > inner) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Lets an email or similar long value wrap after "@" and "." rather than
+  /// inside a word.
+  static String _breakable(String value) =>
+      value.replaceAllMapped(RegExp(r'([@.])'), (m) => '${m[1]}\u200B');
 }

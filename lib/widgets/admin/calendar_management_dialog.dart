@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../models/staff.dart';
 import '../../models/calendar_metadata.dart';
 import '../../repositories/staff_repository.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../providers/staff_providers.dart';
 import '../design/design.dart';
+import '../../services/date_utils.dart';
 
 /// Dialog for admins to manage calendar subscriptions for staff members
 class CalendarManagementDialog extends ConsumerStatefulWidget {
@@ -463,8 +463,7 @@ class _CalendarManagementDialogState
             _buildStatRow(
               'Last accessed',
               metadata.lastAccessed != null
-                  ? DateFormat('MMM d, y • h:mm a')
-                      .format(metadata.lastAccessed!)
+                  ? DateTimeUtils.formatDateTime(metadata.lastAccessed!)
                   : 'Never',
               AppIcons.timer,
             ),
@@ -472,8 +471,7 @@ class _CalendarManagementDialogState
               Divider(height: 24, color: colors.separator),
               _buildStatRow(
                 'Last delivery update',
-                DateFormat('MMM d, y • h:mm a')
-                    .format(metadata.lastDeliveryChange!),
+                DateTimeUtils.formatDateTime(metadata.lastDeliveryChange!),
                 AppIcons.retry,
               ),
             ],

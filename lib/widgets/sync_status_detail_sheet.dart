@@ -6,6 +6,7 @@ import '../models/offline/evidence_upload.dart';
 import '../models/offline/offline_models.dart';
 import '../providers/auth_providers.dart';
 import '../providers/offline_delivery_providers.dart';
+import '../services/date_utils.dart';
 import '../services/offline/connectivity_service.dart';
 import '../services/offline/offline_storage_service.dart';
 import 'design/design.dart';
@@ -365,8 +366,7 @@ class _LegacyPhotoRecoveryState extends ConsumerState<_LegacyPhotoRecovery> {
                 height: 1, thickness: 1, indent: 57, color: colors.separator),
             AppListRow(
               icon: AppIcons.gallery,
-              title: MaterialLocalizations.of(context)
-                  .formatCompactDate(photo.createdAt.toLocal()),
+              title: DateTimeUtils.formatDateTime(photo.createdAt.toLocal()),
               trailing: Builder(
                 builder: (buttonContext) => AppSecondaryButton(
                   label: 'Export',

@@ -133,23 +133,14 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 660),
-            child: SegmentedButton<bool>(
-              expandedInsets: EdgeInsets.zero,
+            child: AppSegmentedControl<bool>(
+              semanticLabel: 'Deliveries view',
               segments: const [
-                ButtonSegment(
-                  value: false,
-                  label: Text('Today', textAlign: TextAlign.center),
-                ),
-                ButtonSegment(
-                  value: true,
-                  label: Text('Calendar', textAlign: TextAlign.center),
-                ),
+                AppSegment(value: false, label: 'Today'),
+                AppSegment(value: true, label: 'Calendar'),
               ],
-              selected: {_showCalendar},
-              showSelectedIcon: false,
-              onSelectionChanged: (selection) {
-                setState(() => _showCalendar = selection.single);
-              },
+              selected: _showCalendar,
+              onChanged: (value) => setState(() => _showCalendar = value),
             ),
           ),
         ),
