@@ -11,6 +11,7 @@ import 'package:bts_delivery_app/services/offline/connectivity_service.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
 import 'package:bts_delivery_app/services/result.dart';
 import 'package:bts_delivery_app/widgets/deliveries_calendar_view.dart';
+import 'package:bts_delivery_app/widgets/design/design.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,9 +42,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(_longName), findsOneWidget);
-    expect(find.text('1 delivery · 1 school'), findsOneWidget);
+    expect(find.textContaining(' · 1 visit'), findsOneWidget);
     expect(find.text('Offline'), findsOneWidget);
-    expect(find.text('Checklist complete'), findsOneWidget);
+    expect(find.text('Complete'), findsOneWidget);
     expect(find.byType(TableCalendar<Delivery>), findsNothing);
     expect(find.byTooltip('Add delivery'), findsNothing);
     final query = repository.queries.single;
@@ -51,9 +52,9 @@ void main() {
     expect(query.end, DateTime(today.year, today.month, today.day + 1));
     expect(query.schools, ['school']);
 
-    await tester.ensureVisible(find.text('Open school'));
+    await tester.ensureVisible(find.text('Open visit'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Open school'));
+    await tester.tap(find.text('Open visit'));
     await tester.pumpAndSettle();
     expect(find.text('School records'), findsOneWidget);
 
@@ -81,16 +82,19 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final checklistAction = find.widgetWithText(
-      TextButton,
-      'Checklist status unavailable',
-    );
+    final checklistAction =
+        find.byKey(const ValueKey('pre-delivery-checklist-row'));
     await tester.ensureVisible(checklistAction);
     await tester.pumpAndSettle();
     expect(checklistAction.hitTestable(), findsOneWidget);
     expect(tester.getSize(checklistAction).height, greaterThanOrEqualTo(44));
-    expect(find.textContaining('· 2 vehicles · 5 pallets'), findsOneWidget);
+    expect(find.text('Status unavailable'), findsOneWidget);
+    expect(find.text('2 vehicles'), findsOneWidget);
+    expect(find.text('5 pallets'), findsOneWidget);
     expect(find.text('Use Gate 3 near the sports centre.'), findsOneWidget);
+    // The view switcher scrolls with the large title.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 2000));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Calendar'));
     await tester.pumpAndSettle();
     expect(find.byType(TableCalendar<Delivery>), findsOneWidget);
@@ -127,7 +131,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byIcon(Icons.chevron_right).first);
+    await tester.tap(find.byIcon(HeroiconsOutline.chevronRight).first);
     await tester.pumpAndSettle();
     expect(
       repository.queries.last,

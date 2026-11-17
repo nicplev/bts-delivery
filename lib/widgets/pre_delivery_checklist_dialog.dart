@@ -9,13 +9,15 @@ import '../services/offline/connectivity_service.dart';
 import 'field_draft_dialog.dart';
 import 'design/design.dart';
 
-/// Opens immediately and keeps the checklist responsive as data loads.
+/// Opens a glass sheet immediately and keeps the checklist responsive as data
+/// loads. Resolves to `true` when it is closed with every item checked.
 Future<bool> showPreDeliveryChecklistDialog({
   required BuildContext context,
   required Delivery delivery,
 }) async {
-  final result = await showDialog<bool>(
+  final result = await showAppGlassSheet<bool>(
     context: context,
+    title: 'Pre-delivery checklist',
     builder: (_) => _PreDeliveryChecklistDialog(delivery: delivery),
   );
   return result ?? false;
@@ -94,26 +96,41 @@ class _PreDeliveryChecklistDialogState
             !items.hasError &&
             !completions.hasError &&
             completions.hasValue;
+    final failed = items.hasError || completions.hasError;
 
-    return AlertDialog(
-      scrollable: true,
-      title: const Text('Pre-delivery checklist'),
-      content: _buildChecklist(items, completions, offline, done),
-      actions: [
-        if (items.hasError || completions.hasError)
-          TextButton(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Flexible(
+          child: SingleChildScrollView(
+            child: _buildChecklist(items, completions, offline, done),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (failed) ...[
+          AppPrimaryButton(
+            label: 'Retry',
+            icon: AppIcons.retry,
             onPressed: () {
               if (items.hasError) {
                 ref.invalidate(activePreDeliveryChecklistItemsProvider);
               }
               if (completions.hasError) ref.invalidate(completionProvider);
             },
-            child: const Text('Retry'),
           ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(allChecked),
-          child: Text(allChecked ? 'Done' : 'Close'),
-        ),
+          const SizedBox(height: 8),
+        ],
+        if (allChecked)
+          AppPrimaryButton(
+            label: 'Done',
+            onPressed: () => Navigator.of(context).pop(true),
+          )
+        else
+          AppSecondaryButton(
+            label: 'Close',
+            onPressed: () => Navigator.of(context).pop(false),
+          ),
       ],
     );
   }
@@ -124,40 +141,76 @@ class _PreDeliveryChecklistDialogState
     bool offline,
     Set<String> done,
   ) {
+    final colors = AppPalette.of(context);
+    Widget note(String message, IconData icon) => Semantics(
+          liveRegion: true,
+          child: AppNotice(message: message, icon: icon),
+        );
+
     if (items.hasError || completions.hasError) {
-      return Text(offline
-          ? 'Couldn’t load the checklist on this device.'
-          : 'Couldn’t load the checklist. Try again.');
+      return note(
+        offline
+            ? 'Couldn’t load the checklist on this device.'
+            : 'Couldn’t load the checklist. Try again.',
+        AppIcons.error,
+      );
     }
     final active = items.valueOrNull;
     if (active == null || !completions.hasValue) {
-      return Text(
-          offline ? 'Checking saved checklist items…' : 'Loading checklist…');
+      return note(
+        offline ? 'Checking saved checklist items…' : 'Loading checklist…',
+        offline ? AppIcons.offline : AppIcons.timer,
+      );
     }
     if (active.isEmpty) {
-      return Text(offline
-          ? 'No checklist items saved on this device.'
-          : 'No checklist items.');
+      return note(
+        offline
+            ? 'No checklist items saved on this device.'
+            : 'No checklist items.',
+        AppIcons.info,
+      );
     }
     final completed = active.where((item) => done.contains(item.id)).length;
+    final progress = '$completed of ${active.length} checked'
+        '${offline ? ' on this device' : ''}';
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppSectionHeading(title: widget.delivery.schoolName),
-        const SizedBox(height: 8),
-        Semantics(
-          liveRegion: true,
-          child: AppStatusPill(
-            label:
-                '$completed of ${active.length} checked${offline ? ' on this device' : ''}',
-            icon: Icons.checklist_outlined,
-            tone: completed == active.length ? AppTone.green : AppTone.blue,
-          ),
+        Text(
+          widget.delivery.schoolName,
+          style: AppTypography.headline.copyWith(color: colors.ink),
         ),
-        const SizedBox(height: 8),
-        LinearProgressIndicator(value: completed / active.length),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            AppStatusRing.fromCounts(
+              done: completed,
+              total: active.length,
+              semanticLabel: completed == active.length
+                  ? 'Complete'
+                  : completed == 0
+                      ? 'Not started'
+                      : 'Partial',
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  progress,
+                  style: AppTypography.subheadline.copyWith(color: colors.ink),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        AppProgressBar(
+          value: completed / active.length,
+          semanticLabel: 'Checklist items checked',
+        ),
+        const SizedBox(height: 14),
         AppGroupedList(
           children: [
             for (final item in active)
@@ -190,7 +243,7 @@ class _PreDeliveryChecklistDialogState
             child: Text(
               saving ? 'Saving…' : feedback!.message,
               style: feedback?.error == true
-                  ? TextStyle(color: Theme.of(context).colorScheme.error)
+                  ? TextStyle(color: AppPalette.of(context).error)
                   : null,
             ),
           ),

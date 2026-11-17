@@ -44,64 +44,41 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
     final canFilter = !isAdmin && ref.watch(canViewAllDeliveriesProvider);
     final canAssignDeliveries = ref.watch(canAssignDeliveriesProvider);
     final showAllDeliveries = ref.watch(allDeliveriesProvider);
-    final connectivityAsync = ref.watch(connectivityStatusProvider);
-    final compactSegments = MediaQuery.sizeOf(context).width <= 360 ||
-        MediaQuery.textScalerOf(context).scale(16) > 20;
+    final connectivity = ref.watch(connectivityStatusProvider).valueOrNull;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Deliveries'),
+      extendBodyBehindAppBar: true,
+      appBar: AppNavBar(
+        showBack: false,
         actions: [
-          // Refresh connectivity button
-          connectivityAsync.when(
-            data: (status) {
-              final isOffline = status == ConnectivityStatus.offline;
-              return IconButton(
-                icon: _isRefreshing
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        isOffline ? Icons.wifi_off : Icons.refresh,
-                        color:
-                            isOffline ? AppTone.yellow.inkFor(context) : null,
+          if (connectivity != null)
+            _GlassNavButton(
+              label: connectivity == ConnectivityStatus.offline
+                  ? 'Reconnect to WiFi'
+                  : 'Refresh connection',
+              onPressed: _isRefreshing ? null : _refreshConnectivity,
+              child: _isRefreshing
+                  ? SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppPalette.of(context).ink,
                       ),
-                tooltip: isOffline ? 'Reconnect to WiFi' : 'Refresh connection',
-                onPressed: _isRefreshing ? null : () => _refreshConnectivity(),
-              );
-            },
-            loading: () => const SizedBox(width: 48),
-            error: (_, __) => const SizedBox(width: 48),
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_horiz),
-            tooltip: 'Delivery options',
-            onSelected: (value) {
-              if (value == 'subscribe') {
-                _showCalendarSubscriptionDialog();
-              } else if (value == 'manual_sync') {
-                _showCalendarSyncDialog(context);
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'subscribe',
-                child: Text('Subscribe to delivery calendar'),
-              ),
-              PopupMenuItem(
-                value: 'manual_sync',
-                child: Text('Sync external calendar (legacy)'),
-              ),
-            ],
-          ),
+                    )
+                  : Icon(
+                      connectivity == ConnectivityStatus.offline
+                          ? AppIcons.offline
+                          : AppIcons.retry,
+                      size: 20,
+                      color: AppPalette.of(context).ink,
+                    ),
+            ),
           if (canFilter)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.filter_list),
+            _GlassMenuButton<String>(
               tooltip: showAllDeliveries
                   ? 'Filter deliveries (all schools)'
                   : 'Filter deliveries (my schools)',
+              icon: AppIcons.filter,
               onSelected: (value) {
                 if (value == 'toggle_filter') {
                   ref.read(allDeliveriesProvider.notifier).state =
@@ -117,70 +94,118 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
                 ),
               ],
             ),
-        ],
-      ),
-      body: Column(
-        children: [
-          const ConnectivityIndicator(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppTokens.gutter,
-              6,
-              AppTokens.gutter,
-              4,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 660),
-              child: SegmentedButton<bool>(
-                expandedInsets: EdgeInsets.zero,
-                segments: [
-                  ButtonSegment(
-                    value: false,
-                    icon: compactSegments
-                        ? null
-                        : const Icon(Icons.today_outlined),
-                    label: const Text('Today', textAlign: TextAlign.center),
-                  ),
-                  ButtonSegment(
-                    value: true,
-                    icon: compactSegments
-                        ? null
-                        : const Icon(Icons.calendar_month_outlined),
-                    label: const Text('Calendar', textAlign: TextAlign.center),
-                  ),
-                ],
-                selected: {_showCalendar},
-                showSelectedIcon: false,
-                onSelectionChanged: (selection) {
-                  setState(() => _showCalendar = selection.single);
-                },
-              ),
-            ),
-          ),
-          Expanded(child: _buildDeliveries(isAdmin)),
-        ],
-      ),
-      floatingActionButton: canAssignDeliveries
-          ? FloatingActionButton(
+          if (canAssignDeliveries)
+            _GlassNavButton(
+              label: 'Add delivery',
               onPressed: () => context.push('/deliveries/add'),
-              tooltip: 'Add delivery',
-              child: const Icon(Icons.add),
-            )
-          : null,
+              child: Icon(AppIcons.add,
+                  size: 22, color: AppPalette.of(context).ink),
+            ),
+          _GlassMenuButton<String>(
+            tooltip: 'Delivery options',
+            icon: AppIcons.more,
+            onSelected: (value) {
+              if (value == 'subscribe') {
+                _showCalendarSubscriptionDialog();
+              } else if (value == 'manual_sync') {
+                _showCalendarSyncDialog(context);
+              }
+            },
+            itemBuilder: (context) => [
+              _menuItem(context, 'subscribe', AppIcons.calendar,
+                  'Subscribe to delivery calendar'),
+              _menuItem(context, 'manual_sync', AppIcons.retry,
+                  'Sync external calendar (legacy)'),
+            ],
+          ),
+        ],
+      ),
+      body: _buildDeliveries(isAdmin),
     );
   }
 
+  PopupMenuItem<String> _menuItem(
+          BuildContext context, String value, IconData icon, String label) =>
+      PopupMenuItem(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppPalette.of(context).ink),
+            const SizedBox(width: 12),
+            Flexible(child: Text(label)),
+          ],
+        ),
+      );
+
+  /// Large title, connection status and the Today / Calendar switcher; it
+  /// scrolls with the content.
+  Widget _header(String subtitle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppLargeTitle(title: 'Deliveries', subtitle: subtitle),
+        const SizedBox(height: 8),
+        const ConnectivityIndicator(),
+        const SizedBox(height: 12),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 660),
+            child: SegmentedButton<bool>(
+              expandedInsets: EdgeInsets.zero,
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  label: Text('Today', textAlign: TextAlign.center),
+                ),
+                ButtonSegment(
+                  value: true,
+                  label: Text('Calendar', textAlign: TextAlign.center),
+                ),
+              ],
+              selected: {_showCalendar},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) {
+                setState(() => _showCalendar = selection.single);
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// A staff-account state below the header.
+  Widget _message(String subtitle, Widget message) => CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: AppInsets.scroll(context),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                _header(subtitle),
+                const SizedBox(height: 24),
+                message,
+              ]),
+            ),
+          ),
+        ],
+      );
+
   Widget _buildDeliveries(bool isAdmin) {
+    final today = ref.watch(deliveryTodayProvider);
+    final dayLine = deliveryDayLabel(today);
     if (!isAdmin) {
       final staff = ref.watch(currentStaffProvider);
       if (staff.hasError) {
-        return Center(
-          child: DeliveryMessage(
-            icon: Icons.error_outline,
+        return _message(
+          dayLine,
+          DeliveryMessage(
+            icon: AppIcons.error,
             title: 'Couldn’t load your staff account',
-            action: TextButton(
+            action: AppSecondaryButton(
+              label: 'Retry',
+              icon: AppIcons.retry,
+              expand: false,
               onPressed: () => ref.invalidate(currentStaffProvider),
-              child: const Text('Retry'),
             ),
           ),
         );
@@ -188,26 +213,31 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
       if (staff.isLoading && !staff.hasValue) {
         final isOffline = ref.watch(connectivityStatusProvider).valueOrNull ==
             ConnectivityStatus.offline;
-        return Center(
-          child: isOffline
+        return _message(
+          dayLine,
+          isOffline
               ? const DeliveryMessage(
-                  icon: Icons.cloud_off_outlined,
+                  icon: AppIcons.offline,
                   title: 'Checking your saved staff account',
                   description:
                       'A connection may be needed to load your deliveries.',
                 )
-              : const CircularProgressIndicator(),
+              : const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
         );
       }
       if (staff.valueOrNull == null) {
-        return Center(
-          child: DeliveryMessage(
-            icon: Icons.link_off,
+        return _message(
+          dayLine,
+          DeliveryMessage(
+            icon: AppIcons.person,
             title: 'Link your staff account',
             description: 'A linked staff account is needed to view deliveries.',
-            action: FilledButton(
+            action: AppPrimaryButton(
+              label: 'Link account',
               onPressed: () => context.push('/staff-link'),
-              child: const Text('Link account'),
             ),
           ),
         );
@@ -216,6 +246,7 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
 
     if (_showCalendar) {
       return DeliveriesCalendarView(
+        header: _header(dayLine),
         firstDay: _calendarFirstDay,
         lastDay: _calendarLastDay,
         focusedDay: _focusedDay,
@@ -232,10 +263,14 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
       );
     }
 
-    final today = ref.watch(deliveryTodayProvider);
+    final deliveries = ref.watch(todayDeliveriesProvider);
+    final count = deliveries.asData?.value.length;
     return DeliveryDayList(
+      header: _header(
+        count == null ? dayLine : '$dayLine · ${deliveryVisitCount(count)}',
+      ),
       date: today,
-      deliveries: ref.watch(todayDeliveriesProvider),
+      deliveries: deliveries,
       onRetry: () => ref.invalidate(todayDeliveriesProvider),
     );
   }
@@ -263,7 +298,7 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
             content: Row(
               children: [
                 Icon(
-                  isOnline ? Icons.wifi : Icons.wifi_off,
+                  isOnline ? AppIcons.online : AppIcons.offline,
                   color: AppPalette.of(context).canvas,
                   size: 20,
                 ),
@@ -285,7 +320,8 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.error_outline, size: 20),
+                Icon(AppIcons.error,
+                    size: 20, color: AppPalette.of(context).canvas),
                 const SizedBox(width: 12),
                 Expanded(child: Text('Error checking connection: $e')),
               ],
@@ -338,6 +374,74 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
   }
 }
 
+/// 44 pt glass nav button with a tooltip (the glass foundation button has a
+/// semantics label but no tooltip, and cannot show a spinner).
+class _GlassNavButton extends StatelessWidget {
+  const _GlassNavButton({
+    required this.label,
+    required this.onPressed,
+    required this.child,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: AppPressable(
+        onTap: onPressed,
+        semanticLabel: label,
+        excludeChildSemantics: true,
+        child: SizedBox.square(
+          dimension: AppTokens.navButtonSize,
+          child: AppGlass(
+            borderRadius: BorderRadius.circular(AppTokens.navButtonSize / 2),
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 44 pt glass nav button that opens a menu.
+class _GlassMenuButton<T> extends StatelessWidget {
+  const _GlassMenuButton({
+    required this.tooltip,
+    required this.icon,
+    required this.itemBuilder,
+    required this.onSelected,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final PopupMenuItemBuilder<T> itemBuilder;
+  final PopupMenuItemSelected<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<T>(
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      itemBuilder: itemBuilder,
+      onSelected: onSelected,
+      child: SizedBox.square(
+        dimension: AppTokens.navButtonSize,
+        child: AppGlass(
+          borderRadius: BorderRadius.circular(AppTokens.navButtonSize / 2),
+          child: Center(
+            child: Icon(icon, size: 20, color: AppPalette.of(context).ink),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CalendarSyncDialog extends ConsumerStatefulWidget {
   const _CalendarSyncDialog();
 
@@ -353,12 +457,15 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final muted = AppTypography.footnote.copyWith(color: colors.muted);
     return AlertDialog(
+      scrollable: true,
       title: const Row(
         children: [
-          Icon(Icons.calendar_month, size: 24),
+          AppIconTile(icon: AppIcons.calendar),
           SizedBox(width: 12),
-          Text('Sync to Apple Calendar'),
+          Expanded(child: Text('Sync to Apple Calendar')),
         ],
       ),
       content: _isSyncing
@@ -367,7 +474,8 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
               children: [
                 CircularProgressIndicator(),
                 SizedBox(height: 16),
-                Text('Syncing deliveries to your calendar...'),
+                Text('Syncing deliveries to your calendar...',
+                    textAlign: TextAlign.center),
               ],
             )
           : _resultMessage != null
@@ -375,11 +483,9 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      _isSuccess ?? false ? Icons.check_circle : Icons.error,
+                      _isSuccess ?? false ? AppIcons.complete : AppIcons.error,
                       size: 48,
-                      color: _isSuccess ?? false
-                          ? AppTone.green.inkFor(context)
-                          : Theme.of(context).colorScheme.error,
+                      color: _isSuccess ?? false ? colors.ink : colors.error,
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -392,21 +498,20 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'This will sync all your deliveries to Apple Calendar.',
-                      style: TextStyle(fontSize: 15),
+                      style:
+                          AppTypography.subheadline.copyWith(color: colors.ink),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       'A new calendar called "BTS Deliveries" will be created.',
-                      style: TextStyle(
-                          fontSize: 13, color: AppPalette.of(context).muted),
+                      style: muted,
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'You can view and manage these events in the Apple Calendar app.',
-                      style: TextStyle(
-                          fontSize: 13, color: AppPalette.of(context).muted),
+                      style: muted,
                     ),
                   ],
                 ),
@@ -426,7 +531,7 @@ class _CalendarSyncDialogState extends ConsumerState<_CalendarSyncDialog> {
                   ),
                   FilledButton(
                     onPressed: _syncToCalendar,
-                    child: const Text('Sync Now'),
+                    child: const Text('Sync now'),
                   ),
                 ],
     );

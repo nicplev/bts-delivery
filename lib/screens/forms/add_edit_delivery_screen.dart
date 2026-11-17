@@ -6,6 +6,7 @@ import '../../providers/schools_providers.dart';
 import '../../services/date_utils.dart';
 import '../../models/delivery.dart';
 import '../../models/school.dart';
+import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
 
 class AddEditDeliveryScreen extends ConsumerStatefulWidget {
@@ -31,6 +32,8 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
   bool _isLoading = false;
   String? _loadedDeliveryId;
 
+  String get _title => widget.isEditing ? 'Edit delivery' : 'Add delivery';
+
   @override
   void dispose() {
     _notesController.dispose();
@@ -40,9 +43,6 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
   void _loadDeliveryData(Delivery delivery, List<School> schools) {
     // Only load if we haven't loaded this specific delivery yet
     if (_loadedDeliveryId == delivery.id) return;
-
-    debugPrint(
-        'Loading delivery ${delivery.id} for school: ${delivery.schoolName}');
 
     setState(() {
       _loadedDeliveryId = delivery.id;
@@ -77,52 +77,33 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
 
       // Show loading or error states
       return deliveryAsync.when(
-        loading: () => Scaffold(
-          appBar: AppBar(
-            title: const Text('Edit Delivery'),
+        loading: () => _stateScaffold(
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
           ),
-          body: const Center(child: CircularProgressIndicator()),
         ),
-        error: (error, _) => Scaffold(
-          appBar: AppBar(
-            title: const Text('Edit Delivery'),
-          ),
-          body: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline,
-                    size: 64, color: Theme.of(context).colorScheme.error),
-                const SizedBox(height: 16),
-                Text('Error loading delivery: $error'),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () => context.pop(),
-                  child: const Text('Go Back'),
-                ),
-              ],
+        error: (error, _) => _stateScaffold(
+          DeliveryMessage(
+            icon: AppIcons.error,
+            title: 'Error loading delivery: $error',
+            action: AppSecondaryButton(
+              label: 'Go back',
+              expand: false,
+              onPressed: () => context.pop(),
             ),
           ),
         ),
         data: (delivery) {
           if (delivery == null) {
-            return Scaffold(
-              appBar: AppBar(
-                title: const Text('Edit Delivery'),
-              ),
-              body: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.search_off, size: 64),
-                    const SizedBox(height: 16),
-                    const Text('Delivery not found'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => context.pop(),
-                      child: const Text('Go Back'),
-                    ),
-                  ],
+            return _stateScaffold(
+              DeliveryMessage(
+                icon: AppIcons.search,
+                title: 'Delivery not found',
+                action: AppSecondaryButton(
+                  label: 'Go back',
+                  expand: false,
+                  onPressed: () => context.pop(),
                 ),
               ),
             );
@@ -142,129 +123,154 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
     return _buildForm(context, schoolsAsync);
   }
 
+  /// Loading / error / not-found states under the same chrome as the form.
+  Widget _stateScaffold(Widget content) => Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: const AppNavBar(),
+        body: Builder(
+          builder: (context) => ListView(
+            padding: AppInsets.scroll(context),
+            children: [
+              AppLargeTitle(title: _title),
+              const SizedBox(height: AppTokens.sectionGap - 8),
+              content,
+            ],
+          ),
+        ),
+      );
+
   Widget _buildForm(
       BuildContext context, AsyncValue<List<School>> schoolsAsync) {
+    final colors = AppPalette.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isEditing ? 'Edit Delivery' : 'Add Delivery'),
-      ),
-      body: SafeArea(
-        top: false,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(
-              AppTokens.gutter,
-              10,
-              AppTokens.gutter,
-              AppTokens.sectionGap,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _formSection(
-                  'School',
-                  schoolsAsync.when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, _) => Text('Error loading schools: $error'),
-                    data: (schools) => DropdownButtonFormField<School>(
-                      initialValue: _selectedSchool,
-                      decoration:
-                          const InputDecoration(hintText: 'Select a school'),
-                      borderRadius:
-                          BorderRadius.circular(AppTokens.controlRadius),
-                      dropdownColor: AppPalette.of(context).surface,
-                      icon: const Icon(Icons.expand_more),
-                      itemHeight: null,
-                      isExpanded: true,
-                      items: [
-                        for (final school in schools)
-                          DropdownMenuItem(
-                            value: school,
-                            child: _menuLabel(school.name),
-                          ),
+      extendBodyBehindAppBar: true,
+      appBar: const AppNavBar(),
+      body: AppFloatingActionArea(
+        action: AppGlassPrimaryButton(
+          label: 'Save delivery',
+          loading: _isLoading,
+          onPressed: _saveDelivery,
+        ),
+        child: Builder(
+          builder: (context) => Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              padding: AppInsets.scroll(context),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AppLargeTitle(
+                    title: _title,
+                    subtitle: _selectedSchool?.name,
+                  ),
+                  _section(
+                    'School',
+                    AppPanel(
+                      child: schoolsAsync.when(
+                        loading: () =>
+                            const Center(child: CircularProgressIndicator()),
+                        error: (error, _) => Text(
+                          'Error loading schools: $error',
+                          style: AppTypography.subheadline
+                              .copyWith(color: colors.error),
+                        ),
+                        data: (schools) => DropdownButtonFormField<School>(
+                          initialValue: _selectedSchool,
+                          decoration: const InputDecoration(
+                              hintText: 'Select a school'),
+                          borderRadius:
+                              BorderRadius.circular(AppTokens.controlRadius),
+                          dropdownColor: colors.surface,
+                          icon:
+                              Icon(AppIcons.chevronDown, color: colors.chevron),
+                          itemHeight: null,
+                          isExpanded: true,
+                          items: [
+                            for (final school in schools)
+                              DropdownMenuItem(
+                                value: school,
+                                child: _menuLabel(school.name),
+                              ),
+                          ],
+                          validator: (value) =>
+                              value == null ? 'Please select a school' : null,
+                          onChanged: (school) =>
+                              setState(() => _selectedSchool = school),
+                        ),
+                      ),
+                    ),
+                  ),
+                  _section(
+                    'Schedule',
+                    AppGroupedList(
+                      separatorIndent: 57,
+                      children: [
+                        AppListRow(
+                          icon: AppIcons.calendar,
+                          title: 'Date',
+                          subtitle: DateTimeUtils.formatDate(_selectedDate),
+                          onTap: _selectDate,
+                        ),
+                        AppListRow(
+                          icon: AppIcons.timer,
+                          title: 'Time (optional)',
+                          subtitle: _selectedTime?.format(context) ??
+                              'No time selected',
+                          showChevron: _selectedTime == null,
+                          trailing: _selectedTime == null
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear selected time',
+                                  icon: Icon(AppIcons.close,
+                                      size: 20, color: colors.muted),
+                                  onPressed: () =>
+                                      setState(() => _selectedTime = null),
+                                ),
+                          onTap: _selectTime,
+                        ),
                       ],
-                      validator: (value) =>
-                          value == null ? 'Please select a school' : null,
-                      onChanged: (school) =>
-                          setState(() => _selectedSchool = school),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                const AppSectionHeading(title: 'Schedule'),
-                const SizedBox(height: 8),
-                AppGroupedList(
-                  children: [
-                    ListTile(
-                      leading: const AppIconTile(
-                          icon: Icons.calendar_today_outlined),
-                      title: const Text('Date'),
-                      subtitle: Text(DateTimeUtils.formatDate(_selectedDate)),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _selectDate,
+                  _section(
+                    'Load',
+                    AppPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _fieldLabel('Vehicles required'),
+                          _countField(
+                            value: _selectedVehicleCount,
+                            count: 10,
+                            label: 'vehicle',
+                            onChanged: (value) =>
+                                setState(() => _selectedVehicleCount = value),
+                          ),
+                          const SizedBox(height: 14),
+                          _fieldLabel('Pallets'),
+                          _countField(
+                            value: _selectedPalletCount,
+                            count: 20,
+                            label: 'pallet',
+                            onChanged: (value) =>
+                                setState(() => _selectedPalletCount = value),
+                          ),
+                        ],
+                      ),
                     ),
-                    ListTile(
-                      leading: const AppIconTile(icon: Icons.schedule_outlined),
-                      title: const Text('Time (Optional)'),
-                      subtitle: Text(
-                          _selectedTime?.format(context) ?? 'No time selected'),
-                      trailing: _selectedTime == null
-                          ? const Icon(Icons.chevron_right)
-                          : IconButton(
-                              tooltip: 'Clear selected time',
-                              icon: const Icon(Icons.close),
-                              onPressed: () =>
-                                  setState(() => _selectedTime = null),
-                            ),
-                      onTap: _selectTime,
+                  ),
+                  _section(
+                    'Notes',
+                    AppPanel(
+                      child: TextFormField(
+                        controller: _notesController,
+                        decoration: const InputDecoration(
+                            hintText: 'Optional delivery notes...'),
+                        maxLines: 3,
+                      ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _formSection(
-                  'Vehicles Required',
-                  _countField(
-                    value: _selectedVehicleCount,
-                    count: 10,
-                    label: 'vehicle',
-                    onChanged: (value) =>
-                        setState(() => _selectedVehicleCount = value),
                   ),
-                ),
-                const SizedBox(height: 12),
-                _formSection(
-                  'Pallets',
-                  _countField(
-                    value: _selectedPalletCount,
-                    count: 20,
-                    label: 'pallet',
-                    onChanged: (value) =>
-                        setState(() => _selectedPalletCount = value),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _formSection(
-                  'Notes',
-                  TextFormField(
-                    controller: _notesController,
-                    decoration: const InputDecoration(
-                        hintText: 'Optional delivery notes...'),
-                    maxLines: 3,
-                  ),
-                ),
-                const SizedBox(height: AppTokens.sectionGap),
-                FilledButton(
-                  onPressed: _isLoading ? null : _saveDelivery,
-                  child: _isLoading
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Save Delivery'),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -272,14 +278,27 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
     );
   }
 
-  Widget _formSection(String title, Widget child) => AppPanel(
+  /// A grouped form section: muted label above its card.
+  Widget _section(String label, Widget child) => Padding(
+        padding: const EdgeInsets.only(top: AppTokens.sectionGap - 4),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppSectionHeading(title: title),
-            const SizedBox(height: 10),
+            AppSectionLabel(label),
+            const SizedBox(height: 8),
             child,
           ],
+        ),
+      );
+
+  Widget _fieldLabel(String text) => Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 6),
+        child: Text(
+          text,
+          style: AppTypography.subheadline.copyWith(
+            color: AppPalette.of(context).ink,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       );
 
@@ -305,7 +324,7 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
         decoration: const InputDecoration(hintText: 'Optional'),
         borderRadius: BorderRadius.circular(AppTokens.controlRadius),
         dropdownColor: AppPalette.of(context).surface,
-        icon: const Icon(Icons.expand_more),
+        icon: Icon(AppIcons.chevronDown, color: AppPalette.of(context).chevron),
         itemHeight: null,
         isExpanded: true,
         items: [
@@ -388,9 +407,6 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
         palletCount: _selectedPalletCount,
         createdAt: DateTime.now(),
       );
-
-      debugPrint(
-          'Saving delivery for ${_selectedSchool!.name} on ${DateTimeUtils.formatDate(_selectedDate)}');
 
       final deliveriesNotifier = ref.read(deliveriesNotifierProvider.notifier);
       final success = widget.isEditing

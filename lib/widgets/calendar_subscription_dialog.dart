@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/staff.dart';
 import '../providers/calendar_sync_providers.dart';
-import '../app/theme/app_tokens.dart';
+import 'design/design.dart';
 
 /// Dialog for subscribing to calendar via webcal:// URL
 class CalendarSubscriptionDialog extends ConsumerStatefulWidget {
@@ -87,12 +87,12 @@ class _CalendarSubscriptionDialogState
       if (mounted) {
         // Show success message and close dialog
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle),
-                SizedBox(width: 12),
-                Expanded(
+                Icon(AppIcons.complete, color: AppPalette.of(context).canvas),
+                const SizedBox(width: 12),
+                const Expanded(
                   child: Text('Calendar subscription opened in Calendar app'),
                 ),
               ],
@@ -128,26 +128,32 @@ class _CalendarSubscriptionDialogState
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Regenerate Calendar Link?'),
-        content: const Text(
-          'This will create a new calendar subscription link and revoke the old one. '
-          'You will need to re-subscribe in your calendar app.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+      builder: (context) {
+        final colors = AppPalette.of(context);
+        return AlertDialog(
+          scrollable: true,
+          title: const Text('Regenerate calendar link?'),
+          content: const Text(
+            'This will create a new calendar subscription link and revoke the old one. '
+            'You will need to re-subscribe in your calendar app.',
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-                backgroundColor: AppTone.yellow.accent,
-                foregroundColor: AppPalette.of(context).actionInk),
-            child: const Text('Regenerate'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            // Revokes the current link: a destructive action.
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.error,
+                foregroundColor: colors.onError,
+              ),
+              child: const Text('Regenerate'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirmed != true) return;
@@ -191,12 +197,15 @@ class _CalendarSubscriptionDialogState
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final body = AppTypography.subheadline.copyWith(color: colors.ink);
+    final muted = AppTypography.footnote.copyWith(color: colors.muted);
     return AlertDialog(
       title: const Row(
         children: [
-          Icon(Icons.calendar_month, size: 24),
+          AppIconTile(icon: AppIcons.calendar),
           SizedBox(width: 12),
-          Text('Subscribe to Calendar'),
+          Expanded(child: Text('Subscribe to calendar')),
         ],
       ),
       content: SingleChildScrollView(
@@ -211,185 +220,130 @@ class _CalendarSubscriptionDialogState
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 16),
-                    Text('Loading calendar subscription...'),
+                    Text('Loading calendar subscription...',
+                        textAlign: TextAlign.center),
                   ],
                 ),
               ),
             ] else if (_errorMessage != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.error_outline,
-                        color: Theme.of(context).colorScheme.onErrorContainer),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.onErrorContainer),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _ErrorBox(message: _errorMessage!),
               const SizedBox(height: 16),
               Center(
-                child: TextButton.icon(
+                child: AppSecondaryButton(
                   onPressed: _loadSubscriptionUrl,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Retry'),
+                  icon: AppIcons.retry,
+                  label: 'Retry',
+                  expand: false,
+                  large: false,
                 ),
               ),
             ] else if (_subscriptionUrl != null) ...[
-              const Text(
+              Text(
                 'Subscribe to automatically sync your deliveries to your calendar app.',
-                style: TextStyle(fontSize: 15),
+                style: body,
               ),
               const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
+              DecoratedBox(
                 decoration: BoxDecoration(
-                  color: AppTone.blue.tintFor(context),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppPalette.of(context).outline),
+                  color: colors.surfaceQuiet,
+                  borderRadius: BorderRadius.circular(AppTokens.controlRadius),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.info_outline,
-                            color: AppTone.blue.inkFor(context), size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Auto-updates every hour',
-                            style: TextStyle(
-                              color: AppTone.blue.inkFor(context),
-                              fontWeight: FontWeight.w500,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(AppIcons.info, color: colors.muted, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Auto-updates every hour',
+                              style: body.copyWith(fontWeight: FontWeight.w600),
                             ),
-                          ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Your calendar will automatically update when deliveries are added or changed.',
+                              style: muted,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Your calendar will automatically update when deliveries are added or changed.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppTone.blue.inkFor(context),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 24),
-              const Text(
-                'How to subscribe:',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              const SizedBox(height: 20),
+              Semantics(
+                header: true,
+                child: Text(
+                  'How to subscribe:',
+                  style: AppTypography.headline.copyWith(color: colors.ink),
+                ),
               ),
               const SizedBox(height: 12),
-              _buildInstructionStep(
-                '1',
-                'Tap "Subscribe Now" below',
-              ),
+              _buildInstructionStep('1', 'Tap "Subscribe now" below'),
               const SizedBox(height: 8),
-              _buildInstructionStep(
-                '2',
-                'Calendar app will open',
-              ),
+              _buildInstructionStep('2', 'Calendar app will open'),
               const SizedBox(height: 8),
-              _buildInstructionStep(
-                '3',
-                'Tap "Subscribe" to confirm',
-              ),
+              _buildInstructionStep('3', 'Tap "Subscribe" to confirm'),
               const SizedBox(height: 8),
-              _buildInstructionStep(
-                '4',
-                'Done! Updates happen automatically',
-              ),
-              const SizedBox(height: 24),
+              _buildInstructionStep('4', 'Done! Updates happen automatically'),
+              const SizedBox(height: 16),
               // Advanced options
-              InkWell(
+              AppPressable(
                 onTap: () {
                   setState(() {
                     _showAdvancedOptions = !_showAdvancedOptions;
                   });
                 },
-                child: Row(
-                  children: [
-                    Icon(
-                      _showAdvancedOptions
-                          ? Icons.expand_less
-                          : Icons.expand_more,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Advanced options',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (_showAdvancedOptions) ...[
-                const SizedBox(height: 16),
-                const Text(
-                  'Calendar URL:',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).surfaceQuiet,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppPalette.of(context).outline),
-                  ),
+                child: ConstrainedBox(
+                  constraints:
+                      const BoxConstraints(minHeight: AppTokens.minTouchTarget),
                   child: Row(
                     children: [
+                      Icon(
+                        _showAdvancedOptions
+                            ? HeroiconsMini.chevronUp
+                            : AppIcons.chevronDown,
+                        size: 20,
+                        color: colors.muted,
+                      ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _httpsUrl ?? _subscriptionUrl!,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontFamily: 'monospace',
+                          'Advanced options',
+                          style: AppTypography.footnote.copyWith(
+                            color: colors.ink,
+                            fontWeight: FontWeight.w600,
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.copy, size: 18),
-                        onPressed: () =>
-                            _copyUrlToClipboard(_httpsUrl ?? _subscriptionUrl!),
-                        tooltip: 'Copy URL',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
                       ),
                     ],
                   ),
                 ),
+              ),
+              if (_showAdvancedOptions) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Calendar URL:',
+                  style: AppTypography.footnote.copyWith(
+                      color: colors.muted, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                _UrlBox(
+                  url: _httpsUrl ?? _subscriptionUrl!,
+                  onCopy: () =>
+                      _copyUrlToClipboard(_httpsUrl ?? _subscriptionUrl!),
+                ),
                 const SizedBox(height: 12),
-                TextButton.icon(
+                AppSecondaryButton(
                   onPressed: _regenerateToken,
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('Regenerate link'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppTone.yellow.inkFor(context),
-                  ),
+                  icon: AppIcons.retry,
+                  label: 'Regenerate link',
+                  large: false,
                 ),
               ],
             ],
@@ -410,14 +364,15 @@ class _CalendarSubscriptionDialogState
               ),
               FilledButton.icon(
                 onPressed: _subscribeToCalendar,
-                icon: const Icon(Icons.calendar_today, size: 18),
-                label: const Text('Subscribe Now'),
+                icon: const Icon(AppIcons.calendar, size: 18),
+                label: const Text('Subscribe now'),
               ),
             ],
     );
   }
 
   Widget _buildInstructionStep(String number, String text) {
+    final colors = AppPalette.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -425,16 +380,16 @@ class _CalendarSubscriptionDialogState
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: AppTone.blue.tintFor(context),
+            color: colors.surfaceQuiet,
             shape: BoxShape.circle,
           ),
           child: Center(
             child: Text(
               number,
-              style: TextStyle(
-                color: AppTone.blue.inkFor(context),
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
+              style: AppTypography.footnote.copyWith(
+                color: colors.ink,
+                fontWeight: FontWeight.w700,
+                height: 1,
               ),
             ),
           ),
@@ -445,11 +400,92 @@ class _CalendarSubscriptionDialogState
             padding: const EdgeInsets.only(top: 2),
             child: Text(
               text,
-              style: const TextStyle(fontSize: 14),
+              style: AppTypography.subheadline.copyWith(color: colors.ink),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Error tokens box for a failed load or action.
+class _ErrorBox extends StatelessWidget {
+  const _ErrorBox({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.errorContainer,
+          borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(AppIcons.error, color: colors.error, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style:
+                      AppTypography.subheadline.copyWith(color: colors.error),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Monospace URL on a grey tile with a copy button.
+class _UrlBox extends StatelessWidget {
+  const _UrlBox({required this.url, required this.onCopy});
+
+  final String url;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceQuiet,
+        borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                url,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: colors.ink,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(HeroiconsOutline.documentDuplicate, size: 20),
+              onPressed: onCopy,
+              tooltip: 'Copy URL',
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

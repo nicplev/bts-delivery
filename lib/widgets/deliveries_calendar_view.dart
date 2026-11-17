@@ -19,6 +19,7 @@ class DeliveriesCalendarView extends ConsumerWidget {
     required this.onDaySelected,
     required this.onPageChanged,
     required this.onFormatChanged,
+    this.header,
   });
 
   final DateTime firstDay;
@@ -29,6 +30,9 @@ class DeliveriesCalendarView extends ConsumerWidget {
   final void Function(DateTime selectedDay, DateTime focusedDay) onDaySelected;
   final ValueChanged<DateTime> onPageChanged;
   final ValueChanged<CalendarFormat> onFormatChanged;
+
+  /// Scrolls above the calendar (the screen's large title and switcher).
+  final Widget? header;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -54,23 +58,28 @@ class DeliveriesCalendarView extends ConsumerWidget {
 
     final selectionVisible = includesDeliveryDate(range, selectedDay);
     final displayedDay = selectionVisible ? selectedDay : focusedDay;
-    final compactHeader = MediaQuery.sizeOf(context).width <= 360 ||
-        MediaQuery.textScalerOf(context).scale(12) > 17;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final compactHeader =
+        MediaQuery.sizeOf(context).width <= 360 || textScaler.scale(12) > 17;
+    final colors = AppPalette.of(context);
     const formats = {
       CalendarFormat.month: 'Month',
       CalendarFormat.twoWeeks: '2 weeks',
       CalendarFormat.week: 'Week',
     };
+    final dayText = AppTypography.body.copyWith(color: colors.ink);
+    final weekdayText = AppTypography.footnote
+        .copyWith(color: colors.muted, fontWeight: FontWeight.w600);
+    const circle = BoxDecoration(shape: BoxShape.circle);
 
     return DeliveryDayList(
+      header: header,
       date: displayedDay,
       deliveries: deliveries.whenData(
         (_) => [...deliveriesOn(displayedDay)]..sort(compareDeliveryTimes),
       ),
       onRetry: () => ref.invalidate(provider),
       calendar: AppPanel(
-        margin:
-            const EdgeInsets.fromLTRB(AppTokens.gutter, 8, AppTokens.gutter, 0),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Column(
           children: [
@@ -87,54 +96,46 @@ class DeliveriesCalendarView extends ConsumerWidget {
               onFormatChanged: onFormatChanged,
               eventLoader: deliveriesOn,
               pageAnimationEnabled: !MediaQuery.disableAnimationsOf(context),
+              daysOfWeekHeight: textScaler.scale(18) + 4,
               calendarStyle: CalendarStyle(
                 outsideDaysVisible: false,
-                defaultTextStyle: TextStyle(color: AppPalette.of(context).ink),
-                weekendTextStyle:
-                    TextStyle(color: AppPalette.of(context).muted),
-                selectedDecoration: BoxDecoration(
-                  color: AppTone.blue.accent,
-                  shape: BoxShape.circle,
+                defaultTextStyle: dayText,
+                weekendTextStyle: dayText,
+                disabledTextStyle: dayText.copyWith(color: colors.inactive),
+                selectedDecoration: circle.copyWith(color: colors.action),
+                selectedTextStyle: dayText.copyWith(
+                  color: colors.onAction,
+                  fontWeight: FontWeight.w600,
                 ),
-                selectedTextStyle: TextStyle(
-                  color: AppPalette.of(context).actionInk,
-                  fontWeight: FontWeight.w700,
+                todayDecoration: circle.copyWith(
+                  border: Border.all(color: colors.ink, width: 1.5),
                 ),
-                todayDecoration: BoxDecoration(
-                  color: AppTone.green.tintFor(context),
-                  shape: BoxShape.circle,
-                ),
-                todayTextStyle: TextStyle(
-                  color: AppTone.green.inkFor(context),
-                  fontWeight: FontWeight.w700,
-                ),
+                todayTextStyle: dayText.copyWith(fontWeight: FontWeight.w600),
               ),
               daysOfWeekStyle: DaysOfWeekStyle(
-                weekdayStyle: TextStyle(
-                    color: AppPalette.of(context).muted,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11),
-                weekendStyle: TextStyle(
-                    color: AppPalette.of(context).muted,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11),
+                weekdayStyle: weekdayText,
+                weekendStyle: weekdayText,
               ),
               headerStyle: HeaderStyle(
                 titleCentered: true,
                 formatButtonVisible: !compactHeader,
                 formatButtonShowsNext: false,
-                leftChevronPadding: const EdgeInsets.all(10),
-                rightChevronPadding: const EdgeInsets.all(10),
+                leftChevronIcon: Icon(HeroiconsOutline.chevronLeft,
+                    size: 20, color: colors.ink, semanticLabel: 'Previous'),
+                rightChevronIcon: Icon(HeroiconsOutline.chevronRight,
+                    size: 20, color: colors.ink, semanticLabel: 'Next'),
+                leftChevronPadding: const EdgeInsets.all(12),
+                rightChevronPadding: const EdgeInsets.all(12),
                 leftChevronMargin: EdgeInsets.zero,
                 rightChevronMargin: EdgeInsets.zero,
-                titleTextStyle: Theme.of(context).textTheme.titleMedium!,
-                formatButtonTextStyle: TextStyle(
-                  color: AppTone.blue.inkFor(context),
-                  fontSize: 12,
+                titleTextStyle:
+                    AppTypography.headline.copyWith(color: colors.ink),
+                formatButtonTextStyle: AppTypography.footnote.copyWith(
+                  color: colors.ink,
                   fontWeight: FontWeight.w600,
                 ),
                 formatButtonDecoration: BoxDecoration(
-                  color: AppTone.blue.tintFor(context),
+                  color: colors.fill,
                   borderRadius: BorderRadius.circular(AppTokens.pillRadius),
                 ),
               ),
@@ -142,11 +143,8 @@ class DeliveriesCalendarView extends ConsumerWidget {
                 markerBuilder: (context, day, events) {
                   if (events.isEmpty) return null;
                   return Positioned(
-                    bottom: 1,
-                    child: Badge(
-                      label:
-                          Text(events.length > 9 ? '9+' : '${events.length}'),
-                    ),
+                    bottom: 3,
+                    child: _DeliveryDots(count: events.length),
                   );
                 },
               ),
@@ -170,8 +168,7 @@ class DeliveriesCalendarView extends ConsumerWidget {
                       heightFactor: 1,
                       child: AppStatusPill(
                         label: formats[format]!,
-                        icon: Icons.expand_more,
-                        tone: AppTone.blue,
+                        icon: AppIcons.chevronDown,
                       ),
                     ),
                   ),
@@ -179,6 +176,33 @@ class DeliveriesCalendarView extends ConsumerWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Up to three small ink dots under a day that has deliveries.
+class _DeliveryDots extends StatelessWidget {
+  const _DeliveryDots({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = AppPalette.of(context).ink;
+    return Semantics(
+      label: '$count ${count == 1 ? 'delivery' : 'deliveries'}',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < (count > 3 ? 3 : count); i++)
+            Container(
+              width: 5,
+              height: 5,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              decoration: BoxDecoration(color: ink, shape: BoxShape.circle),
+            ),
+        ],
       ),
     );
   }

@@ -186,9 +186,10 @@ void main() {
     Future<void> openRoom(DeliveryVisit visit) async {
       router.go('/home');
       await tester.pumpAndSettle();
-      final openSchool = find
-          .widgetWithText(FilledButton, 'Open school')
-          .at(visit.deliveryId == 'first' ? 0 : 1);
+      // The next visit opens from its card; later visits are rows.
+      final openSchool = visit.deliveryId == 'first'
+          ? find.widgetWithText(FilledButton, 'Open visit')
+          : find.byKey(ValueKey(visit.deliveryId));
       await tester.ensureVisible(openSchool);
       await tester.pumpAndSettle();
       await tester.tap(openSchool);
@@ -344,7 +345,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final open = find.text('Open school');
+    final open = find.text('Open visit');
     await tester.dragUntilVisible(
       open,
       find.byType(CustomScrollView).first,

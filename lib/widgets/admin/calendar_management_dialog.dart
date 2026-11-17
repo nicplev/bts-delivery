@@ -47,6 +47,21 @@ class _CalendarManagementDialogState
     });
   }
 
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(AppIcons.complete, color: AppPalette.of(context).canvas),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Future<void> _generateToken() async {
     setState(() {
       _isLoading = true;
@@ -77,18 +92,7 @@ class _CalendarManagementDialogState
           _subscriptionUrl = url;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle),
-                SizedBox(width: 12),
-                Text('Calendar subscription created successfully'),
-              ],
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _showSuccess('Calendar subscription created successfully');
       }
     } catch (e) {
       if (mounted) {
@@ -104,58 +108,43 @@ class _CalendarManagementDialogState
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        scrollable: true,
-        title: const Text('Regenerate Calendar Link?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'This will create a new calendar subscription link and revoke the old one.',
+      builder: (context) {
+        final colors = AppPalette.of(context);
+        return AlertDialog(
+          scrollable: true,
+          title: const Text('Regenerate calendar link?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This will create a new calendar subscription link and revoke the old one.',
+              ),
+              const SizedBox(height: 16),
+              AppNotice(
+                icon: AppIcons.infoOutline,
+                message:
+                    '${widget.staff.name} will need to re-subscribe in their calendar app.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTone.yellow.tintFor(context),
-                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-                border: Border.all(color: AppPalette.of(context).outline),
+            // Revokes the current link: a destructive action.
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.error,
+                foregroundColor: colors.onError,
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.warning_amber,
-                      color: AppTone.yellow.inkFor(context)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '${widget.staff.name} will need to re-subscribe in their calendar app.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppTone.yellow.inkFor(context),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              child: const Text('Regenerate'),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTone.yellow.accent,
-              foregroundColor: AppPalette.of(context).actionInk,
-            ),
-            child: const Text('Regenerate'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirmed != true) return;
@@ -189,18 +178,7 @@ class _CalendarManagementDialogState
           _subscriptionUrl = url;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle),
-                SizedBox(width: 12),
-                Text('Calendar link regenerated successfully'),
-              ],
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _showSuccess('Calendar link regenerated successfully');
       }
     } catch (e) {
       if (mounted) {
@@ -231,22 +209,22 @@ class _CalendarManagementDialogState
   @override
   Widget build(BuildContext context) {
     final metadataAsync = ref.watch(calendarMetadataProvider(widget.staff.id));
+    final colors = AppPalette.of(context);
 
     return AlertDialog(
       title: Row(
         children: [
-          const AppIconTile(icon: Icons.calendar_month_outlined),
+          const AppIconTile(icon: AppIcons.calendar),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Calendar Management'),
+                const Text('Calendar management'),
                 Text(
                   widget.staff.name,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppPalette.of(context).muted,
-                      ),
+                  style:
+                      AppTypography.subheadline.copyWith(color: colors.muted),
                 ),
               ],
             ),
@@ -271,27 +249,31 @@ class _CalendarManagementDialogState
                   ),
                 ),
               ] else if (_errorMessage != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTone.pink.tintFor(context),
-                    borderRadius:
-                        BorderRadius.circular(AppTokens.controlRadius),
-                    border: Border.all(color: AppPalette.of(context).outline),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.error_outline,
-                          color: AppTone.pink.inkFor(context)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: TextStyle(color: AppTone.pink.inkFor(context)),
-                        ),
+                Semantics(
+                  liveRegion: true,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colors.errorContainer,
+                      borderRadius:
+                          BorderRadius.circular(AppTokens.controlRadius),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(AppIcons.error, color: colors.error, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: AppTypography.subheadline
+                                  .copyWith(color: colors.error),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -324,156 +306,49 @@ class _CalendarManagementDialogState
               if (_subscriptionUrl == null)
                 FilledButton.icon(
                   onPressed: widget.staff.isLinked ? _generateToken : null,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Generate Link'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTone.blue.accent,
-                    foregroundColor: AppPalette.of(context).actionInk,
-                  ),
+                  icon: const Icon(AppIcons.add, size: 18),
+                  label: const Text('Generate link'),
                 )
               else
                 FilledButton.icon(
                   onPressed: _regenerateToken,
-                  icon: const Icon(Icons.refresh, size: 18),
+                  icon: const Icon(AppIcons.retry, size: 18),
                   label: const Text('Regenerate'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTone.yellow.accent,
-                    foregroundColor: AppPalette.of(context).actionInk,
-                  ),
                 ),
             ],
     );
   }
 
-  Widget _buildStatusSection(AsyncValue<CalendarMetadata?> metadataAsync) {
-    if (_subscriptionUrl == null) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppPalette.of(context).surfaceQuiet,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppPalette.of(context).outline),
-        ),
+  /// Neutral status tile: icon, title and detail line.
+  Widget _statusTile({
+    required Widget icon,
+    required String title,
+    required String detail,
+  }) {
+    final colors = AppPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceQuiet,
+        borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            Icon(Icons.calendar_month_outlined,
-                color: AppPalette.of(context).muted, size: 32),
-            const SizedBox(width: 16),
+            icon,
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'No Calendar Subscription',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                      color: AppPalette.of(context).ink,
-                    ),
+                    title,
+                    style: AppTypography.headline.copyWith(color: colors.ink),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
-                    'Generate a link to enable calendar sync',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppPalette.of(context).muted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return metadataAsync.when(
-      data: (metadata) {
-        final isActive = metadata?.isActive ?? false;
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isActive
-                ? AppTone.green.tintFor(context)
-                : AppTone.yellow.tintFor(context),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: AppPalette.of(context).outline,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isActive ? Icons.check_circle : Icons.schedule,
-                color: isActive
-                    ? AppTone.green.inkFor(context)
-                    : AppTone.yellow.inkFor(context),
-                size: 32,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isActive ? 'Calendar Active' : 'Calendar Inactive',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                        color: isActive
-                            ? AppTone.green.inkFor(context)
-                            : AppTone.yellow.inkFor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      metadata?.lastAccessedText ?? 'Never accessed',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isActive
-                            ? AppTone.green.inkFor(context)
-                            : AppTone.yellow.inkFor(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTone.green.tintFor(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppPalette.of(context).outline),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.calendar_month,
-                color: AppTone.green.inkFor(context), size: 32),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Calendar Active',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                      color: AppTone.green.inkFor(context),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Subscription link generated',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppTone.green.inkFor(context),
-                    ),
+                    detail,
+                    style: AppTypography.footnote.copyWith(color: colors.muted),
                   ),
                 ],
               ),
@@ -484,124 +359,127 @@ class _CalendarManagementDialogState
     );
   }
 
+  Widget _buildStatusSection(AsyncValue<CalendarMetadata?> metadataAsync) {
+    final colors = AppPalette.of(context);
+    if (_subscriptionUrl == null) {
+      return _statusTile(
+        icon: Icon(AppIcons.calendar, color: colors.muted, size: 28),
+        title: 'No calendar subscription',
+        detail: 'Generate a link to enable calendar sync',
+      );
+    }
+
+    return metadataAsync.when(
+      data: (metadata) {
+        final isActive = metadata?.isActive ?? false;
+        return _statusTile(
+          icon: isActive
+              ? const AppStatusRing(
+                  status: AppCompletion.complete,
+                  size: 28,
+                  semanticLabel: 'Active',
+                )
+              : Icon(AppIcons.paused, color: colors.muted, size: 28),
+          title: isActive ? 'Calendar active' : 'Calendar inactive',
+          detail: metadata?.lastAccessedText ?? 'Never accessed',
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => _statusTile(
+        icon: Icon(AppIcons.calendar, color: colors.ink, size: 28),
+        title: 'Calendar active',
+        detail: 'Subscription link generated',
+      ),
+    );
+  }
+
   Widget _buildUrlSection() {
+    final colors = AppPalette.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Subscription URL',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: AppPalette.of(context).ink,
-          ),
+          style: AppTypography.headline.copyWith(color: colors.ink),
         ),
         const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(12),
+        DecoratedBox(
           decoration: BoxDecoration(
-            color: AppTone.blue.tintFor(context),
+            color: colors.surfaceQuiet,
             borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-            border: Border.all(color: AppPalette.of(context).outline),
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _subscriptionUrl!,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontFamily: 'monospace',
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _subscriptionUrl!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: colors.ink,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.copy, size: 18),
-                onPressed: _copyUrl,
-                tooltip: 'Copy URL',
-                color: AppTone.blue.inkFor(context),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ],
+                IconButton(
+                  icon:
+                      const Icon(HeroiconsOutline.documentDuplicate, size: 20),
+                  onPressed: _copyUrl,
+                  tooltip: 'Copy URL',
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 8),
         Text(
           'Share this URL with ${widget.staff.name} to subscribe',
-          style: TextStyle(
-            fontSize: 12,
-            color: AppPalette.of(context).muted,
-            fontStyle: FontStyle.italic,
-          ),
+          style: AppTypography.footnote.copyWith(color: colors.muted),
         ),
       ],
     );
   }
 
   Widget _buildStatisticsSection(AsyncValue<CalendarMetadata?> metadataAsync) {
+    final colors = AppPalette.of(context);
     return metadataAsync.when(
       data: (metadata) {
         if (metadata == null) {
-          return Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppPalette.of(context).surfaceQuiet,
-              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-              border: Border.all(color: AppPalette.of(context).outline),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline,
-                    color: AppPalette.of(context).muted, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'No usage data yet',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppPalette.of(context).muted,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
+          return const AppNotice(message: 'No usage data yet');
         }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Usage Statistics',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: AppPalette.of(context).ink,
-              ),
+              'Usage statistics',
+              style: AppTypography.headline.copyWith(color: colors.ink),
             ),
             const SizedBox(height: 12),
             _buildStatRow(
-              'Total Accesses',
+              'Total accesses',
               metadata.accessCount.toString(),
-              Icons.visibility,
+              HeroiconsOutline.eye,
             ),
-            const Divider(height: 24),
+            Divider(height: 24, color: colors.separator),
             _buildStatRow(
-              'Last Accessed',
+              'Last accessed',
               metadata.lastAccessed != null
                   ? DateFormat('MMM d, y • h:mm a')
                       .format(metadata.lastAccessed!)
                   : 'Never',
-              Icons.access_time,
+              AppIcons.timer,
             ),
             if (metadata.lastDeliveryChange != null) ...[
-              const Divider(height: 24),
+              Divider(height: 24, color: colors.separator),
               _buildStatRow(
-                'Last Delivery Update',
+                'Last delivery update',
                 DateFormat('MMM d, y • h:mm a')
                     .format(metadata.lastDeliveryChange!),
-                Icons.update,
+                AppIcons.retry,
               ),
             ],
           ],
@@ -613,9 +491,10 @@ class _CalendarManagementDialogState
   }
 
   Widget _buildStatRow(String label, String value, IconData icon) {
+    final colors = AppPalette.of(context);
     return Row(
       children: [
-        Icon(icon, size: 18, color: AppTone.blue.inkFor(context)),
+        Icon(icon, size: 18, color: colors.muted),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -623,18 +502,13 @@ class _CalendarManagementDialogState
             children: [
               Text(
                 label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppPalette.of(context).muted,
-                ),
+                style: AppTypography.footnote.copyWith(color: colors.muted),
               ),
               const SizedBox(height: 2),
               Text(
                 value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
+                style: AppTypography.subheadline
+                    .copyWith(color: colors.ink, fontWeight: FontWeight.w600),
               ),
             ],
           ),

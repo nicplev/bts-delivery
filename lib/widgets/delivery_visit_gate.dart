@@ -7,6 +7,7 @@ import '../providers/delivery_visit_provider.dart';
 import '../providers/auth_providers.dart';
 import '../services/offline/connectivity_service.dart';
 import 'delivery_day_list.dart';
+import 'design/design.dart';
 
 class DeliveryVisitGate extends ConsumerWidget {
   const DeliveryVisitGate(
@@ -41,47 +42,62 @@ class DeliveryVisitGate extends ConsumerWidget {
         child: child,
       );
     }
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('School visit'),
-        leading: BackButton(onPressed: () {
-          if (context.canPop()) {
-            context.pop();
-          } else {
-            context.go('/home');
-          }
-        }),
+    final message = state.when(
+      skipLoadingOnRefresh: false,
+      loading: () => DeliveryMessage(
+        icon: online ? AppIcons.download : AppIcons.offline,
+        title: online
+            ? 'Preparing the school visit'
+            : 'Checking saved visit records',
+        description:
+            online ? 'Saving classroom information for offline access.' : null,
       ),
-      body: Center(
-        child: state.when(
-          skipLoadingOnRefresh: false,
-          loading: () => DeliveryMessage(
-            icon: online ? Icons.downloading : Icons.cloud_off_outlined,
-            title: online
-                ? 'Preparing the school visit'
-                : 'Checking saved visit records',
-            description: online
-                ? 'Saving classroom information for offline access.'
-                : null,
-          ),
-          error: (_, __) => DeliveryMessage(
-            icon: Icons.error_outline,
-            title: 'Couldn’t prepare this school visit',
-            description: 'Check your connection and try again.',
-            action: TextButton(
-                onPressed: () => ref.invalidate(provider),
-                child: const Text('Retry')),
-          ),
-          data: (_) => DeliveryMessage(
-            icon: Icons.cloud_off_outlined,
-            title: 'This visit isn’t available offline yet',
-            description:
-                'Connect and open the visit to save the classroom records on this device.',
-            action: TextButton(
-                onPressed: () => ref.invalidate(provider),
-                child: const Text('Retry')),
-          ),
+      error: (_, __) => DeliveryMessage(
+        icon: AppIcons.error,
+        title: 'Couldn’t prepare this school visit',
+        description: 'Check your connection and try again.',
+        action: AppSecondaryButton(
+          label: 'Retry',
+          icon: AppIcons.retry,
+          expand: false,
+          onPressed: () => ref.invalidate(provider),
         ),
+      ),
+      data: (_) => DeliveryMessage(
+        icon: AppIcons.offline,
+        title: 'This visit isn’t available offline yet',
+        description:
+            'Connect and open the visit to save the classroom records on this device.',
+        action: AppSecondaryButton(
+          label: 'Retry',
+          icon: AppIcons.retry,
+          expand: false,
+          onPressed: () => ref.invalidate(provider),
+        ),
+      ),
+    );
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppNavBar(
+        showBack: true,
+        onBack: () {
+          final router = GoRouter.maybeOf(context);
+          if (router == null) {
+            Navigator.maybePop(context);
+          } else if (router.canPop()) {
+            router.pop();
+          } else {
+            router.go('/home');
+          }
+        },
+      ),
+      body: ListView(
+        padding: AppInsets.scroll(context),
+        children: [
+          const AppLargeTitle(title: 'School visit'),
+          const SizedBox(height: AppTokens.sectionGap - 8),
+          message,
+        ],
       ),
     );
   }
