@@ -6,7 +6,6 @@ import '../providers/auth_providers.dart';
 import '../models/school.dart';
 import '../models/delivery_visit.dart';
 import '../providers/delivery_visit_provider.dart';
-import '../utils/year_level_colors.dart';
 import 'delivery_day_list.dart';
 import 'design/design.dart';
 

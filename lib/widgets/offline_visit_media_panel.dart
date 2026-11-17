@@ -46,6 +46,7 @@ class OfflineVisitMediaPanel extends ConsumerWidget {
       label: Text(label),
       onPressed: () => showModalBottomSheet<void>(
         context: context,
+        useRootNavigator: true,
         showDragHandle: true,
         useSafeArea: true,
         isScrollControlled: true,

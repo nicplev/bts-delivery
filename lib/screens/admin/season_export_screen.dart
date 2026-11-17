@@ -41,8 +41,8 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
         title: const Text('Season Report'),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(
-            AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap),
+        padding: EdgeInsets.fromLTRB(AppTokens.gutter, 10, AppTokens.gutter,
+            MediaQuery.paddingOf(context).bottom + AppTokens.sectionGap),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

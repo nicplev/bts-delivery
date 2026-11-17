@@ -59,11 +59,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 700),
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(
+                    padding: EdgeInsets.fromLTRB(
                       AppTokens.gutter,
                       8,
                       AppTokens.gutter,
-                      AppTokens.sectionGap,
+                      MediaQuery.paddingOf(context).bottom +
+                          AppTokens.sectionGap,
                     ),
                     children: [
                       _ProfileHeader(

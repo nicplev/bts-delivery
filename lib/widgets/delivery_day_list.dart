@@ -104,8 +104,11 @@ class DeliveryDayList extends ConsumerWidget {
                   );
                 }
                 return SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(
-                      AppTokens.gutter, 0, AppTokens.gutter, 88),
+                  padding: EdgeInsets.fromLTRB(
+                      AppTokens.gutter,
+                      0,
+                      AppTokens.gutter,
+                      MediaQuery.paddingOf(context).bottom + 88),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {

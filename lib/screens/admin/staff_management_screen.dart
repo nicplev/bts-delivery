@@ -118,8 +118,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.fromLTRB(
-                AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap),
+            padding: EdgeInsets.fromLTRB(AppTokens.gutter, 10, AppTokens.gutter,
+                MediaQuery.paddingOf(context).bottom + AppTokens.sectionGap),
             itemCount: staffList.length,
             itemBuilder: (context, index) {
               final staff = staffList[index];

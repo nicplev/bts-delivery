@@ -8,7 +8,6 @@ import '../../providers/delivery_visit_provider.dart';
 import '../../services/offline/field_draft_store.dart';
 import '../../widgets/field_draft_dialog.dart';
 import '../../utils/notification_utils.dart';
-import '../../utils/year_level_colors.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
 

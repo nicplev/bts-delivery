@@ -62,6 +62,7 @@ Future<void> _showSavedEdits(BuildContext context, String uid) async {
   final router = GoRouter.of(context);
   final location = await showModalBottomSheet<String>(
     context: context,
+    useRootNavigator: true,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,

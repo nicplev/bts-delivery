@@ -1,20 +1,120 @@
 import 'package:flutter/material.dart';
 
-import 'brand_colors.dart';
-
+/// Spacing, radii and sizes shared by every screen (390 × 844 pt reference).
 class AppTokens {
   AppTokens._();
 
-  static const gutter = 20.0;
+  /// Horizontal screen gutter.
+  static const gutter = 16.0;
+
+  /// Vertical gap between sections of a screen.
   static const sectionGap = 24.0;
-  static const cardRadius = 16.0;
+
+  /// Card / panel / grouped list corner radius.
+  static const cardRadius = 20.0;
+
+  /// Inner tiles, notices, inputs and other controls.
   static const controlRadius = 12.0;
+
+  /// Capsules (pills, buttons, tab bar).
   static const pillRadius = 999.0;
-  static const panelShadow = [
-    BoxShadow(color: Color(0x16000000), blurRadius: 16, offset: Offset(0, 5)),
+
+  /// Bottom corners of the year-coloured classroom header.
+  static const headerRadius = 28.0;
+
+  /// Glass modal sheet corner radius.
+  static const sheetRadius = 36.0;
+
+  /// Inset of a glass modal sheet from the screen edges.
+  static const sheetInset = 8.0;
+
+  /// Minimum touch target.
+  static const minTouchTarget = 44.0;
+
+  /// Glass navigation button (back / options) diameter.
+  static const navButtonSize = 44.0;
+
+  /// Height of a primary (full-width) action button.
+  static const primaryButtonHeight = 50.0;
+
+  /// Height of the floating glass tab bar capsule.
+  static const tabBarHeight = 62.0;
+
+  /// Gap between the floating action button and whatever is below it.
+  static const floatingActionGap = 12.0;
+
+  /// Backdrop blur sigma used by glass surfaces.
+  static const glassBlur = 20.0;
+
+  /// Very soft drop shadow under glass surfaces. Painted outside the shape
+  /// only, so it never darkens the translucent fill.
+  static const glassShadow = [
+    BoxShadow(
+      color: Color(0x1F000000),
+      blurRadius: 20,
+      offset: Offset(0, 4),
+      blurStyle: BlurStyle.outer,
+    ),
   ];
+
+  /// Legacy panel shadow; content cards no longer use a shadow.
+  static const panelShadow = glassShadow;
 }
 
+/// The spec type scale (SF on iOS). Colours come from the theme.
+class AppTypography {
+  AppTypography._();
+
+  /// Large title 34/41 bold (screen titles).
+  static const largeTitle = TextStyle(
+      fontSize: 34,
+      height: 41 / 34,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.4);
+
+  /// Title 2 22/28 bold (card titles such as a school name).
+  static const title2 = TextStyle(
+      fontSize: 22,
+      height: 28 / 22,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.26);
+
+  /// Title 3 20/25 semibold (sheet titles).
+  static const title3 = TextStyle(
+      fontSize: 20,
+      height: 25 / 20,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.45);
+
+  /// Headline 17/22 semibold.
+  static const headline = TextStyle(
+      fontSize: 17,
+      height: 22 / 17,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.43);
+
+  /// Body 17/22.
+  static const body =
+      TextStyle(fontSize: 17, height: 22 / 17, letterSpacing: -0.43);
+
+  /// Subheadline 15/20 (secondary lines, subtitles).
+  static const subheadline =
+      TextStyle(fontSize: 15, height: 20 / 15, letterSpacing: -0.23);
+
+  /// Footnote 13/18 (section labels when semibold, captions).
+  static const footnote =
+      TextStyle(fontSize: 13, height: 18 / 13, letterSpacing: -0.08);
+
+  /// Tab bar label 10/12 semibold.
+  static const tabLabel =
+      TextStyle(fontSize: 10, height: 1.2, fontWeight: FontWeight.w600);
+}
+
+/// Neutral colour tokens for light/dark × normal/high-contrast.
+///
+/// Colour is reserved for year levels (see `YearLevelColors`); everything here
+/// is neutral except [warningTint]/[warningInk] (amber, tint only) and the
+/// error tokens.
 @immutable
 class AppPalette extends ThemeExtension<AppPalette> {
   const AppPalette({this.dark = false, this.highContrast = false});
@@ -32,33 +132,122 @@ class AppPalette extends ThemeExtension<AppPalette> {
   }
 
   Brightness get brightness => dark ? Brightness.dark : Brightness.light;
-  Color get canvas => dark ? const Color(0xFF11161C) : const Color(0xFFF3F5F7);
-  Color get surface => dark ? const Color(0xFF20272E) : Colors.white;
-  Color get surfaceQuiet =>
-      dark ? const Color(0xFF2A333B) : const Color(0xFFEDF1F5);
 
-  Color get outline => switch ((dark, highContrast)) {
-        (true, true) => const Color(0xFF8897A5),
-        (true, false) => const Color(0xFF394552),
-        (false, true) => const Color(0xFF687683),
-        (false, false) => const Color(0xFFDCE2E8),
+  /// Screen background.
+  Color get canvas => dark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+
+  /// Cards and other opaque content.
+  Color get surface => dark ? const Color(0xFF1C1C1E) : Colors.white;
+
+  /// Opaque grey (the [fill] composited on [surface]): tiles, pills, tracks,
+  /// secondary buttons, input fills. Use this where a solid colour is needed.
+  Color get surfaceQuiet => switch ((dark, highContrast)) {
+        (true, true) => const Color(0xFF2C2C2E),
+        (true, false) => const Color(0xFF323235),
+        (false, true) => const Color(0xFFE5E5EA),
+        (false, false) => const Color(0xFFEFEFF0),
       };
 
+  /// Translucent grey fill from the spec (adapts to what is beneath it).
+  Color get fill => highContrast
+      ? surfaceQuiet
+      : dark
+          ? const Color(0x3D767680)
+          : const Color(0x1F767680);
+
+  /// Opaque hairline / border colour. Visible (≥3:1) in high contrast.
+  Color get outline => switch ((dark, highContrast)) {
+        (true, true) => const Color(0xFF8E8E93),
+        (true, false) => const Color(0xFF38383A),
+        (false, true) => const Color(0xFF6E6E73),
+        (false, false) => const Color(0xFFD1D1D6),
+      };
+
+  /// List separators (translucent in normal contrast).
+  Color get separator => highContrast
+      ? outline
+      : dark
+          ? const Color(0x24FFFFFF)
+          : const Color(0x1F000000);
+
+  /// Primary text and glyphs.
   Color get ink => switch ((dark, highContrast)) {
         (true, true) => Colors.white,
-        (true, false) => const Color(0xFFF5F7FA),
-        (false, true) => const Color(0xFF0B1218),
-        (false, false) => const Color(0xFF18212A),
+        (true, false) => const Color(0xFFF5F5F7),
+        (false, true) => Colors.black,
+        (false, false) => const Color(0xFF1A1A1A),
       };
 
+  /// Secondary text.
   Color get muted => switch ((dark, highContrast)) {
-        (true, true) => const Color(0xFFE0E7EE),
-        (true, false) => const Color(0xFFB7C1CB),
-        (false, true) => const Color(0xFF283440),
-        (false, false) => const Color(0xFF4B5965),
+        (true, true) => const Color(0xFFD1D1D6),
+        (true, false) => const Color(0xFFA1A1A6),
+        (false, true) => const Color(0xFF3A3D42),
+        (false, false) => const Color(0xFF5B6068),
       };
 
-  Color get actionInk => const Color(0xFF0B1611);
+  /// Disclosure chevrons.
+  Color get chevron => highContrast
+      ? muted
+      : dark
+          ? const Color(0xFF8E8E93)
+          : const Color(0xFF8A8F98);
+
+  /// Empty "not started" ring, grabbers and other inactive marks.
+  Color get inactive => highContrast ? muted : const Color(0xFF8E8E93);
+
+  /// Track behind a partial progress ring.
+  Color get ringTrack => highContrast
+      ? outline
+      : dark
+          ? const Color(0xFF3A3A3C)
+          : const Color(0xFFD1D1D6);
+
+  /// Primary action fill (ink; inverted in dark mode).
+  Color get action => ink;
+
+  /// Label on [action].
+  Color get onAction => switch ((dark, highContrast)) {
+        (true, true) => Colors.black,
+        (true, false) => const Color(0xFF1A1A1A),
+        (false, _) => Colors.white,
+      };
+
+  /// Label colour for the fixed dark fill returned by the legacy
+  /// `AppTone.accent` (always white). New code should use [onAction].
+  Color get actionInk => Colors.white;
+
+  /// Pale amber background of warnings (never a solid fill).
+  Color get warningTint => switch ((dark, highContrast)) {
+        (true, true) => const Color(0xFF2E240C),
+        (true, false) => const Color(0xFF3A2E12),
+        (false, true) => const Color(0xFFFFF4D6),
+        (false, false) => const Color(0xFFFFF4D6),
+      };
+
+  /// Dark amber text / icon on [warningTint].
+  Color get warningInk => switch ((dark, highContrast)) {
+        (true, true) => const Color(0xFFFFE3A8),
+        (true, false) => const Color(0xFFFFD98A),
+        (false, true) => const Color(0xFF5C3800),
+        (false, false) => const Color(0xFF7A4A00),
+      };
+
+  /// Clear glass fill (tab bar, nav buttons, sheets).
+  Color get glassFill =>
+      dark ? const Color(0x8C28282A) : const Color(0x9EFFFFFF);
+
+  /// 0.5 pt hairline around glass.
+  Color get glassEdge =>
+      dark ? const Color(0x2EFFFFFF) : const Color(0x14000000);
+
+  /// Tinted glass (the floating primary action): [action] at ~85 %.
+  Color get tintedGlassFill =>
+      dark ? const Color(0xD9F5F5F7) : const Color(0xD91A1A1A);
+
+  /// Modal barrier behind sheets.
+  Color get scrim => const Color(0x38000000);
+
   Color get error => dark ? const Color(0xFFFFAAB4) : const Color(0xFF9D2236);
   Color get onError => dark ? const Color(0xFF30040B) : Colors.white;
   Color get errorContainer =>
@@ -75,58 +264,47 @@ class AppPalette extends ThemeExtension<AppPalette> {
       t < 0.5 ? this : other ?? this;
 }
 
+/// Tint/ink pairs for tiles, pills and panels.
+///
+/// The UI is neutral: only [neutral] and [warning] carry meaning. The old brand
+/// tones remain so existing code compiles, but they resolve to neutral.
 enum AppTone {
+  /// Grey tint with ink text.
   neutral,
+  @Deprecated(
+      'Colour is reserved for year levels; use neutral or AppTone.warning')
   green,
+  @Deprecated(
+      'Colour is reserved for year levels; use neutral or AppTone.warning')
   blue,
+  @Deprecated(
+      'Colour is reserved for year levels; use neutral or AppTone.warning')
   pink,
-  yellow;
+  @Deprecated(
+      'Colour is reserved for year levels; use neutral or AppTone.warning')
+  yellow,
 
+  /// Pale amber tint with dark amber ink: something must be decided.
+  warning;
+
+  /// Legacy solid fill. Neutral returns muted grey, warning returns amber ink,
+  /// the old brand tones return the fixed light-mode action ink (pair it with
+  /// `AppPalette.actionInk`). Prefer `AppPalette.action` / `onAction`.
+  @Deprecated('Use AppPalette.action with AppPalette.onAction')
   Color get accent => switch (this) {
         neutral => const AppPalette().muted,
-        green => BrandColors.kakaGreen,
-        blue => BrandColors.kakaBlue,
-        pink => BrandColors.kakaPink,
-        yellow => BrandColors.kakaYellow,
+        warning => const AppPalette().warningInk,
+        _ => const Color(0xFF1A1A1A),
       };
 
   Color inkFor(BuildContext context) => inkOn(AppPalette.of(context));
   Color tintFor(BuildContext context) => tintOn(AppPalette.of(context));
 
-  Color tintOn(AppPalette colors) => switch ((this, colors.dark)) {
-        (neutral, _) => colors.surfaceQuiet,
-        (green, true) => const Color(0xFF19392C),
-        (blue, true) => const Color(0xFF163449),
-        (pink, true) => const Color(0xFF482438),
-        (yellow, true) => const Color(0xFF37351C),
-        (green, false) => BrandColors.greenLightest,
-        (blue, false) => BrandColors.blueLightest,
-        (pink, false) => BrandColors.pinkLightest,
-        (yellow, false) => colors.highContrast
-            ? const Color(0xFFFFF2A3)
-            : BrandColors.yellowLightest,
-      };
+  /// Background tint for this tone.
+  Color tintOn(AppPalette colors) =>
+      this == warning ? colors.warningTint : colors.surfaceQuiet;
 
-  Color inkOn(AppPalette colors) {
-    if (this == neutral) return colors.muted;
-    return switch ((this, colors.dark, colors.highContrast)) {
-      (green, true, true) => const Color(0xFFB6F8D9),
-      (blue, true, true) => const Color(0xFFBDEEFF),
-      (pink, true, true) => const Color(0xFFFFCDE9),
-      (yellow, true, true) => const Color(0xFFFFFAC0),
-      (green, true, false) => BrandColors.greenLighter,
-      (blue, true, false) => BrandColors.blueLighter,
-      (pink, true, false) => const Color(0xFFFFA8D8),
-      (yellow, true, false) => const Color(0xFFFFF39A),
-      (green, false, true) => const Color(0xFF064A2B),
-      (blue, false, true) => const Color(0xFF003E5B),
-      (pink, false, true) => const Color(0xFF68053C),
-      (yellow, false, true) => const Color(0xFF382C00),
-      (green, false, false) => BrandColors.greenDarker,
-      (blue, false, false) => const Color(0xFF005980),
-      (pink, false, false) => BrandColors.pinkDarker,
-      (yellow, false, false) => const Color(0xFF695300),
-      _ => colors.muted,
-    };
-  }
+  /// Text / glyph colour on [tintOn].
+  Color inkOn(AppPalette colors) =>
+      this == warning ? colors.warningInk : colors.ink;
 }

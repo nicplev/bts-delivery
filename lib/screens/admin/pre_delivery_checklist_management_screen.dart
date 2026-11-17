@@ -89,8 +89,8 @@ class _PreDeliveryChecklistManagementScreenState
           }
 
           return ReorderableListView.builder(
-            padding: const EdgeInsets.fromLTRB(
-                AppTokens.gutter, 10, AppTokens.gutter, AppTokens.sectionGap),
+            padding: EdgeInsets.fromLTRB(AppTokens.gutter, 10, AppTokens.gutter,
+                MediaQuery.paddingOf(context).bottom + AppTokens.sectionGap),
             itemCount: items.length,
             onReorder: (oldIndex, newIndex) =>
                 _reorderItems(items, oldIndex, newIndex),

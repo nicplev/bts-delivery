@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
-/// KAKA Brand Colors
-/// Official brand colors for the BTS Delivery App
+/// KAKA brand colours (legacy).
+///
+/// The redesigned UI is neutral and colour is reserved for year levels, so no
+/// brand colour may reach the UI any more. Kept only so stray references still
+/// compile; use `AppPalette` tokens and `YearLevelColors` instead.
+@Deprecated('Brand colours are no longer used in the UI; use AppPalette tokens '
+    'or YearLevelColors')
 class BrandColors {
   BrandColors._(); // Private constructor to prevent instantiation
 

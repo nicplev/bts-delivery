@@ -243,11 +243,11 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                       ),
                     )
                   : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(
+                      padding: EdgeInsets.fromLTRB(
                         AppTokens.gutter,
                         2,
                         AppTokens.gutter,
-                        16,
+                        MediaQuery.paddingOf(context).bottom + 16,
                       ),
                       itemCount: results.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),

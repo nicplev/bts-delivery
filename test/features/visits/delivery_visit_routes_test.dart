@@ -29,6 +29,7 @@ import 'package:bts_delivery_app/repositories/schools_repository.dart';
 import 'package:bts_delivery_app/services/delivery_visit_access.dart';
 import 'package:bts_delivery_app/screens/forms/classroom_detail_screen.dart';
 import 'package:bts_delivery_app/screens/main/school_hub_screen.dart';
+import 'package:bts_delivery_app/widgets/design/design.dart';
 import 'package:bts_delivery_app/services/offline/connectivity_service.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
 import 'package:bts_delivery_app/services/offline/field_draft_store.dart';
@@ -396,7 +397,7 @@ void main() {
       await tester.tap(capture.hitTestable());
       await tester.pumpAndSettle();
       expect(back, findsOneWidget);
-      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byType(AppGlassTabBar), findsNothing);
     }
 
     await openCapture();

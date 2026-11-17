@@ -15,6 +15,7 @@ class SyncStatusDetailSheet extends ConsumerWidget {
   static void show(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       showDragHandle: true,
       useSafeArea: true,
       isScrollControlled: true,

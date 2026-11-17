@@ -6,6 +6,7 @@ import '../providers/offline_delivery_providers.dart';
 import '../providers/saved_edit_providers.dart';
 import '../providers/offline_media_providers.dart';
 import '../services/offline/offline_storage_service.dart';
+import '../widgets/design/design.dart';
 
 class BTSDeliveryApp extends ConsumerWidget {
   const BTSDeliveryApp({super.key});
@@ -44,7 +45,10 @@ class BTSDeliveryApp extends ConsumerWidget {
         highContrastDarkTheme: AppTheme.highContrastDarkTheme,
         themeAnimationStyle: themeAnimationStyle,
         home: const _StartupScreen(
-          icon: CircularProgressIndicator(),
+          icon: SizedBox.square(
+            dimension: 28,
+            child: CircularProgressIndicator(strokeWidth: 3),
+          ),
           message: 'Initializing app...',
         ),
       ),
@@ -56,7 +60,7 @@ class BTSDeliveryApp extends ConsumerWidget {
         highContrastDarkTheme: AppTheme.highContrastDarkTheme,
         themeAnimationStyle: themeAnimationStyle,
         home: _StartupScreen(
-          icon: const Icon(Icons.error_outline, size: 48),
+          icon: const AppIconTile(icon: AppIcons.error, size: 48),
           message: 'Initialization failed: $error',
           onRetry: () => ref.invalidate(offlineStorageInitProvider),
         ),
@@ -88,10 +92,20 @@ class _StartupScreen extends StatelessWidget {
               children: [
                 icon,
                 const SizedBox(height: 16),
-                Text(message, textAlign: TextAlign.center),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: AppTypography.body
+                      .copyWith(color: AppPalette.of(context).ink),
+                ),
                 if (onRetry != null) ...[
-                  const SizedBox(height: 16),
-                  FilledButton(onPressed: onRetry, child: const Text('Retry')),
+                  const SizedBox(height: 20),
+                  AppPrimaryButton(
+                    label: 'Retry',
+                    icon: AppIcons.retry,
+                    expand: false,
+                    onPressed: onRetry,
+                  ),
                 ],
               ],
             ),
