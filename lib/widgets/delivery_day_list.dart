@@ -8,6 +8,7 @@ import '../providers/auth_providers.dart';
 import '../providers/deliveries_providers.dart';
 import '../providers/pre_delivery_checklist_providers.dart';
 import '../providers/repository_providers.dart';
+import '../providers/visit_signoff_providers.dart';
 import '../services/date_utils.dart';
 import '../services/offline/connectivity_service.dart';
 import 'design/design.dart';
@@ -22,10 +23,12 @@ String deliveryVisitCount(int count) =>
 
 /// The visits of one day.
 ///
-/// Without [calendar] (the Today view) the first visit is a hero card under
-/// "Next visit" and the rest are compact rows under "Later today". With a
-/// [calendar] the calendar sits above the selected day's visits, all shown as
-/// compact rows. [header] (large title, view switcher…) scrolls with the list.
+/// Without [calendar] (the Today view) the first visit that is not signed off
+/// is a hero card under "Next visit", the other visits still to sign off are
+/// compact rows under "Later today" and signed-off visits are compact rows
+/// under "Signed off" at the bottom. With a [calendar] the calendar sits above
+/// the selected day's visits, all shown as compact rows in time order.
+/// [header] (large title, view switcher…) scrolls with the list.
 class DeliveryDayList extends ConsumerWidget {
   const DeliveryDayList({
     super.key,
@@ -93,26 +96,47 @@ class DeliveryDayList extends ConsumerWidget {
                 : 'No deliveries scheduled',
           );
         }
-        if (!today) {
-          return _VisitRows(deliveries: items, firstVisitNumber: 1);
+        // Visit numbers follow the day's time order in every section.
+        final numbered = [
+          for (var index = 0; index < items.length; index++)
+            (delivery: items[index], number: index + 1),
+        ];
+        if (!today) return _VisitRows(visits: numbered);
+
+        final toSignOff = <_NumberedVisit>[];
+        final signedOff = <_NumberedVisit>[];
+        for (final visit in numbered) {
+          (ref.watch(visitSignedOffProvider(_visitOf(visit.delivery)))
+                  ? signedOff
+                  : toSignOff)
+              .add(visit);
         }
+        final next = toSignOff.firstOrNull;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            section(
-              'Next visit',
-              _NextVisitCard(
-                key: ValueKey(items.first.id),
-                delivery: items.first,
-                visitNumber: 1,
-              ),
-            ),
-            if (items.length > 1)
+            if (next != null)
               section(
-                'Later today',
-                _VisitRows(
-                    deliveries: items.skip(1).toList(), firstVisitNumber: 2),
+                'Next visit',
+                _NextVisitCard(
+                  key: ValueKey(next.delivery.id),
+                  delivery: next.delivery,
+                  visitNumber: next.number,
+                ),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(top: AppTokens.sectionGap - 4),
+                child: AppNotice(
+                  key: ValueKey('all-visits-signed-off'),
+                  icon: AppIcons.complete,
+                  message: 'All visits signed off today',
+                ),
               ),
+            if (toSignOff.length > 1)
+              section('Later today', _VisitRows(visits: toSignOff.sublist(1))),
+            if (signedOff.isNotEmpty)
+              section('Signed off', _VisitRows(visits: signedOff)),
           ],
         );
       },
@@ -224,13 +248,14 @@ List<String> _staffNames(WidgetRef ref, Delivery delivery, bool canEdit) {
   return team?.map((staff) => staff.name).toList() ?? delivery.staffNames;
 }
 
+typedef _NumberedVisit = ({Delivery delivery, int number});
+
+DeliveryVisit _visitOf(Delivery delivery) =>
+    DeliveryVisit(deliveryId: delivery.id, schoolId: delivery.schoolId);
+
 void _openVisit(BuildContext context, Delivery delivery) {
   context.push(
-    schoolWorkPath(
-      delivery.schoolId,
-      visit:
-          DeliveryVisit(deliveryId: delivery.id, schoolId: delivery.schoolId),
-    ),
+    schoolWorkPath(delivery.schoolId, visit: _visitOf(delivery)),
     extra: delivery,
   );
 }
@@ -456,32 +481,85 @@ class _ChecklistRow extends StatelessWidget {
   }
 }
 
+/// The checklist's real status on a compact row, in words with a 16 pt icon.
+({String label, Widget icon}) _rowChecklistStatus(
+    BuildContext context, AsyncValue<bool> status) {
+  final colors = AppPalette.of(context);
+  Widget glyph(IconData icon) => Icon(icon, size: 16, color: colors.muted);
+  return status.when(
+    skipLoadingOnRefresh: false,
+    data: (complete) => complete
+        ? (
+            label: 'Checklist complete',
+            icon: const AppStatusRing(status: AppCompletion.complete, size: 16),
+          )
+        : (
+            label: 'Checklist to complete',
+            icon:
+                const AppStatusRing(status: AppCompletion.notStarted, size: 16),
+          ),
+    error: (_, __) =>
+        (label: 'Checklist status unavailable', icon: glyph(AppIcons.error)),
+    loading: () => (label: 'Checking checklist…', icon: glyph(AppIcons.timer)),
+  );
+}
+
 /// Compact visit rows in one grouped card.
 class _VisitRows extends StatelessWidget {
-  const _VisitRows({required this.deliveries, required this.firstVisitNumber});
+  const _VisitRows({required this.visits});
 
-  final List<Delivery> deliveries;
-  final int firstVisitNumber;
+  final List<_NumberedVisit> visits;
 
   @override
   Widget build(BuildContext context) {
     return AppGroupedList(
       separatorIndent: 57,
       children: [
-        for (var index = 0; index < deliveries.length; index++)
+        for (final visit in visits)
           _VisitRow(
-            key: ValueKey(deliveries[index].id),
-            delivery: deliveries[index],
-            visitNumber: firstVisitNumber + index,
+            key: ValueKey(visit.delivery.id),
+            delivery: visit.delivery,
+            visitNumber: visit.number,
           ),
       ],
     );
   }
 }
 
-/// School name, "1:30 PM · Visit 2 · 2 pallets", staff and instructions, a
-/// visit options menu (checklist and management) and a chevron. The row opens
-/// the visit.
+/// A small status under a row's subtitle: 16 pt icon and words that wrap.
+class _RowStatus extends StatelessWidget {
+  const _RowStatus({super.key, required this.icon, required this.label});
+
+  final Widget icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final style = AppTypography.footnote.copyWith(color: colors.muted);
+    final lineHeight = MediaQuery.textScalerOf(context)
+        .scale(style.fontSize! * (style.height ?? 1.3));
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Centred on the first line of the words.
+          SizedBox(
+            height: lineHeight < 16 ? 16 : lineHeight,
+            child: Center(child: ExcludeSemantics(child: icon)),
+          ),
+          const SizedBox(width: 6),
+          Expanded(child: Text(label, style: style)),
+        ],
+      ),
+    );
+  }
+}
+
+/// School name, "1:30 PM · Visit 2 · 2 pallets", staff and instructions, the
+/// pre-delivery checklist status (or "Signed off"), a visit options menu
+/// (checklist and management) and a chevron. The row opens the visit.
 class _VisitRow extends ConsumerWidget {
   const _VisitRow({
     super.key,
@@ -506,6 +584,11 @@ class _VisitRow extends ConsumerWidget {
       if (_plural(delivery.palletCount, 'pallet') case final pallets?) pallets,
     ].join(' · ');
     final secondary = AppTypography.subheadline.copyWith(color: colors.muted);
+    final signedOff = ref.watch(visitSignedOffProvider(_visitOf(delivery)));
+    final checklist = signedOff
+        ? null
+        : _rowChecklistStatus(
+            context, ref.watch(deliveryChecklistStatusProvider(delivery.id)));
 
     return AppPressable(
       onTap: () => _openVisit(context, delivery),
@@ -549,6 +632,19 @@ class _VisitRow extends ConsumerWidget {
                             ),
                           ],
                         ),
+                      ),
+                    if (signedOff)
+                      _RowStatus(
+                        key: const ValueKey('visit-row-signed-off'),
+                        icon: Icon(AppIcons.complete,
+                            size: 16, color: colors.ink),
+                        label: 'Signed off',
+                      )
+                    else if (checklist != null)
+                      _RowStatus(
+                        key: const ValueKey('visit-row-checklist'),
+                        icon: checklist.icon,
+                        label: checklist.label,
                       ),
                   ],
                 ),

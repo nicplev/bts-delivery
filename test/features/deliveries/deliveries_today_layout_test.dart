@@ -1,11 +1,17 @@
 import 'package:bts_delivery_app/app/theme/app_theme.dart';
+import 'dart:async';
+
 import 'package:bts_delivery_app/models/delivery.dart';
+import 'package:bts_delivery_app/models/delivery_visit.dart';
+import 'package:bts_delivery_app/models/offline/evidence_upload.dart';
 import 'package:bts_delivery_app/models/pre_delivery_checklist_item.dart';
+import 'package:bts_delivery_app/models/signoff_snapshot.dart';
 import 'package:bts_delivery_app/models/staff.dart';
 import 'package:bts_delivery_app/providers/auth_providers.dart';
 import 'package:bts_delivery_app/providers/offline_delivery_providers.dart';
 import 'package:bts_delivery_app/providers/pre_delivery_checklist_providers.dart';
 import 'package:bts_delivery_app/providers/repository_providers.dart';
+import 'package:bts_delivery_app/providers/visit_signoff_providers.dart';
 import 'package:bts_delivery_app/repositories/deliveries_repository.dart';
 import 'package:bts_delivery_app/screens/forms/add_edit_delivery_screen.dart';
 import 'package:bts_delivery_app/screens/main/deliveries_screen.dart';
@@ -140,7 +146,272 @@ void main() {
         find.byTooltip('Visit options for Riverside School'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  group('signed-off visits', () {
+    testWidgets('next visit skips a signed-off first visit', (tester) async {
+      await tester.pumpWidget(_app(
+        _Repository(_today(), third: true),
+        signed: {'first': Stream.value(_evidence('oakfield', 'first'))},
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Next visit'), findsOneWidget);
+      // Visit numbers keep the day's time order.
+      expect(find.text('1:30 PM · Visit 2'), findsOneWidget);
+      expect(find.text('Open visit'), findsOneWidget);
+      expect(find.text('Later today'), findsOneWidget);
+      expect(find.text('3:00 PM · Visit 3'), findsOneWidget);
+      expect(find.text('Signed off'), findsNWidgets(2)); // label + row status
+      final signedRow = find.byKey(const ValueKey('first'));
+      expect(
+          find.descendant(
+              of: signedRow,
+              matching: find.byKey(const ValueKey('visit-row-signed-off'))),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: signedRow,
+              matching: find.byKey(const ValueKey('visit-row-checklist'))),
+          findsNothing);
+      // Sections are in order: next, later today, signed off.
+      expect(tester.getTopLeft(find.text('Later today')).dy,
+          lessThan(tester.getTopLeft(signedRow).dy));
+
+      // A signed-off visit still opens.
+      await tester.ensureVisible(signedRow);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Oakfield Primary'));
+      await tester.pumpAndSettle();
+      expect(find.text('Visit first'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('every visit signed off shows a calm line, no hero card',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        _Repository(_today()),
+        signed: {
+          'first': Stream.value(_evidence('oakfield', 'first')),
+          'second': Stream.value(_evidence('riverside', 'second')),
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('All visits signed off today'), findsOneWidget);
+      expect(find.text('Next visit'), findsNothing);
+      expect(find.text('Open visit'), findsNothing);
+      expect(find.text('Later today'), findsNothing);
+      expect(
+          find.byKey(const ValueKey('visit-row-signed-off')), findsNWidgets(2));
+      expect(find.textContaining('· 2 visits'), findsOneWidget);
+      expect(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('all-visits-signed-off')))
+              .dy,
+          lessThan(tester.getTopLeft(find.byKey(const ValueKey('first'))).dy));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a loading or unreadable sign-off keeps the visit as next',
+        (tester) async {
+      final loading = StreamController<SignedEvidence?>();
+      addTearDown(loading.close);
+      await tester.pumpWidget(_app(
+        _Repository(_today()),
+        signed: {
+          'first': loading.stream,
+          'second': Stream.error(StateError('Signed evidence unavailable')),
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('9:00 AM · Visit 1'), findsOneWidget);
+      expect(find.text('Open visit'), findsOneWidget);
+      expect(find.text('Later today'), findsOneWidget);
+      expect(find.text('Signed off'), findsNothing);
+      expect(find.text('All visits signed off today'), findsNothing);
+      expect(find.textContaining('unavailable'), findsNothing);
+      expect(find.textContaining('Couldn’t'), findsNothing);
+
+      // Once the record arrives the visit moves to "Signed off".
+      loading.add(_evidence('oakfield', 'first'));
+      await tester.pumpAndSettle();
+      expect(find.text('1:30 PM · Visit 2'), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('visit-row-signed-off')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a signature waiting to upload counts as signed off',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        _Repository(_today()),
+        queued: [
+          EvidenceUpload(
+            id: 'sig',
+            kind: EvidenceKind.signature,
+            ownerUid: 'driver',
+            schoolId: 'oakfield',
+            deliveryId: 'first',
+            localFileName: 'sig.png',
+            storagePath: 'schools/oakfield/signoffs/sig.png',
+            createdAt: _today(),
+          ),
+          // A photo or another visit's signature does not sign this visit.
+          EvidenceUpload(
+            id: 'photo',
+            kind: EvidenceKind.photo,
+            ownerUid: 'driver',
+            schoolId: 'riverside',
+            deliveryId: 'second',
+            localFileName: 'p.jpg',
+            storagePath: 'p.jpg',
+            createdAt: _today(),
+          ),
+          EvidenceUpload(
+            id: 'other',
+            kind: EvidenceKind.signature,
+            ownerUid: 'driver',
+            schoolId: 'riverside',
+            deliveryId: 'another-day',
+            localFileName: 'o.png',
+            storagePath: 'schools/riverside/signoffs/other.png',
+            createdAt: _today(),
+          ),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1:30 PM · Visit 2'), findsOneWidget);
+      expect(find.text('Open visit'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('first')),
+              matching: find.text('Signed off')),
+          findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('calendar day rows mark signed-off visits in time order',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        _Repository(_today()),
+        // Listened to again when the calendar replaces the Today view.
+        signed: {
+          'first': Stream.multi(
+              (listener) => listener.add(_evidence('oakfield', 'first'))),
+        },
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Calendar'));
+      await tester.pumpAndSettle();
+
+      final first = find.byKey(const ValueKey('first'));
+      final second = find.byKey(const ValueKey('second'));
+      await tester.scrollUntilVisible(second, 200,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      expect(find.text('Next visit'), findsNothing);
+      expect(
+          tester.getTopLeft(first).dy, lessThan(tester.getTopLeft(second).dy));
+      expect(find.text('9:00 AM · Visit 1 · 4 pallets'), findsOneWidget);
+      expect(find.descendant(of: first, matching: find.text('Signed off')),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: second, matching: find.text('Checklist to complete')),
+          findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('checklist status on rows', () {
+    testWidgets('a later-today row shows its checklist status', (tester) async {
+      await tester.pumpWidget(_app(_Repository(_today())));
+      await tester.pumpAndSettle();
+
+      final row = find.byKey(const ValueKey('second'));
+      expect(
+          find.descendant(
+              of: row, matching: find.text('Checklist to complete')),
+          findsOneWidget);
+      // The hero card keeps its own checklist row.
+      expect(find.byKey(const ValueKey('pre-delivery-checklist-row')),
+          findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a completed checklist reads "Checklist complete"',
+        (tester) async {
+      await tester
+          .pumpWidget(_app(_Repository(_today()), checklistComplete: true));
+      await tester.pumpAndSettle();
+
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('second')),
+              matching: find.text('Checklist complete')),
+          findsOneWidget);
+      // The options menu still opens the checklist.
+      final options = find.byTooltip('Visit options for Riverside School');
+      await tester.ensureVisible(options);
+      await tester.pumpAndSettle();
+      await tester.tap(options);
+      await tester.pumpAndSettle();
+      expect(find.text('Pre-delivery checklist · Complete'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('rows stack at 320 pt and 200 % text', (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(_app(
+        _Repository(_today(), third: true),
+        textScale: 2,
+        signed: {'first': Stream.value(_evidence('oakfield', 'first'))},
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      final scrollable = find.byType(Scrollable).first;
+      final checklist = find.descendant(
+          of: find.byKey(const ValueKey('third')),
+          matching: find.text('Checklist to complete'));
+      await tester.scrollUntilVisible(checklist, 120, scrollable: scrollable);
+      await tester.pumpAndSettle();
+      expect(checklist.hitTestable(), findsOneWidget);
+      // The words wrap rather than truncate.
+      final text = tester.widget<Text>(checklist);
+      expect(text.overflow, isNot(TextOverflow.ellipsis));
+      expect(text.maxLines, isNull);
+
+      final signed = find.descendant(
+          of: find.byKey(const ValueKey('first')),
+          matching: find.text('Signed off'));
+      await tester.scrollUntilVisible(signed, 120, scrollable: scrollable);
+      await tester.pumpAndSettle();
+      expect(signed.hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
 }
+
+SignedEvidence _evidence(String schoolId, String deliveryId) => SignedEvidence(
+      id: 'evidence-$deliveryId',
+      schoolId: schoolId,
+      deliveryId: deliveryId,
+      ownerUid: 'driver',
+      signaturePath: 'schools/$schoolId/signoffs/evidence-$deliveryId.png',
+      typedName: 'Receiver',
+      capturedAt: _today(),
+      snapshot: SignOffSnapshot(
+        sourceReadAt: _today(),
+        serverReviewed: false,
+        summary: const {},
+      ),
+    );
 
 DateTime _today() {
   final now = DateTime.now();
@@ -152,6 +423,9 @@ Widget _app(
   bool isAdmin = false,
   double textScale = 1,
   ThemeData? theme,
+  Map<String, Stream<SignedEvidence?>> signed = const {},
+  List<EvidenceUpload> queued = const [],
+  bool checklistComplete = false,
 }) {
   final router = GoRouter(
     initialLocation: '/home',
@@ -179,15 +453,15 @@ Widget _app(
             id: 'staff',
             name: 'Driver',
             role: isAdmin ? 'admin' : 'staff',
-            assignedSchoolIds: const ['oakfield', 'riverside'],
+            assignedSchoolIds: const ['oakfield', 'riverside', 'hillcrest'],
             createdAt: today,
           ))),
       connectivityStatusProvider
           .overrideWith((_) => Stream.value(ConnectivityStatus.online)),
       evidenceUploadsProvider.overrideWith(
         (_) => Stream.value(
-          const EvidenceUploadStatus(
-            items: [],
+          EvidenceUploadStatus(
+            items: queued,
             activeId: null,
             legacyReviewCount: 0,
             localError: false,
@@ -195,7 +469,10 @@ Widget _app(
         ),
       ),
       deliveryChecklistStatusProvider
-          .overrideWith((_, __) => const AsyncValue.data(false)),
+          .overrideWith((_, __) => AsyncValue.data(checklistComplete)),
+      // No visit is signed off unless a test says so.
+      visitSignedEvidenceProvider.overrideWith((_, DeliveryVisit visit) =>
+          signed[visit.deliveryId] ?? Stream.value(null)),
       activePreDeliveryChecklistItemsProvider.overrideWith((_) => Stream.value([
             PreDeliveryChecklistItem(
               id: 'gate',
@@ -220,9 +497,12 @@ Widget _app(
 }
 
 class _Repository implements DeliveriesRepository {
-  _Repository(this.today);
+  _Repository(this.today, {this.third = false});
 
   final DateTime today;
+
+  /// Adds a 3:00 PM visit to Hillcrest College.
+  final bool third;
 
   @override
   Stream<List<Delivery>> watchDeliveriesByDateRange(
@@ -253,6 +533,15 @@ class _Repository implements DeliveriesRepository {
         notes: 'Use Gate B near reception.',
         createdAt: today,
       ),
+      if (third)
+        Delivery(
+          id: 'third',
+          schoolId: 'hillcrest',
+          schoolName: 'Hillcrest College',
+          date: today,
+          time: today.add(const Duration(hours: 15)),
+          createdAt: today,
+        ),
     ]);
   }
 
