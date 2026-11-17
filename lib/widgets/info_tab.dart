@@ -15,6 +15,8 @@ import 'offline_media_view.dart';
 import 'school_timer_history.dart';
 import 'design/design.dart';
 
+/// Visit hub › Info: grouped cards for the school's details, map, contacts,
+/// classroom import and timer history.
 class InfoTab extends ConsumerStatefulWidget {
   const InfoTab({super.key, required this.schoolId});
 
@@ -48,78 +50,93 @@ class _InfoTabState extends ConsumerState<InfoTab> {
 
     return schoolAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) =>
-          const Center(child: Text('Couldn’t load school information')),
+      error: (_, __) => const _InfoMessage(
+          icon: AppIcons.error, text: 'Couldn’t load school information'),
       data: (school) {
         if (school == null) {
-          return const Center(child: Text('School not found'));
+          return const _InfoMessage(
+              icon: AppIcons.school, text: 'School not found');
         }
 
         final canEditSchoolData = ref.watch(canEditSchoolDataProvider);
+        const gap = SizedBox(height: AppTokens.sectionGap);
 
         return ListView(
           key: const PageStorageKey('school-info'),
           primary: true,
           padding: EdgeInsets.fromLTRB(
             AppTokens.gutter,
-            16,
+            8,
             AppTokens.gutter,
-            MediaQuery.paddingOf(context).bottom + 16,
+            AppInsets.bottom(context),
           ),
           children: [
-            _buildSchoolInfoCard(school),
-            const SizedBox(height: 16),
-            _buildLocationCard(school.address),
-            const SizedBox(height: 16),
-            _buildSchoolMapCard(school),
-            const SizedBox(height: 16),
+            ..._buildSchoolInfoSection(school),
+            gap,
+            ..._buildSchoolMapSection(school),
+            gap,
+            ..._buildContactsSection(contactsAsync, canEdit: canEditSchoolData),
             if (canEditSchoolData &&
                 ref.watch(activeDeliveryVisitProvider) == null) ...[
-              _buildBulkImportCard(school),
-              const SizedBox(height: 16),
+              gap,
+              ..._buildBulkImportSection(school),
             ],
-            _buildContactsCard(contactsAsync, canEdit: canEditSchoolData),
-            const SizedBox(height: 16),
-            _buildTimerHistoryCard(),
+            gap,
+            ..._buildTimerHistorySection(),
           ],
         );
       },
     );
   }
 
-  Widget _buildTimerHistoryCard() {
+  /// Section label with an optional small grey capsule action on the right.
+  /// The action wraps below the label when large text leaves no room.
+  Widget _label(String text, {Widget? action}) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: action == null
+            ? AppSectionLabel(text)
+            : Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [AppSectionLabel(text), action],
+              ),
+      );
+
+  Widget _smallAction(
+    String label,
+    IconData icon,
+    VoidCallback onPressed, {
+    Key? key,
+  }) =>
+      AppSecondaryButton(
+        key: key,
+        label: label,
+        icon: icon,
+        expand: false,
+        large: false,
+        onPressed: onPressed,
+      );
+
+  List<Widget> _buildTimerHistorySection() {
     final isVisit = ref.watch(activeDeliveryVisitProvider) != null;
     final isAdmin = isVisit && ref.watch(isAdminProvider);
 
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const AppIconTile(icon: Icons.history, tone: AppTone.green),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  isVisit ? 'Visit timer history' : 'Earlier timer history',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ),
-              if (isAdmin)
-                IconButton(
-                  onPressed: () => _showAddTimerDialog(),
-                  icon: const Icon(Icons.add),
-                  tooltip: 'Add Timer Entry',
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SchoolTimerHistory(schoolId: widget.schoolId, readOnly: !isVisit),
-        ],
+    return [
+      _label(
+        isVisit ? 'Visit timer history' : 'Earlier timer history',
+        action: isAdmin
+            ? _smallAction('Add entry', AppIcons.add, _showAddTimerDialog,
+                key: const ValueKey('add-timer-entry'))
+            : null,
       ),
-    );
+      AppPanel(
+        padding: EdgeInsets.zero,
+        child:
+            SchoolTimerHistory(schoolId: widget.schoolId, readOnly: !isVisit),
+      ),
+    ];
   }
 
   void _showAddTimerDialog() {
@@ -133,106 +150,66 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     );
   }
 
-  Widget _buildSchoolInfoCard(School school) {
+  List<Widget> _buildSchoolInfoSection(School school) {
     final isAdmin = ref.watch(isAdminProvider);
+    final address = school.address?.trim() ?? '';
 
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return [
+      _label(
+        'School Information',
+        action: isAdmin
+            ? _smallAction(
+                'Edit', AppIcons.edit, () => _showEditSchoolDialog(school),
+                key: const ValueKey('edit-school'))
+            : null,
+      ),
+      AppGroupedList(
+        separatorIndent: 57,
         children: [
-          Row(
-            children: [
-              const AppIconTile(icon: Icons.school, tone: AppTone.blue),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'School Information',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ),
-              if (isAdmin)
-                IconButton(
-                  onPressed: () => _showEditSchoolDialog(school),
-                  icon: const Icon(Icons.edit),
-                  tooltip: 'Edit School',
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _buildInfoRow(
-            icon: Icons.label,
-            label: 'School Name',
+          _InfoRow(
+            icon: AppIcons.school,
+            label: 'School name',
             value: school.name,
           ),
-          const SizedBox(height: 12),
-          _buildInfoRow(
-            icon: Icons.calendar_today,
+          _InfoRow(
+            icon: AppIcons.location,
+            label: 'Address',
+            value: address.isEmpty ? 'No address saved' : address,
+          ),
+          if (address.isNotEmpty)
+            AppListRow(
+              key: const ValueKey('open-in-maps'),
+              icon: AppIcons.map,
+              title: 'Open in Maps',
+              trailing: Icon(AppIcons.external,
+                  size: 18, color: AppPalette.of(context).chevron),
+              showChevron: false,
+              onTap: () => _openInMaps(address),
+            ),
+          _InfoRow(
+            icon: AppIcons.calendar,
             label: 'Added',
             value: _formatDate(school.createdAt),
           ),
           if (school.isSignedOff && school.lastSignOffDate != null) ...[
-            const SizedBox(height: 12),
-            _buildInfoRow(
-              icon: Icons.check_circle,
+            _InfoRow(
+              icon: AppIcons.completeOutline,
               label: 'Earlier school sign-off',
               value: _formatDate(school.lastSignOffDate!),
-              valueColor: AppTone.green.inkFor(context),
             ),
-            if (school.signedBy?.isNotEmpty == true) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow(
-                icon: Icons.person,
+            if (school.signedBy?.isNotEmpty == true)
+              _InfoRow(
+                icon: AppIcons.person,
                 label: 'Signed by',
                 value: school.signedBy!,
               ),
-            ],
           ],
         ],
       ),
-    );
+    ];
   }
 
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-    Color? valueColor,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AppIconTile(icon: icon, tone: AppTone.neutral, size: 32),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppPalette.of(context).muted,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: valueColor,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSchoolMapCard(School school) {
+  List<Widget> _buildSchoolMapSection(School school) {
     final canEdit = ref.watch(canEditSchoolDataProvider);
     final visit = ref.watch(activeDeliveryVisitProvider);
     final reference = school.schoolMapStoragePath ?? school.schoolMapUrl;
@@ -245,310 +222,209 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             visit: visit,
           );
     final owner = ref.watch(offlineMediaOwnerProvider(school.id));
+    final colors = AppPalette.of(context);
 
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const AppIconTile(icon: Icons.map_outlined, tone: AppTone.blue),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('School map',
-                    style: Theme.of(context).textTheme.titleLarge),
-              ),
-              if (canEdit && reference != null)
-                IconButton(
-                  onPressed: () => _showDeleteMapConfirmation(school),
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete map',
-                ),
-              if (canEdit)
-                IconButton(
-                  onPressed: () => _handleUploadSchoolMap(school),
-                  icon: Icon(reference == null ? Icons.add : Icons.edit),
-                  tooltip: reference == null ? 'Upload map' : 'Replace map',
-                ),
-            ],
-          ),
-          if (reference == null)
-            const Text('No school map uploaded')
-          else if (asset == null)
-            const Text(
-                'This school map cannot be opened from its saved reference')
-          else ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-              child: SizedBox(
-                width: double.infinity,
-                height: 250,
-                child: OfflineMediaPreview(asset: asset),
-              ),
-            ),
-            if (visit != null) OfflineMediaDownloadStatus(asset: asset),
-            Wrap(
-              spacing: 8,
-              children: [
-                TextButton.icon(
-                  onPressed: owner == null
-                      ? null
-                      : () => Navigator.of(context).push<void>(
-                            MaterialPageRoute(
-                              builder: (_) => OfflineMediaScreen(
-                                asset: asset,
-                                ownerUid: owner,
-                                title: 'School map',
-                              ),
-                            ),
-                          ),
-                  icon: const Icon(Icons.open_in_full_outlined),
-                  label: const Text('Open map'),
-                ),
-                if (visit != null)
-                  OfflineMediaDownloadButton(asset: asset, compact: false),
-              ],
-            ),
-          ],
-          if (visit != null)
-            OfflineEarlierMapButton(visit: visit, currentMap: asset),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBulkImportCard(School school) {
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const AppIconTile(icon: Icons.upload_file, tone: AppTone.green),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Bulk Import',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+    final actions = <Widget>[
+      if (asset != null) ...[
+        AppSecondaryButton(
+          key: const ValueKey('open-school-map'),
+          label: 'Open map',
+          icon: AppIcons.gallery,
+          large: false,
+          onPressed: owner == null
+              ? null
+              : () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => OfflineMediaScreen(
+                        asset: asset,
+                        ownerUid: owner,
+                        title: 'School map',
                       ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
-            style: TextStyle(color: AppPalette.of(context).muted),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () {
-              context.push(
-                '/schools/${school.id}/bulk-import?schoolName=${Uri.encodeComponent(school.name)}',
-              );
-            },
-            icon: const Icon(Icons.cloud_upload),
-            label: const Text('Import Classrooms'),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 48),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+                    ),
+                  ),
+        ),
+        if (visit != null)
+          OfflineMediaDownloadButton(asset: asset, compact: false),
+      ],
+      if (canEdit)
+        AppSecondaryButton(
+          key: const ValueKey('upload-school-map'),
+          label: reference == null ? 'Upload map' : 'Replace map',
+          icon: AppIcons.upload,
+          large: false,
+          onPressed: () => _handleUploadSchoolMap(school),
+        ),
+      if (canEdit && reference != null)
+        AppSecondaryButton(
+          key: const ValueKey('delete-school-map'),
+          label: 'Delete map',
+          icon: AppIcons.delete,
+          large: false,
+          onPressed: () => _showDeleteMapConfirmation(school),
+        ),
+    ];
 
-  Widget _buildLocationCard(String? savedAddress) {
-    final address = savedAddress?.trim() ?? '';
-
-    return AppPanel(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const AppIconTile(icon: Icons.location_on_outlined),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Location',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  address.isEmpty ? 'No address saved' : address,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                if (address.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: () => _openInMaps(address),
-                    icon: const Icon(Icons.open_in_new_outlined),
-                    label: const Text('Open in Maps'),
+    return [
+      _label('School map'),
+      AppPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (reference == null || asset == null)
+              Row(
+                children: [
+                  const AppIconTile(icon: AppIcons.map, size: 29),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      reference == null
+                          ? 'No school map uploaded'
+                          : 'This school map cannot be opened from its saved reference',
+                      style: AppTypography.body.copyWith(color: colors.muted),
+                    ),
                   ),
                 ],
+              )
+            else ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 250,
+                  child: OfflineMediaPreview(asset: asset),
+                ),
+              ),
+              if (visit != null) OfflineMediaDownloadStatus(asset: asset),
+            ],
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (var i = 0; i < actions.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                actions[i],
               ],
-            ),
-          ),
-        ],
+            ],
+            if (visit != null)
+              OfflineEarlierMapButton(visit: visit, currentMap: asset),
+          ],
+        ),
       ),
-    );
+    ];
   }
 
-  Widget _buildContactsCard(
+  List<Widget> _buildBulkImportSection(School school) {
+    return [
+      _label('Import'),
+      AppPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const AppIconTile(icon: AppIcons.importFile, size: 29),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Import multiple classrooms, year levels, and consumables at once using a CSV file.',
+                    style: AppTypography.subheadline
+                        .copyWith(color: AppPalette.of(context).muted),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            AppSecondaryButton(
+              key: const ValueKey('import-classrooms'),
+              label: 'Import classrooms',
+              icon: AppIcons.importFile,
+              onPressed: () {
+                context.push(
+                  '/schools/${school.id}/bulk-import?schoolName=${Uri.encodeComponent(school.name)}',
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildContactsSection(
     AsyncValue<List<Contact>> contactsAsync, {
     required bool canEdit,
   }) {
-    return AppPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const AppIconTile(icon: Icons.contacts, tone: AppTone.pink),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Contacts',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ),
-              if (canEdit)
-                IconButton(
-                  onPressed: _showAddContactDialog,
-                  icon: const Icon(Icons.add),
-                  tooltip: 'Add Contact',
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          contactsAsync.when(
-            loading: () => const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-            error: (_, __) => const Text('Couldn’t load contacts'),
-            data: (contacts) {
-              if (contacts.isEmpty) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        Icon(Icons.person_off,
-                            size: 48, color: AppPalette.of(context).muted),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No contacts added yet',
-                          style: TextStyle(color: AppPalette.of(context).muted),
-                        ),
-                      ],
+    final colors = AppPalette.of(context);
+    return [
+      _label(
+        'Contacts',
+        action: canEdit
+            ? _smallAction('Add', AppIcons.add, _showAddContactDialog,
+                key: const ValueKey('add-contact'))
+            : null,
+      ),
+      contactsAsync.when(
+        loading: () => const AppPanel(
+          child: Center(child: CircularProgressIndicator()),
+        ),
+        error: (_, __) => AppPanel(
+          child: Text('Couldn’t load contacts',
+              style: AppTypography.body.copyWith(color: colors.muted)),
+        ),
+        data: (contacts) {
+          if (contacts.isEmpty) {
+            return AppPanel(
+              child: Row(
+                children: [
+                  const AppIconTile(icon: AppIcons.people, size: 29),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'No contacts added yet',
+                      style: AppTypography.body.copyWith(color: colors.muted),
                     ),
                   ),
-                );
-              }
+                ],
+              ),
+            );
+          }
 
-              return AppGroupedList(
-                children: contacts.map((contact) {
-                  return _buildContactTile(contact, canEdit: canEdit);
-                }).toList(),
-              );
-            },
-          ),
-        ],
+          return AppGroupedList(
+            separatorIndent: 57,
+            children: [
+              for (final contact in contacts)
+                _buildContactTile(contact, canEdit: canEdit),
+            ],
+          );
+        },
       ),
-    );
+    ];
   }
 
   Widget _buildContactTile(Contact contact, {required bool canEdit}) {
     final hasPhone = contact.phone?.isNotEmpty == true;
     final hasEmail = contact.email?.isNotEmpty == true;
-    return ListTile(
-      leading: const AppIconTile(
-          icon: Icons.person_outline, tone: AppTone.pink, size: 32),
-      title: Text(
-        contact.name,
-        style: const TextStyle(fontWeight: FontWeight.w500),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (hasPhone)
-            Row(
-              children: [
-                const Icon(Icons.phone, size: 14),
-                const SizedBox(width: 4),
-                Expanded(child: Text(contact.phone!)),
-              ],
-            ),
-          if (hasEmail)
-            Row(
-              children: [
-                const Icon(Icons.email, size: 14),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(contact.email!),
-                ),
-              ],
-            ),
-        ],
-      ),
+    final colors = AppPalette.of(context);
+    final details = [
+      if (hasPhone) contact.phone!,
+      if (hasEmail) contact.email!,
+    ];
+    return AppListRow(
+      icon: AppIcons.person,
+      title: contact.name,
+      subtitle: details.isEmpty ? null : details.join('\n'),
       trailing: canEdit || hasPhone || hasEmail
           ? PopupMenuButton<String>(
+              tooltip: 'Contact options',
+              icon: Icon(AppIcons.more, size: 20, color: colors.ink),
               itemBuilder: (context) => [
                 if (hasPhone)
-                  const PopupMenuItem(
-                    value: 'call',
-                    child: Row(
-                      children: [
-                        Icon(Icons.phone),
-                        SizedBox(width: 8),
-                        Text('Call'),
-                      ],
-                    ),
-                  ),
+                  _menuItem('call', AppIcons.phone, 'Call', colors.ink),
                 if (hasEmail)
-                  const PopupMenuItem(
-                    value: 'email',
-                    child: Row(
-                      children: [
-                        Icon(Icons.email),
-                        SizedBox(width: 8),
-                        Text('Email'),
-                      ],
-                    ),
-                  ),
+                  _menuItem('email', AppIcons.email, 'Email', colors.ink),
                 if (canEdit)
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(Icons.edit),
-                        SizedBox(width: 8),
-                        Text('Edit'),
-                      ],
-                    ),
-                  ),
+                  _menuItem('edit', AppIcons.edit, 'Edit', colors.ink),
                 if (canEdit)
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete,
-                            color: Theme.of(context).colorScheme.error),
-                        const SizedBox(width: 8),
-                        Text('Delete',
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.error)),
-                      ],
-                    ),
-                  ),
+                  _menuItem('delete', AppIcons.delete, 'Delete', colors.error),
               ],
               onSelected: (value) {
                 switch (value) {
@@ -575,6 +451,23 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     );
   }
 
+  PopupMenuItem<String> _menuItem(
+    String value,
+    IconData icon,
+    String label,
+    Color color,
+  ) =>
+      PopupMenuItem(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 12),
+            Text(label, style: TextStyle(color: color)),
+          ],
+        ),
+      );
+
   void _showAddContactDialog() {
     _contactNameController.clear();
     _contactPhoneController.clear();
@@ -583,7 +476,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Contact'),
+        title: const Text('Add contact'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -592,7 +485,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _contactNameController,
                 decoration: const InputDecoration(
                   labelText: 'Name *',
-                  prefixIcon: Icon(Icons.person),
+                  prefixIcon: Icon(AppIcons.person),
                 ),
                 textCapitalization: TextCapitalization.words,
               ),
@@ -601,7 +494,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _contactPhoneController,
                 decoration: const InputDecoration(
                   labelText: 'Phone',
-                  prefixIcon: Icon(Icons.phone),
+                  prefixIcon: Icon(AppIcons.phone),
                 ),
                 keyboardType: TextInputType.phone,
               ),
@@ -610,7 +503,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _contactEmailController,
                 decoration: const InputDecoration(
                   labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
+                  prefixIcon: Icon(AppIcons.email),
                 ),
                 keyboardType: TextInputType.emailAddress,
               ),
@@ -639,7 +532,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit Contact'),
+        title: const Text('Edit contact'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -648,7 +541,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _contactNameController,
                 decoration: const InputDecoration(
                   labelText: 'Name *',
-                  prefixIcon: Icon(Icons.person),
+                  prefixIcon: Icon(AppIcons.person),
                 ),
                 textCapitalization: TextCapitalization.words,
               ),
@@ -657,7 +550,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _contactPhoneController,
                 decoration: const InputDecoration(
                   labelText: 'Phone',
-                  prefixIcon: Icon(Icons.phone),
+                  prefixIcon: Icon(AppIcons.phone),
                 ),
                 keyboardType: TextInputType.phone,
               ),
@@ -666,7 +559,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _contactEmailController,
                 decoration: const InputDecoration(
                   labelText: 'Email',
-                  prefixIcon: Icon(Icons.email),
+                  prefixIcon: Icon(AppIcons.email),
                 ),
                 keyboardType: TextInputType.emailAddress,
               ),
@@ -691,7 +584,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Contact'),
+        title: const Text('Delete contact'),
         content: Text('Are you sure you want to delete ${contact.name}?'),
         actions: [
           TextButton(
@@ -701,8 +594,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           FilledButton(
             onPressed: () => _deleteContact(contact.id),
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-                foregroundColor: Theme.of(context).colorScheme.onError),
+                backgroundColor: AppPalette.of(context).error,
+                foregroundColor: AppPalette.of(context).onError),
             child: const Text('Delete'),
           ),
         ],
@@ -889,7 +782,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Edit School'),
+        title: const Text('Edit school'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -898,7 +791,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _schoolNameController,
                 decoration: const InputDecoration(
                   labelText: 'School Name *',
-                  prefixIcon: Icon(Icons.school),
+                  prefixIcon: Icon(AppIcons.school),
                 ),
                 textCapitalization: TextCapitalization.words,
               ),
@@ -907,7 +800,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
                 controller: _schoolAddressController,
                 decoration: const InputDecoration(
                   labelText: 'Address',
-                  prefixIcon: Icon(Icons.location_on),
+                  prefixIcon: Icon(AppIcons.location),
                 ),
                 textCapitalization: TextCapitalization.words,
                 maxLines: 3,
@@ -1067,7 +960,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete School Map'),
+        title: const Text('Delete school map'),
         content: const Text(
             'Are you sure you want to delete the school map? This action cannot be undone.'),
         actions: [
@@ -1078,8 +971,8 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           FilledButton(
             onPressed: () => _deleteSchoolMap(dialogContext, school),
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-                foregroundColor: Theme.of(context).colorScheme.onError),
+                backgroundColor: AppPalette.of(context).error,
+                foregroundColor: AppPalette.of(context).onError),
             child: const Text('Delete'),
           ),
         ],
@@ -1137,5 +1030,84 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ),
       );
     }
+  }
+}
+
+/// A read-only fact: grey icon tile, muted label, value below (wraps freely).
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return MergeSemantics(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 68),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              AppIconTile(icon: icon, size: 29),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: AppTypography.footnote.copyWith(
+                          color: colors.muted, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      style: AppTypography.body.copyWith(color: colors.ink),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoMessage extends StatelessWidget {
+  const _InfoMessage({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppIconTile(icon: icon, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: AppTypography.body
+                  .copyWith(color: AppPalette.of(context).muted),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

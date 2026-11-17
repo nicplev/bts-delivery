@@ -196,7 +196,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(
           find.text('Classroom records ready on this device'), findsOneWidget);
-      await tester.tap(find.text('Year 1'));
+      // Records list classrooms across year levels directly.
+      expect(find.text('Year 1 · 0 of 10 packs'), findsOneWidget);
+      await tester.ensureVisible(find.text('Room A'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Room A'));
       await tester.pumpAndSettle();
@@ -246,7 +248,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('This visit isn’t available offline yet'), findsOneWidget);
-    expect(find.text('Year 1'), findsNothing);
+    expect(find.text('Room A'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -372,15 +374,17 @@ void main() {
 
     expect(find.text('Classroom records ready on this device'), findsOneWidget);
     await tester.dragUntilVisible(
-      find.text('Year 1'),
+      find.text('Room A'),
       find.byType(NestedScrollView),
       const Offset(0, -120),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Year 1').hitTestable(), findsOneWidget);
+    expect(find.text('Room A').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.text('Sign-Off'));
+    // The section switch scrolls with the large title.
+    await scrollVisitTo(find.text('Sign-off'), delta: 160);
+    await tester.tap(find.text('Sign-off'));
     await tester.pumpAndSettle();
     expect(find.text('of 10 packs recorded'), findsOneWidget);
     expect(find.text('10 packs outstanding in 1 classroom'), findsOneWidget);
@@ -578,6 +582,7 @@ void main() {
     container.read(queue.notifier).state = emptyQueue;
     await tester.pumpAndSettle();
 
+    await scrollVisitTo(find.text('Info'), delta: 160);
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
     await scrollVisitTo(find.text('School Information'));
@@ -590,16 +595,18 @@ void main() {
     expect(find.byType(GoogleMap), findsNothing);
     expect(tester.takeException(), isNull);
 
+    await scrollVisitTo(find.text('Records'), delta: 160);
     await tester.tap(find.text('Records'));
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
-      find.text('Year 1'),
+      find.text('Room A'),
       find.byType(NestedScrollView),
       const Offset(0, -120),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Year 1').hitTestable(), findsOneWidget);
-    await tester.tap(find.text('Sign-Off'));
+    expect(find.text('Room A').hitTestable(), findsOneWidget);
+    await scrollVisitTo(find.text('Sign-off'), delta: 160);
+    await tester.tap(find.text('Sign-off'));
     await tester.pumpAndSettle();
     await openCapture();
     container.read(membership.notifier).state =

@@ -5,6 +5,9 @@ import '../models/school_timer.dart';
 import '../providers/school_timer_providers.dart';
 import 'design/design.dart';
 
+/// The visit timer condensed to one row ("Timer 00:00:14" + a grey Start /
+/// Stop capsule for staff who can control it). History and manual entries
+/// live in the hub's Info tab.
 class SchoolTimerWidget extends ConsumerStatefulWidget {
   final String schoolId;
 
@@ -78,14 +81,10 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
         }
 
         final running = activeTimer?.isActive ?? false;
-        return _buildTimerPanel(
+        return _buildTimerRow(
           context,
-          tone: running ? AppTone.green : AppTone.neutral,
-          icon: running ? Icons.timer : Icons.timer_outlined,
-          label: running
-              ? 'Started by ${activeTimer!.startedByName}'
-              : 'Visit timer',
           elapsed: _formatDuration(_displayedElapsed),
+          note: running ? 'Started by ${activeTimer!.startedByName}' : null,
           action: canControl
               ? _buildControlButton(
                   context,
@@ -95,85 +94,78 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
               : null,
         );
       },
-      loading: () => _buildTimerPanel(
+      loading: () => _buildTimerRow(context, status: 'Loading visit timer…'),
+      error: (error, _) => _buildTimerRow(
         context,
-        icon: Icons.timer_outlined,
-        label: 'Loading visit timer…',
-      ),
-      error: (error, _) => _buildTimerPanel(
-        context,
-        tone: AppTone.pink,
-        icon: Icons.error_outline,
-        label: 'Timer unavailable',
+        icon: AppIcons.error,
+        status: 'Timer unavailable',
       ),
     );
   }
 
-  Widget _buildTimerPanel(
+  /// One condensed row: clock glyph, "Timer", the elapsed time (or a status)
+  /// and a grey Start/Stop capsule. Wraps onto two lines when narrow.
+  Widget _buildTimerRow(
     BuildContext context, {
-    required IconData icon,
-    required String label,
-    AppTone tone = AppTone.neutral,
+    IconData icon = HeroiconsMini.clock,
     String? elapsed,
+    String? status,
+    String? note,
     Widget? action,
   }) {
-    final textTheme = Theme.of(context).textTheme;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppTokens.gutter,
-        4,
-        AppTokens.gutter,
-        8,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final stackAction = constraints.maxWidth <
-              MediaQuery.textScalerOf(context).scale(240);
-          final display = Row(
-            children: [
-              Icon(icon, size: 20, color: tone.inkFor(context)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (elapsed != null)
-                      Text(
-                        elapsed,
-                        style: textTheme.titleMedium?.copyWith(
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                          fontWeight: FontWeight.w700,
-                          color: tone.inkFor(context),
-                        ),
-                      ),
-                    Text(
-                      label,
-                      style: textTheme.bodySmall?.copyWith(
-                        color: AppPalette.of(context).muted,
-                      ),
+    final colors = AppPalette.of(context);
+    final label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: colors.muted),
+        const SizedBox(width: 6),
+        Text(
+          'Timer',
+          style: AppTypography.subheadline.copyWith(color: colors.muted),
+        ),
+      ],
+    );
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 48),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                label,
+                if (elapsed != null)
+                  Text(
+                    elapsed,
+                    key: const ValueKey('visit-timer-elapsed'),
+                    style: AppTypography.subheadline.copyWith(
+                      color: colors.ink,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
-                  ],
-                ),
+                  ),
+                if (status != null)
+                  Text(
+                    status,
+                    style:
+                        AppTypography.subheadline.copyWith(color: colors.muted),
+                  ),
+                if (action != null) action,
+              ],
+            ),
+            if (note != null)
+              Text(
+                note,
+                style: AppTypography.footnote.copyWith(color: colors.muted),
               ),
-            ],
-          );
-
-          if (action == null) return display;
-          if (stackAction) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [display, const SizedBox(height: 8), action],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: display),
-              const SizedBox(width: 8),
-              action,
-            ],
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -185,59 +177,38 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
   }) {
     final isRunning = activeTimer != null && activeTimer.isActive;
 
-    return FilledButton.icon(
-      onPressed: isLoading
-          ? null
-          : () async {
-              final notifier = ref.read(schoolTimerNotifierProvider.notifier);
-              if (isRunning) {
-                final success =
-                    await notifier.stopTimer(widget.schoolId, activeTimer.id);
-                if (!success && context.mounted) {
-                  final error = ref.read(schoolTimerNotifierProvider).error;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content:
-                          Text(error?.toString() ?? 'Failed to stop timer'),
-                    ),
-                  );
-                }
-              } else {
-                final success = await notifier.startTimer(widget.schoolId);
-                if (!success && context.mounted) {
-                  final error = ref.read(schoolTimerNotifierProvider).error;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content:
-                          Text(error?.toString() ?? 'Failed to start timer'),
-                    ),
-                  );
-                }
-              }
-            },
-      icon: isLoading
-          ? SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppPalette.of(context).muted,
+    return AppSecondaryButton(
+      key: const ValueKey('visit-timer-control'),
+      label: isRunning ? 'Stop' : 'Start',
+      icon: isRunning ? AppIcons.stop : AppIcons.play,
+      expand: false,
+      large: false,
+      loading: isLoading,
+      onPressed: () async {
+        final notifier = ref.read(schoolTimerNotifierProvider.notifier);
+        if (isRunning) {
+          final success =
+              await notifier.stopTimer(widget.schoolId, activeTimer.id);
+          if (!success && context.mounted) {
+            final error = ref.read(schoolTimerNotifierProvider).error;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(error?.toString() ?? 'Failed to stop timer'),
               ),
-            )
-          : Icon(
-              isRunning ? Icons.stop : Icons.play_arrow,
-              size: 20,
-            ),
-      label: Text(isRunning ? 'Stop' : 'Start'),
-      style: FilledButton.styleFrom(
-        backgroundColor:
-            isRunning ? AppTone.pink.tintFor(context) : AppTone.green.accent,
-        foregroundColor: isRunning
-            ? AppTone.pink.inkFor(context)
-            : AppPalette.of(context).actionInk,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        minimumSize: const Size(64, 48),
-      ),
+            );
+          }
+        } else {
+          final success = await notifier.startTimer(widget.schoolId);
+          if (!success && context.mounted) {
+            final error = ref.read(schoolTimerNotifierProvider).error;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(error?.toString() ?? 'Failed to start timer'),
+              ),
+            );
+          }
+        }
+      },
     );
   }
 }

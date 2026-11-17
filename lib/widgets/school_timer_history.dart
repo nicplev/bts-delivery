@@ -4,8 +4,10 @@ import 'package:intl/intl.dart';
 import '../models/school_timer.dart';
 import '../providers/school_timer_providers.dart';
 import '../providers/auth_providers.dart';
-import '../app/theme/app_tokens.dart';
+import 'design/design.dart';
 
+/// Completed visit timers as neutral rows (admins can edit, delete and add
+/// manual entries). Sized to its content; place it inside a card.
 class SchoolTimerHistory extends ConsumerWidget {
   final String schoolId;
   final bool readOnly;
@@ -29,100 +31,58 @@ class SchoolTimerHistory extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final historyAsync = ref.watch(schoolTimerHistoryProvider(schoolId));
     final isAdmin = !readOnly && ref.watch(isAdminProvider);
+    final colors = AppPalette.of(context);
 
     return historyAsync.when(
       data: (timers) {
         if (timers.isEmpty) {
-          return Container(
-            padding: const EdgeInsets.all(24),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.history,
-                    size: 48,
-                    color: AppPalette.of(context).muted,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No timer history yet',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: AppPalette.of(context).muted,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Completed timers will appear here',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppPalette.of(context).muted,
-                    ),
-                  ),
-                  if (isAdmin) ...[
-                    const SizedBox(height: 16),
-                    TextButton.icon(
-                      onPressed: () => _showAddEditDialog(context, ref, null),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Manual Entry'),
-                    ),
-                  ],
-                ],
-              ),
-            ),
+          return _Message(
+            icon: AppIcons.timer,
+            title: 'No timer history yet',
+            description: 'Completed timers will appear here',
+            action: isAdmin
+                ? AppSecondaryButton(
+                    key: const ValueKey('add-manual-timer-entry'),
+                    label: 'Add manual entry',
+                    icon: AppIcons.add,
+                    large: false,
+                    onPressed: () => _showAddEditDialog(context, ref, null),
+                  )
+                : null,
           );
         }
 
-        return ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: timers.length,
-          separatorBuilder: (context, index) => Divider(
-            height: 1,
-            color: AppPalette.of(context).outline,
-          ),
-          itemBuilder: (context, index) {
-            final timer = timers[index];
-            return _TimerHistoryTile(
-              timer: timer,
-              schoolId: schoolId,
-              formatDuration: _formatDuration,
-              isAdmin: isAdmin,
-              onEdit: () => _showAddEditDialog(context, ref, timer),
-              onDelete: () => _showDeleteConfirmation(context, ref, timer),
-            );
-          },
-        );
-      },
-      loading: () => Container(
-        padding: const EdgeInsets.all(24),
-        child: const Center(
-          child: CircularProgressIndicator(),
-        ),
-      ),
-      error: (error, _) => Container(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.error_outline,
-                size: 48,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Failed to load timer history',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: AppPalette.of(context).muted,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var index = 0; index < timers.length; index++) ...[
+              if (index > 0)
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  indent: 57,
+                  color: colors.separator,
                 ),
+              _TimerHistoryTile(
+                timer: timers[index],
+                schoolId: schoolId,
+                formatDuration: _formatDuration,
+                isAdmin: isAdmin,
+                onEdit: () => _showAddEditDialog(context, ref, timers[index]),
+                onDelete: () =>
+                    _showDeleteConfirmation(context, ref, timers[index]),
               ),
             ],
-          ),
-        ),
+          ],
+        );
+      },
+      loading: () => const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, _) => const _Message(
+        icon: AppIcons.error,
+        title: 'Failed to load timer history',
       ),
     );
   }
@@ -146,7 +106,7 @@ class SchoolTimerHistory extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Timer Entry'),
+        title: const Text('Delete timer entry'),
         content: Text(
           'Are you sure you want to delete the timer entry from ${dateFormat.format(timer.startedAt)}?',
         ),
@@ -170,10 +130,56 @@ class SchoolTimerHistory extends ConsumerWidget {
               }
             },
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-                foregroundColor: Theme.of(context).colorScheme.onError),
+                backgroundColor: AppPalette.of(context).error,
+                foregroundColor: AppPalette.of(context).onError),
             child: const Text('Delete'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Message extends StatelessWidget {
+  const _Message({
+    required this.icon,
+    required this.title,
+    this.description,
+    this.action,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? description;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppIconTile(icon: icon, size: 48),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: AppTypography.headline.copyWith(color: colors.ink),
+          ),
+          if (description != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              description!,
+              textAlign: TextAlign.center,
+              style: AppTypography.footnote.copyWith(color: colors.muted),
+            ),
+          ],
+          if (action != null) ...[
+            const SizedBox(height: 12),
+            action!,
+          ],
         ],
       ),
     );
@@ -201,156 +207,81 @@ class _TimerHistoryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('MMM d, yyyy');
     final timeFormat = DateFormat('h:mm a');
+    final colors = AppPalette.of(context);
+    final people = [
+      'Started by ${timer.startedByName}',
+      if (timer.stoppedByName != null) 'Stopped by ${timer.stoppedByName}',
+    ].join(' · ');
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Date column
-          SizedBox(
-            width: 90,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  dateFormat.format(timer.startedAt),
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: AppPalette.of(context).ink,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 68),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 4, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const AppIconTile(icon: AppIcons.timer, size: 29),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${dateFormat.format(timer.startedAt)} · ${timeFormat.format(timer.startedAt)}',
+                    style: AppTypography.body.copyWith(color: colors.ink),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  timeFormat.format(timer.startedAt),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppPalette.of(context).muted,
+                  const SizedBox(height: 2),
+                  Text(
+                    formatDuration(timer.elapsed),
+                    style: AppTypography.subheadline.copyWith(
+                      color: colors.ink,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          // Duration column
-          SizedBox(
-            width: 80,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTone.green.tintFor(context),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                formatDuration(timer.elapsed),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  color: AppTone.green.inkFor(context),
-                ),
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // Staff info column
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.play_arrow,
-                      size: 14,
-                      color: AppTone.green.inkFor(context),
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        timer.startedByName,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppPalette.of(context).muted,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                if (timer.stoppedByName != null) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.stop,
-                        size: 14,
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          timer.stoppedByName!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppPalette.of(context).muted,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    people,
+                    style: AppTypography.footnote.copyWith(color: colors.muted),
                   ),
                 ],
-              ],
-            ),
-          ),
-
-          // Admin menu
-          if (isAdmin)
-            PopupMenuButton<String>(
-              icon: Icon(
-                Icons.more_vert,
-                size: 20,
-                color: AppPalette.of(context).muted,
               ),
-              onSelected: (value) {
-                if (value == 'edit') {
-                  onEdit();
-                } else if (value == 'delete') {
-                  onDelete();
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit, size: 18),
-                      SizedBox(width: 8),
-                      Text('Edit'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete,
-                          size: 18, color: Theme.of(context).colorScheme.error),
-                      const SizedBox(width: 8),
-                      Text('Delete',
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.error)),
-                    ],
-                  ),
-                ),
-              ],
             ),
-        ],
+            if (isAdmin)
+              PopupMenuButton<String>(
+                tooltip: 'Timer entry options',
+                icon: Icon(AppIcons.more, size: 20, color: colors.ink),
+                onSelected: (value) {
+                  if (value == 'edit') {
+                    onEdit();
+                  } else if (value == 'delete') {
+                    onDelete();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(AppIcons.edit, size: 20, color: colors.ink),
+                        const SizedBox(width: 12),
+                        const Text('Edit'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(AppIcons.delete, size: 20, color: colors.error),
+                        const SizedBox(width: 12),
+                        Text('Delete', style: TextStyle(color: colors.error)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -500,115 +431,101 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
     }
   }
 
+  /// A labelled pair of date and time picker buttons.
+  Widget _dateTimeFields({
+    required String label,
+    required String date,
+    required String time,
+    required VoidCallback onDate,
+    required VoidCallback onTime,
+  }) {
+    final colors = AppPalette.of(context);
+    final dateButton = OutlinedButton.icon(
+      onPressed: onDate,
+      icon: const Icon(AppIcons.calendar, size: 18),
+      label: Text(date),
+    );
+    final timeButton = OutlinedButton.icon(
+      onPressed: onTime,
+      icon: const Icon(AppIcons.timer, size: 18),
+      label: Text(time),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          label,
+          style: AppTypography.footnote
+              .copyWith(color: colors.muted, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        // Stacked: the dialog sizes itself intrinsically, and two pickers side
+        // by side do not fit large text on narrow screens.
+        dateButton,
+        const SizedBox(height: 8),
+        timeButton,
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('MMM d, yyyy');
     final timeFormat = DateFormat('h:mm a');
     final isEditing = widget.timer != null;
+    final colors = AppPalette.of(context);
+    final invalid = _duration.isNegative;
 
     return AlertDialog(
-      title: Text(isEditing ? 'Edit Timer Entry' : 'Add Timer Entry'),
+      title: Text(isEditing ? 'Edit timer entry' : 'Add timer entry'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Start Time
-            Text(
-              'Start Time',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppPalette.of(context).muted,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _selectDate(context, true),
-                    icon: const Icon(Icons.calendar_today, size: 16),
-                    label: Text(dateFormat.format(_startDate)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _selectTime(context, true),
-                    icon: const Icon(Icons.access_time, size: 16),
-                    label: Text(timeFormat
-                        .format(_combineDateAndTime(_startDate, _startTime))),
-                  ),
-                ),
-              ],
+            _dateTimeFields(
+              label: 'Start time',
+              date: dateFormat.format(_startDate),
+              time: timeFormat
+                  .format(_combineDateAndTime(_startDate, _startTime)),
+              onDate: () => _selectDate(context, true),
+              onTime: () => _selectTime(context, true),
             ),
             const SizedBox(height: 16),
-
-            // Stop Time
-            Text(
-              'Stop Time',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppPalette.of(context).muted,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _selectDate(context, false),
-                    icon: const Icon(Icons.calendar_today, size: 16),
-                    label: Text(dateFormat.format(_stopDate)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _selectTime(context, false),
-                    icon: const Icon(Icons.access_time, size: 16),
-                    label: Text(timeFormat
-                        .format(_combineDateAndTime(_stopDate, _stopTime))),
-                  ),
-                ),
-              ],
+            _dateTimeFields(
+              label: 'Stop time',
+              date: dateFormat.format(_stopDate),
+              time:
+                  timeFormat.format(_combineDateAndTime(_stopDate, _stopTime)),
+              onDate: () => _selectDate(context, false),
+              onTime: () => _selectTime(context, false),
             ),
             const SizedBox(height: 20),
-
-            // Duration
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
+            DecoratedBox(
               decoration: BoxDecoration(
-                color: _duration.isNegative
-                    ? AppTone.pink.tintFor(context)
-                    : AppTone.green.tintFor(context),
-                borderRadius: BorderRadius.circular(8),
+                color: invalid ? colors.errorContainer : colors.surfaceQuiet,
+                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Duration: ',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: AppPalette.of(context).muted,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Duration: ',
+                      style: AppTypography.subheadline.copyWith(
+                          color: invalid ? colors.error : colors.muted),
                     ),
-                  ),
-                  Text(
-                    _formatDuration(_duration),
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                      color: _duration.isNegative
-                          ? Theme.of(context).colorScheme.error
-                          : AppTone.green.inkFor(context),
+                    Text(
+                      _formatDuration(_duration),
+                      style: AppTypography.headline.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                        color: invalid ? colors.error : colors.ink,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -620,13 +537,13 @@ class _TimerEntryDialogState extends State<TimerEntryDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _isLoading || _duration.isNegative ? null : _save,
+          onPressed: _isLoading || invalid ? null : _save,
           child: _isLoading
               ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppPalette.of(context).ink),
+                      strokeWidth: 2, color: colors.muted),
                 )
               : Text(isEditing ? 'Save' : 'Add'),
         ),
