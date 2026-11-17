@@ -208,8 +208,8 @@ class _RecordsTabState extends ConsumerState<RecordsTab> {
   }
 }
 
-/// The year chips: the foundation's filter for real year levels, followed by
-/// neutral chips for specialist / composite / other year levels.
+/// The year chips for real year levels, followed by neutral chips for
+/// specialist / composite / other year levels.
 class _YearFilterRow extends StatelessWidget {
   const _YearFilterRow({
     required this.years,
@@ -223,91 +223,25 @@ class _YearFilterRow extends StatelessWidget {
   final String? selected;
   final ValueChanged<String> onToggle;
 
-  static const _chip = 44.0;
-  static const _gap = 8.0;
-
   @override
   Widget build(BuildContext context) {
-    final selectedYears = {
-      for (final year in years)
-        if (selected == 'year:${year.name}') year,
-    };
-    final yearFilter = AppYearFilter(
+    return AppYearFilter(
       years: years,
-      selected: selectedYears,
+      selected: {
+        for (final year in years)
+          if (selected == 'year:${year.name}') year,
+      },
       onToggle: (year) => onToggle('year:${year.name}'),
-    );
-    if (others.isEmpty) return yearFilter;
-    return Semantics(
-      container: true,
-      label: 'Filter by year level',
-      explicitChildNodes: true,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            if (years.isNotEmpty) ...[
-              // Sized to its chips so the filter's own scroll view never
-              // needs to scroll inside this one.
-              SizedBox(
-                width: years.length * _chip + (years.length - 1) * _gap,
-                child: yearFilter,
-              ),
-              const SizedBox(width: _gap),
-            ],
-            for (var i = 0; i < others.length; i++) ...[
-              if (i > 0) const SizedBox(width: _gap),
-              _NeutralYearChip(
-                level: others[i],
-                selected: selected == 'level:${others[i].id}',
-                onTap: () => onToggle('level:${others[i].id}'),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Neutral filter chip for a year level that has no year colour.
-class _NeutralYearChip extends StatelessWidget {
-  const _NeutralYearChip({
-    required this.level,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final YearLevel level;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppPalette.of(context);
-    const size = _YearFilterRow._chip;
-    return AppPressable(
-      key: ValueKey('year-filter-level-${level.id}'),
-      onTap: onTap,
-      semanticLabel: yearLevelWords(level.label),
-      selected: selected,
-      excludeChildSemantics: true,
-      child: SizedBox.square(
-        dimension: size,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: selected ? Border.all(color: colors.ink, width: 2.5) : null,
+      extras: [
+        for (final level in others)
+          AppYearFilterExtra(
+            id: 'level-${level.id}',
+            label: level.label,
+            semanticLabel: yearLevelWords(level.label),
+            selected: selected == 'level:${level.id}',
+            onTap: () => onToggle('level:${level.id}'),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(selected ? 4.5 : 0),
-            child: AppYearBadge(
-              label: level.label,
-              size: selected ? size - 9 : size,
-            ),
-          ),
-        ),
-      ),
+      ],
     );
   }
 }

@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import '../../widgets/design/design.dart';
 
@@ -12,7 +11,7 @@ import '../../widgets/design/design.dart';
 /// Content is given either as [children] (laid out in one column with the
 /// screen gutters) or as [slivers] for lists that need their own sliver (e.g.
 /// a reorderable list). On wide screens the content is centred at [maxWidth].
-class AdminPage extends StatefulWidget {
+class AdminPage extends StatelessWidget {
   const AdminPage({
     super.key,
     required this.title,
@@ -20,6 +19,7 @@ class AdminPage extends StatefulWidget {
     this.subtitleWidget,
     this.navActions = const [],
     this.showBack,
+    this.backLabel = 'Back',
     this.action,
     this.children = const [],
     this.slivers,
@@ -36,6 +36,9 @@ class AdminPage extends StatefulWidget {
   /// Forces the glass back button on/off (default: shown when a route can pop).
   final bool? showBack;
 
+  /// Screen-reader label of the back button ("Back to profile").
+  final String backLabel;
+
   /// The one floating primary action (usually an [AppGlassPrimaryButton]).
   final Widget? action;
 
@@ -47,119 +50,48 @@ class AdminPage extends StatefulWidget {
   final double maxWidth;
 
   @override
-  State<AdminPage> createState() => _AdminPageState();
-}
-
-class _AdminPageState extends State<AdminPage> {
-  /// Keeps the scroll view (and its position) when the floating action
-  /// appears or disappears: `AppFloatingActionArea` wraps the content in a
-  /// `Stack` only while it has an action, which would otherwise rebuild it.
-  final _contentKey = GlobalKey();
-
-  /// Measured height of the floating action. `AppFloatingActionArea` reserves
-  /// room for a one-line label; at large text sizes the label wraps, so the
-  /// difference is added to the bottom of the scroll view.
-  double _actionHeight = 0;
-
-  void _onActionHeight(double height) {
-    if (mounted && height != _actionHeight) {
-      setState(() => _actionHeight = height);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final title = widget.title;
-    final subtitle = widget.subtitle;
-    final subtitleWidget = widget.subtitleWidget;
-    final slivers = widget.slivers;
-    final children = widget.children;
-    final maxWidth = widget.maxWidth;
-    final action = widget.action;
+    final slivers = this.slivers;
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppNavBar(actions: widget.navActions, showBack: widget.showBack),
+      appBar: AppNavBar(
+          actions: navActions, showBack: showBack, backLabel: backLabel),
       body: AppFloatingActionArea(
-        action: action == null
-            ? null
-            : _MeasureHeight(onHeight: _onActionHeight, child: action),
-        child: LayoutBuilder(
-            key: _contentKey,
-            builder: (context, constraints) {
-              final reserved = AppFloatingActionArea.reservedHeight(context);
-              final overflow = action == null
-                  ? 0.0
-                  : math.max(
-                      0.0,
-                      _actionHeight +
-                          AppTokens.floatingActionGap * 2 -
-                          reserved);
-              final insets = AppInsets.scroll(context, bottom: 24 + overflow);
-              final side = math.max(
-                  AppTokens.gutter, (constraints.maxWidth - maxWidth) / 2);
-              EdgeInsets gutters(double top, double bottom) =>
-                  EdgeInsets.fromLTRB(side, top, side, bottom);
-              return CustomScrollView(
-                slivers: [
-                  SliverPadding(
-                    padding: gutters(insets.top, 16),
-                    sliver: SliverToBoxAdapter(
-                      child: AppLargeTitle(
-                        title: title,
-                        subtitle: subtitle,
-                        subtitleWidget: subtitleWidget,
-                      ),
-                    ),
+        action: action,
+        child: LayoutBuilder(builder: (context, constraints) {
+          final insets = AppInsets.scroll(context);
+          final side =
+              math.max(AppTokens.gutter, (constraints.maxWidth - maxWidth) / 2);
+          EdgeInsets gutters(double top, double bottom) =>
+              EdgeInsets.fromLTRB(side, top, side, bottom);
+          return CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: gutters(insets.top, 16),
+                sliver: SliverToBoxAdapter(
+                  child: AppLargeTitle(
+                    title: title,
+                    subtitle: subtitle,
+                    subtitleWidget: subtitleWidget,
                   ),
-                  if (slivers != null)
-                    for (final sliver in slivers)
-                      SliverPadding(padding: gutters(0, 0), sliver: sliver)
-                  else
-                    SliverPadding(
-                      padding: gutters(0, 0),
-                      sliver: SliverList(
-                        delegate: SliverChildListDelegate(children),
-                      ),
-                    ),
-                  SliverPadding(
-                      padding: EdgeInsets.only(bottom: insets.bottom)),
-                ],
-              );
-            }),
+                ),
+              ),
+              if (slivers != null)
+                for (final sliver in slivers)
+                  SliverPadding(padding: gutters(0, 0), sliver: sliver)
+              else
+                SliverPadding(
+                  padding: gutters(0, 0),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate(children),
+                  ),
+                ),
+              SliverPadding(padding: EdgeInsets.only(bottom: insets.bottom)),
+            ],
+          );
+        }),
       ),
     );
-  }
-}
-
-/// Reports its child's laid-out height after each layout that changes it.
-class _MeasureHeight extends SingleChildRenderObjectWidget {
-  const _MeasureHeight({required this.onHeight, required super.child});
-
-  final ValueChanged<double> onHeight;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) =>
-      _RenderMeasureHeight(onHeight);
-
-  @override
-  void updateRenderObject(
-          BuildContext context, _RenderMeasureHeight renderObject) =>
-      renderObject.onHeight = onHeight;
-}
-
-class _RenderMeasureHeight extends RenderProxyBox {
-  _RenderMeasureHeight(this.onHeight);
-
-  ValueChanged<double> onHeight;
-  double? _last;
-
-  @override
-  void performLayout() {
-    super.performLayout();
-    final height = size.height;
-    if (height == _last) return;
-    _last = height;
-    WidgetsBinding.instance.addPostFrameCallback((_) => onHeight(height));
   }
 }
 
@@ -219,24 +151,11 @@ class AdminOptionsButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppPalette.of(context);
     return AppPressable(
       onTap: onPressed,
       semanticLabel: semanticLabel,
       excludeChildSemantics: true,
-      child: SizedBox.square(
-        dimension: AppTokens.minTouchTarget,
-        child: Center(
-          child: DecoratedBox(
-            decoration:
-                BoxDecoration(color: colors.fill, shape: BoxShape.circle),
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Icon(AppIcons.more, size: 18, color: colors.ink),
-            ),
-          ),
-        ),
-      ),
+      child: const AppMenuCircle(),
     );
   }
 }
@@ -328,13 +247,4 @@ class AdminDestructiveButton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Destructive confirm button for dialogs (error fill).
-ButtonStyle adminDestructiveStyle(BuildContext context) {
-  final colors = AppPalette.of(context);
-  return FilledButton.styleFrom(
-    backgroundColor: colors.error,
-    foregroundColor: colors.onError,
-  );
 }

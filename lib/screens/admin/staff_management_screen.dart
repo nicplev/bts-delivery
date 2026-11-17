@@ -88,6 +88,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     );
 
     return AdminPage(
+      backLabel: 'Back to profile',
       title: 'Staff management',
       subtitle: count == null
           ? null
@@ -126,7 +127,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
         AdminSheetAction(
             value: _StaffChoice.invite,
             label: 'Create invitation',
-            icon: HeroiconsOutline.key),
+            icon: AppIcons.invitation),
         AdminSheetAction(
             value: _StaffChoice.calendar,
             label: 'Manage calendar',
@@ -200,7 +201,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                   icon: const Icon(AppIcons.chevronDown, size: 20),
                   decoration: const InputDecoration(
                     labelText: 'Role',
-                    prefixIcon: Icon(HeroiconsOutline.identification, size: 20),
+                    prefixIcon: Icon(AppIcons.role, size: 20),
                   ),
                   items: const [
                     DropdownMenuItem(value: 'staff', child: Text('Staff')),
@@ -429,7 +430,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                 // Then delete
                 await _deleteStaff(staff);
               },
-              style: adminDestructiveStyle(context),
+              style: appDestructiveButtonStyle(context),
               child: const Text('Delete'),
             ),
           ],
@@ -500,9 +501,9 @@ class _StaffRow extends StatelessWidget {
             child: AppIconTile(
               size: 29,
               icon: staff.isAdmin
-                  ? HeroiconsOutline.shieldCheck
+                  ? AppIcons.admin
                   : staff.isManager
-                      ? HeroiconsOutline.shieldExclamation
+                      ? AppIcons.manager
                       : AppIcons.person,
             ),
           ),
@@ -524,7 +525,7 @@ class _StaffRow extends StatelessWidget {
                       const AppStatusPill(label: 'Manager'),
                     AppStatusPill(
                       label: isLinked ? 'Linked to user account' : 'Not linked',
-                      icon: isLinked ? AppIcons.check : HeroiconsOutline.link,
+                      icon: isLinked ? AppIcons.check : AppIcons.link,
                     ),
                     Consumer(
                       builder: (context, ref, child) {

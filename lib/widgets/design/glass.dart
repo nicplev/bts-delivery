@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../app/theme/app_tokens.dart';
 import 'app_icons.dart';
@@ -181,6 +182,9 @@ class _AppPressableState extends State<AppPressable> {
 }
 
 /// 44 pt round glass button for the nav area (back, options…).
+///
+/// [tooltip] adds a long-press / hover tooltip (the semantics label stays
+/// [semanticLabel]); [loading] swaps the icon for a spinner and disables it.
 class AppGlassIconButton extends StatelessWidget {
   const AppGlassIconButton({
     super.key,
@@ -189,6 +193,8 @@ class AppGlassIconButton extends StatelessWidget {
     required this.onPressed,
     this.size = AppTokens.navButtonSize,
     this.iconSize = 20,
+    this.tooltip,
+    this.loading = false,
   });
 
   final IconData icon;
@@ -198,61 +204,248 @@ class AppGlassIconButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final double size;
   final double iconSize;
+  final String? tooltip;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
-    final colors = AppPalette.of(context);
-    return AppPressable(
-      onTap: onPressed,
+    final button = AppPressable(
+      onTap: loading ? null : onPressed,
       semanticLabel: semanticLabel,
       excludeChildSemantics: true,
-      child: SizedBox.square(
-        dimension: size,
-        child: AppGlass(
-          borderRadius: BorderRadius.circular(size / 2),
-          child: Center(child: Icon(icon, size: iconSize, color: colors.ink)),
+      child: AppGlassCircle(
+        icon: icon,
+        size: size,
+        iconSize: iconSize,
+        loading: loading,
+      ),
+    );
+    if (tooltip == null) return button;
+    return Tooltip(
+        message: tooltip!, excludeFromSemantics: true, child: button);
+  }
+}
+
+/// The glass circle drawn by [AppGlassIconButton] and [AppGlassMenuButton]
+/// (no tap handling or semantics of its own).
+class AppGlassCircle extends StatelessWidget {
+  const AppGlassCircle({
+    super.key,
+    required this.icon,
+    this.size = AppTokens.navButtonSize,
+    this.iconSize = 20,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final double size;
+  final double iconSize;
+
+  /// Shows a spinner instead of [icon].
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = AppPalette.of(context).ink;
+    return SizedBox.square(
+      dimension: size,
+      child: AppGlass(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: Center(
+          child: loading
+              ? SizedBox.square(
+                  dimension: iconSize - 2,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: ink),
+                )
+              : Icon(icon, size: iconSize, color: ink),
         ),
       ),
     );
   }
 }
 
-/// Glass status capsule for the nav area (icon + label, e.g. "Offline").
-class AppGlassStatus extends StatelessWidget {
-  const AppGlassStatus({super.key, required this.label, this.icon});
+/// A 44 pt glass nav button that opens a popup menu (filter, "more"…).
+/// [tooltip] is also its semantics label.
+class AppGlassMenuButton<T> extends StatelessWidget {
+  const AppGlassMenuButton({
+    super.key,
+    required this.tooltip,
+    required this.itemBuilder,
+    this.onSelected,
+    this.icon = AppIcons.more,
+    this.enabled = true,
+    this.initialValue,
+  });
 
-  final String label;
-  final IconData? icon;
+  final String tooltip;
+  final PopupMenuItemBuilder<T> itemBuilder;
+  final PopupMenuItemSelected<T>? onSelected;
+  final IconData icon;
+  final bool enabled;
+  final T? initialValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<T>(
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      enabled: enabled,
+      initialValue: initialValue,
+      itemBuilder: itemBuilder,
+      onSelected: onSelected,
+      child: AppGlassCircle(icon: icon),
+    );
+  }
+}
+
+/// An opaque in-content "more" button (44 pt target, grey circle, ink glyph)
+/// that opens a popup menu: the per-row / per-card options control.
+/// [tooltip] is also its semantics label.
+class AppMenuButton<T> extends StatelessWidget {
+  const AppMenuButton({
+    super.key,
+    required this.tooltip,
+    required this.itemBuilder,
+    this.onSelected,
+    this.icon = AppIcons.more,
+    this.enabled = true,
+  });
+
+  final String tooltip;
+  final PopupMenuItemBuilder<T> itemBuilder;
+  final PopupMenuItemSelected<T>? onSelected;
+  final IconData icon;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<T>(
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      enabled: enabled,
+      itemBuilder: itemBuilder,
+      onSelected: onSelected,
+      child: AppMenuCircle(icon: icon),
+    );
+  }
+}
+
+/// The grey circle drawn by [AppMenuButton] in a 44 pt target.
+class AppMenuCircle extends StatelessWidget {
+  const AppMenuCircle({super.key, this.icon = AppIcons.more});
+
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
-    return Semantics(
-      liveRegion: true,
-      container: true,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: AppTokens.navButtonSize),
-        child: AppGlass(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 18, color: colors.ink),
-                const SizedBox(width: 6),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.subheadline
-                      .copyWith(fontWeight: FontWeight.w600, color: colors.ink),
-                ),
-              ),
-            ],
+    return SizedBox.square(
+      dimension: AppTokens.minTouchTarget,
+      child: Center(
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: colors.fill, shape: BoxShape.circle),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(icon, size: 20, color: colors.ink),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A popup menu row: optional ink [icon] and a body label; [destructive]
+/// rows use the error colour (delete).
+PopupMenuItem<T> appMenuItem<T>(
+  BuildContext context,
+  T value,
+  String label, {
+  IconData? icon,
+  bool destructive = false,
+  bool enabled = true,
+}) {
+  final colors = AppPalette.of(context);
+  final ink = destructive ? colors.error : colors.ink;
+  return PopupMenuItem<T>(
+    value: value,
+    enabled: enabled,
+    child: Row(
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 20, color: ink),
+          const SizedBox(width: 12),
+        ],
+        Flexible(
+          child: Text(label, style: AppTypography.body.copyWith(color: ink)),
+        ),
+      ],
+    ),
+  );
+}
+
+/// Glass status capsule for the nav area (icon + label, e.g. "Offline").
+///
+/// A live region, so changes are announced. The label wraps (centred) at
+/// large text sizes instead of being cut off. With [onTap] it is a button
+/// whose screen-reader label is [semanticLabel] (default: [label]).
+class AppGlassStatus extends StatelessWidget {
+  const AppGlassStatus({
+    super.key,
+    required this.label,
+    this.icon,
+    this.onTap,
+    this.semanticLabel,
+  });
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback? onTap;
+
+  /// Replaces [label] for screen readers (e.g. "Offline. Show uploads").
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final capsule = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: AppTokens.minTouchTarget),
+      child: AppGlass(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 18, color: colors.ink),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: AppTypography.subheadline
+                    .copyWith(fontWeight: FontWeight.w600, color: colors.ink),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (onTap == null) {
+      return Semantics(
+        liveRegion: true,
+        container: true,
+        label: semanticLabel,
+        excludeSemantics: semanticLabel != null,
+        child: capsule,
+      );
+    }
+    return Semantics(
+      liveRegion: true,
+      child: AppPressable(
+        onTap: onTap,
+        semanticLabel: semanticLabel ?? label,
+        excludeChildSemantics: true,
+        child: capsule,
       ),
     );
   }
@@ -327,7 +520,11 @@ class AppGlassPrimaryButton extends StatelessWidget {
 /// scrolling [child] content, and adds the space it covers to the child's
 /// `MediaQuery` bottom padding (read it with `AppInsets.scroll(context)` or let
 /// a `ListView` without explicit padding pick it up).
-class AppFloatingActionArea extends StatelessWidget {
+///
+/// The reserved space follows the action's laid-out height (a label that wraps
+/// at large text sizes reserves more), and [child] keeps its element and
+/// scroll position when the action appears or disappears.
+class AppFloatingActionArea extends StatefulWidget {
   const AppFloatingActionArea({super.key, required this.child, this.action});
 
   final Widget child;
@@ -335,39 +532,98 @@ class AppFloatingActionArea extends StatelessWidget {
   /// Usually an [AppGlassPrimaryButton]; `null` shows nothing.
   final Widget? action;
 
-  /// Bottom space the floating action covers (button + gap), text-scale aware.
-  static double reservedHeight(BuildContext context) {
-    final buttonHeight = math.max(AppTokens.primaryButtonHeight,
-        MediaQuery.textScalerOf(context).scale(22) + 24);
-    return buttonHeight + AppTokens.floatingActionGap * 2;
+  /// Estimated bottom space a one-line floating action covers (button + gaps),
+  /// text-scale aware. Used until the action has been measured.
+  static double reservedHeight(BuildContext context) =>
+      _estimatedActionHeight(context) + AppTokens.floatingActionGap * 2;
+
+  static double _estimatedActionHeight(BuildContext context) => math.max(
+      AppTokens.primaryButtonHeight,
+      MediaQuery.textScalerOf(context).scale(22) + 24);
+
+  @override
+  State<AppFloatingActionArea> createState() => _AppFloatingActionAreaState();
+}
+
+class _AppFloatingActionAreaState extends State<AppFloatingActionArea> {
+  double? _actionHeight;
+
+  void _onActionHeight(double height) {
+    if (mounted && widget.action != null && height != _actionHeight) {
+      setState(() => _actionHeight = height);
+    }
+  }
+
+  @override
+  void didUpdateWidget(AppFloatingActionArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.action == null) _actionHeight = null;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (action == null) return child;
     final media = MediaQuery.of(context);
-    final reserve = reservedHeight(context);
-    final bottom = media.padding.bottom + reserve;
+    final action = widget.action;
+    final MediaQueryData data;
+    if (action == null) {
+      data = media;
+    } else {
+      final actionHeight = _actionHeight ??
+          AppFloatingActionArea._estimatedActionHeight(context);
+      final bottom =
+          media.padding.bottom + actionHeight + AppTokens.floatingActionGap * 2;
+      data = media.copyWith(
+        padding: media.padding.copyWith(bottom: bottom),
+        viewPadding: media.viewPadding
+            .copyWith(bottom: math.max(media.viewPadding.bottom, bottom)),
+      );
+    }
+    // The child is always the first Stack child under the same widgets, so
+    // its element (and scroll position) survives the action toggling.
     return Stack(
       children: [
-        Positioned.fill(
-          child: MediaQuery(
-            data: media.copyWith(
-              padding: media.padding.copyWith(bottom: bottom),
-              viewPadding: media.viewPadding
-                  .copyWith(bottom: math.max(media.viewPadding.bottom, bottom)),
-            ),
-            child: child,
+        Positioned.fill(child: MediaQuery(data: data, child: widget.child)),
+        if (action != null)
+          Positioned(
+            left: AppTokens.gutter,
+            right: AppTokens.gutter,
+            bottom: media.padding.bottom + AppTokens.floatingActionGap,
+            child: _MeasureHeight(onHeight: _onActionHeight, child: action),
           ),
-        ),
-        Positioned(
-          left: AppTokens.gutter,
-          right: AppTokens.gutter,
-          bottom: media.padding.bottom + AppTokens.floatingActionGap,
-          child: action!,
-        ),
       ],
     );
+  }
+}
+
+/// Reports its child's laid-out height after each layout that changes it.
+class _MeasureHeight extends SingleChildRenderObjectWidget {
+  const _MeasureHeight({required this.onHeight, required super.child});
+
+  final ValueChanged<double> onHeight;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMeasureHeight(onHeight);
+
+  @override
+  void updateRenderObject(
+          BuildContext context, _RenderMeasureHeight renderObject) =>
+      renderObject.onHeight = onHeight;
+}
+
+class _RenderMeasureHeight extends RenderProxyBox {
+  _RenderMeasureHeight(this.onHeight);
+
+  ValueChanged<double> onHeight;
+  double? _last;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final height = size.height;
+    if (height == _last) return;
+    _last = height;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onHeight(height));
   }
 }
 

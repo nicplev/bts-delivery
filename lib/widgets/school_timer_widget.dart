@@ -107,7 +107,7 @@ class _SchoolTimerWidgetState extends ConsumerState<SchoolTimerWidget> {
   /// and a grey Start/Stop capsule. Wraps onto two lines when narrow.
   Widget _buildTimerRow(
     BuildContext context, {
-    IconData icon = HeroiconsMini.clock,
+    IconData icon = AppIcons.timerMini,
     String? elapsed,
     String? status,
     String? note,

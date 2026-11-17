@@ -38,7 +38,6 @@ class AppPrimaryButton extends StatelessWidget {
         icon: icon,
         loading: loading,
         spinnerColor: colors.muted,
-        wrap: expand,
       ),
     );
     return expand ? SizedBox(width: double.infinity, child: button) : button;
@@ -82,11 +81,20 @@ class AppSecondaryButton extends StatelessWidget {
         icon: icon,
         loading: loading,
         spinnerColor: colors.ink,
-        wrap: expand,
       ),
     );
     return expand ? SizedBox(width: double.infinity, child: button) : button;
   }
+}
+
+/// Error-red fill for the confirm button of a destructive dialog ("Delete",
+/// "Sign out"). Use only in confirmations; pair with a grey Cancel.
+ButtonStyle appDestructiveButtonStyle(BuildContext context) {
+  final colors = AppPalette.of(context);
+  return FilledButton.styleFrom(
+    backgroundColor: colors.error,
+    foregroundColor: colors.onError,
+  );
 }
 
 class _ButtonContent extends StatelessWidget {
@@ -95,11 +103,7 @@ class _ButtonContent extends StatelessWidget {
     required this.icon,
     required this.loading,
     required this.spinnerColor,
-    required this.wrap,
   });
-
-  /// Let the label wrap (only safe when the button has a bounded width).
-  final bool wrap;
 
   final String label;
   final IconData? icon;
@@ -117,9 +121,11 @@ class _ButtonContent extends StatelessWidget {
         : icon == null
             ? null
             : Icon(icon, size: 20);
-    final Widget text = wrap
-        ? Flexible(child: Text(label, textAlign: TextAlign.center))
-        : Text(label, textAlign: TextAlign.center);
+    // A loose Flexible in a min-size row wraps the label within a bounded
+    // width (large text on narrow screens) and stays on one line when the
+    // width is unbounded (e.g. a non-expanded button in a Row).
+    final Widget text =
+        Flexible(child: Text(label, textAlign: TextAlign.center));
     if (leading == null) {
       return Row(
           mainAxisSize: MainAxisSize.min,

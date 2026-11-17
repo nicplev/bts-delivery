@@ -292,15 +292,9 @@ class EvidenceUploadActions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colors = AppPalette.of(context);
-    return PopupMenuButton<bool>(
+    return AppMenuButton<bool>(
       tooltip: 'Upload actions',
-      icon: Icon(AppIcons.more, color: colors.ink, size: 22),
-      constraints: const BoxConstraints(minWidth: 160),
-      style: IconButton.styleFrom(
-        minimumSize:
-            const Size(AppTokens.minTouchTarget, AppTokens.minTouchTarget),
-      ),
+      icon: AppIcons.more,
       onSelected: (retry) => _update(context, () async {
         final worker = await ref.read(evidenceUploadWorkerProvider.future);
         if (retry) {
@@ -309,12 +303,12 @@ class EvidenceUploadActions extends ConsumerWidget {
           await worker.pause(item.id);
         }
       }),
-      itemBuilder: (_) => [
+      itemBuilder: (context) => [
         if (item.paused || item.error != null)
-          PopupMenuItem(
-              value: true, child: Text(item.paused ? 'Resume' : 'Retry')),
+          appMenuItem(context, true, item.paused ? 'Resume' : 'Retry',
+              icon: AppIcons.retry),
         if (!item.paused)
-          const PopupMenuItem(value: false, child: Text('Pause')),
+          appMenuItem(context, false, 'Pause', icon: AppIcons.paused),
       ],
     );
   }
@@ -350,8 +344,6 @@ class _LegacyPhotoRecoveryState extends ConsumerState<_LegacyPhotoRecovery> {
     final photos = store.legacyPhotosForRecovery;
     if (photos.isEmpty) return const SizedBox.shrink();
     final colors = AppPalette.of(context);
-    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -363,14 +355,7 @@ class _LegacyPhotoRecoveryState extends ConsumerState<_LegacyPhotoRecovery> {
             title: 'Recover older classroom photos',
             subtitle: 'Export a local copy for review.',
             showChevron: false,
-            trailing: AnimatedRotation(
-              turns: _expanded ? 0.5 : 0,
-              duration: reduceMotion
-                  ? Duration.zero
-                  : const Duration(milliseconds: 200),
-              child:
-                  Icon(AppIcons.chevronDown, size: 18, color: colors.chevron),
-            ),
+            trailing: AppDisclosureChevron(expanded: _expanded),
             onTap: () => setState(() => _expanded = !_expanded),
           ),
         ),

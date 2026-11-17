@@ -95,17 +95,13 @@ void main() {
         isNot(AppTheme.darkTheme.scaffoldBackgroundColor));
   });
 
-  test('old brand tones resolve to neutral and warning is amber', () {
+  test('tones are neutral grey or warning amber only', () {
+    expect(AppTone.values, [AppTone.neutral, AppTone.warning]);
     for (final colors in _palettes) {
-      for (final tone in AppTone.values.where((t) => t != AppTone.warning)) {
-        expect(tone.tintOn(colors), colors.surfaceQuiet);
-        expect(tone.inkOn(colors), colors.ink);
-      }
+      expect(AppTone.neutral.tintOn(colors), colors.surfaceQuiet);
+      expect(AppTone.neutral.inkOn(colors), colors.ink);
       expect(AppTone.warning.tintOn(colors), colors.warningTint);
       expect(AppTone.warning.inkOn(colors), colors.warningInk);
-    }
-    for (final tone in AppTone.values.where((t) => t != AppTone.warning)) {
-      expect(_isNeutral(tone.accent), isTrue, reason: '$tone');
     }
   });
 
@@ -166,25 +162,6 @@ void main() {
       expect(SchoolYear.parse(label), year, reason: label);
     });
     expect(SchoolYear.parse(null), isNull);
-  });
-
-  testWidgets('legacy year helpers use the new mapping', (tester) async {
-    late BuildContext context;
-    await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.darkTheme,
-      home: Builder(builder: (c) {
-        context = c;
-        return const SizedBox();
-      }),
-    ));
-    expect(YearLevelColors.getBackgroundColor(context, 'Year 1'),
-        const Color(0xFFD62828));
-    expect(YearLevelColors.getIconColor(context, 'Year 1'), Colors.white);
-    expect(YearLevelColors.getBackgroundColor(context, 'Specialist'),
-        const AppPalette(dark: true).surfaceQuiet);
-    expect(YearLevelColors.needsBorder('Prep'), isTrue);
-    expect(YearLevelColors.needsBorder('Year 2'), isFalse);
-    expect(YearLevelColors.needsBorder('Prep', context), isTrue);
   });
 
   testWidgets('startup follows system dark and high contrast settings',

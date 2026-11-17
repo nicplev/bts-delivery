@@ -277,10 +277,10 @@ class _NextVisitCard extends ConsumerWidget {
         ref.watch(deliveryChecklistStatusProvider(delivery.id)));
     final facts = [
       if (_plural(delivery.vehicleCount, 'vehicle') case final vehicles?)
-        (HeroiconsMini.truck, vehicles),
+        (AppIcons.vehiclesMini, vehicles),
       if (_plural(delivery.palletCount, 'pallet') case final pallets?)
-        (HeroiconsMini.cube, pallets),
-      if (staffNames.isNotEmpty) (HeroiconsMini.users, staffNames.join(', ')),
+        (AppIcons.palletsMini, pallets),
+      if (staffNames.isNotEmpty) (AppIcons.staffMini, staffNames.join(', ')),
     ];
     final notes = delivery.notes?.trim();
 
@@ -586,7 +586,6 @@ class _VisitOptionsButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colors = AppPalette.of(context);
     final isAdmin = ref.watch(isAdminProvider);
     final canEdit = ref.watch(canAssignDeliveriesProvider);
     final checklist = includeChecklist
@@ -595,23 +594,12 @@ class _VisitOptionsButton extends ConsumerWidget {
         : null;
 
     PopupMenuItem<String> item(String value, IconData icon, String label,
-            {Color? color}) =>
-        PopupMenuItem(
-          value: value,
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: color ?? colors.ink),
-              const SizedBox(width: 12),
-              Flexible(
-                child: Text(label, style: TextStyle(color: color)),
-              ),
-            ],
-          ),
-        );
+            {bool destructive = false}) =>
+        appMenuItem(context, value, label,
+            icon: icon, destructive: destructive);
 
-    return PopupMenuButton<String>(
+    return AppMenuButton<String>(
       tooltip: tooltip,
-      padding: EdgeInsets.zero,
       itemBuilder: (context) => [
         if (checklist != null)
           item('checklist', AppIcons.checklist,
@@ -619,7 +607,7 @@ class _VisitOptionsButton extends ConsumerWidget {
         if (canEdit) item('edit', AppIcons.edit, 'Edit'),
         if (isAdmin) item('staff', AppIcons.people, 'Manage staff'),
         if (isAdmin)
-          item('delete', AppIcons.delete, 'Delete', color: colors.error),
+          item('delete', AppIcons.delete, 'Delete', destructive: true),
       ],
       onSelected: (value) {
         switch (value) {
@@ -633,19 +621,6 @@ class _VisitOptionsButton extends ConsumerWidget {
             _openStaffAllocation(context, ref, delivery);
         }
       },
-      child: SizedBox.square(
-        dimension: AppTokens.minTouchTarget,
-        child: Center(
-          child: DecoratedBox(
-            decoration:
-                BoxDecoration(color: colors.fill, shape: BoxShape.circle),
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Icon(AppIcons.more, size: 20, color: colors.ink),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -678,7 +653,6 @@ Future<void> _deleteDelivery(
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) {
-      final colors = AppPalette.of(context);
       return AlertDialog(
         title: const Text('Delete delivery?'),
         content: Text(
@@ -691,10 +665,7 @@ Future<void> _deleteDelivery(
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: colors.error,
-              foregroundColor: colors.onError,
-            ),
+            style: appDestructiveButtonStyle(context),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),

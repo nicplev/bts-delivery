@@ -218,7 +218,7 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
       // Share the file
       await Share.shareXFiles(
         [XFile(filePath)],
-        subject: 'Classroom Import Template',
+        subject: 'Classroom import template',
         text:
             'Use this CSV template to bulk import classrooms for ${widget.schoolName}',
       );
@@ -268,7 +268,8 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
     );
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppNavBar(showBack: true, onBack: _goBack),
+      appBar: AppNavBar(
+          showBack: true, onBack: _goBack, backLabel: 'Back to school'),
       body: AppFloatingActionArea(
         action: imported
             ? AppGlassPrimaryButton(
@@ -339,7 +340,7 @@ class _BulkImportScreenState extends ConsumerState<BulkImportScreen> {
                     const SizedBox(height: 8),
                     AppSecondaryButton(
                       onPressed: _pasteTemplate,
-                      icon: HeroiconsOutline.clipboardDocument,
+                      icon: AppIcons.paste,
                       label: 'Paste template',
                       large: false,
                     ),

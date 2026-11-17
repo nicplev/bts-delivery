@@ -97,6 +97,7 @@ class AppIconTile extends StatelessWidget {
 }
 
 /// Section label above a card: 13 pt semibold muted (e.g. "Next visit").
+/// A [trailing] control moves under the label at large text / narrow width.
 class AppSectionLabel extends StatelessWidget {
   const AppSectionLabel(this.text, {super.key, this.trailing, this.color});
 
@@ -124,14 +125,29 @@ class AppSectionLabel extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: trailing == null
           ? label
-          : Row(children: [
-              Expanded(child: label),
-              const SizedBox(width: 12),
-              trailing!,
-            ]),
+          : LayoutBuilder(builder: (context, constraints) {
+              if (appStackTrailing(context, constraints)) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [label, const SizedBox(height: 8), trailing!],
+                );
+              }
+              return Row(children: [
+                Expanded(child: label),
+                const SizedBox(width: 12),
+                trailing!,
+              ]);
+            }),
     );
   }
 }
+
+/// Whether a trailing control should move under its text instead of sharing
+/// the line: at large text sizes or in a narrow (< 240 pt) or unbounded width.
+bool appStackTrailing(BuildContext context, BoxConstraints constraints) =>
+    !constraints.hasBoundedWidth ||
+    constraints.maxWidth < 240 ||
+    MediaQuery.textScalerOf(context).scale(17) > 24;
 
 /// Section title with an optional trailing action that wraps below the title
 /// on narrow or large-text layouts.
@@ -322,6 +338,125 @@ class AppListRow extends StatelessWidget {
       excludeChildSemantics: semanticLabel != null,
       pressedColor: colors.fill,
       child: row,
+    );
+  }
+}
+
+/// Chevron that points down when collapsed and up when [expanded]
+/// (rotation respects reduce motion).
+class AppDisclosureChevron extends StatelessWidget {
+  const AppDisclosureChevron({super.key, required this.expanded});
+
+  final bool expanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return ExcludeSemantics(
+      child: AnimatedRotation(
+        turns: expanded ? 0.5 : 0,
+        duration:
+            reduceMotion ? Duration.zero : const Duration(milliseconds: 200),
+        child: Icon(AppIcons.chevronDown,
+            size: 18, color: AppPalette.of(context).chevron),
+      ),
+    );
+  }
+}
+
+/// A ripple-free, collapsed-by-default row (optional [leading] / [icon],
+/// title, subtitle, chevron) that shows [children] below it when expanded.
+/// Use inside an opaque card; it carries the expanded semantics state.
+class AppDisclosure extends StatefulWidget {
+  const AppDisclosure({
+    super.key,
+    required this.title,
+    required this.children,
+    this.subtitle,
+    this.icon,
+    this.leading,
+    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    this.childrenPadding = const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    this.initiallyExpanded = false,
+  });
+
+  final String title;
+  final String? subtitle;
+
+  /// Shown in a 29 pt [AppIconTile]. Ignored when [leading] is set.
+  final IconData? icon;
+  final Widget? leading;
+  final List<Widget> children;
+
+  /// Padding of the header row.
+  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry childrenPadding;
+  final bool initiallyExpanded;
+
+  @override
+  State<AppDisclosure> createState() => _AppDisclosureState();
+}
+
+class _AppDisclosureState extends State<AppDisclosure> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final lead = widget.leading ??
+        (widget.icon == null
+            ? null
+            : AppIconTile(icon: widget.icon!, size: 29));
+    final header = Semantics(
+      expanded: _expanded,
+      child: AppPressable(
+        onTap: () => setState(() => _expanded = !_expanded),
+        pressedColor: colors.fill,
+        child: ConstrainedBox(
+          constraints:
+              BoxConstraints(minHeight: widget.subtitle == null ? 52 : 68),
+          child: Padding(
+            padding: widget.padding,
+            child: Row(
+              children: [
+                if (lead != null) ...[lead, const SizedBox(width: 12)],
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.title,
+                          style:
+                              AppTypography.body.copyWith(color: colors.ink)),
+                      if (widget.subtitle != null)
+                        Text(widget.subtitle!,
+                            style: AppTypography.subheadline
+                                .copyWith(color: colors.muted)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                AppDisclosureChevron(expanded: _expanded),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        header,
+        if (_expanded)
+          Padding(
+            padding: widget.childrenPadding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: widget.children,
+            ),
+          ),
+      ],
     );
   }
 }

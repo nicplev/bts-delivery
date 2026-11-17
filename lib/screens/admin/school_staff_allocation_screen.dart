@@ -264,9 +264,9 @@ class _StaffSelectionRow extends StatelessWidget {
       secondary: AppIconTile(
         size: 29,
         icon: staff.isAdmin
-            ? HeroiconsOutline.shieldCheck
+            ? AppIcons.admin
             : staff.isManager
-                ? HeroiconsOutline.shieldExclamation
+                ? AppIcons.manager
                 : AppIcons.person,
       ),
     );

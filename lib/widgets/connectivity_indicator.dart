@@ -9,8 +9,13 @@ import 'design/design.dart';
 /// Neutral glass status capsule for the nav area: "Offline", evidence waiting
 /// on this device, uploads in progress or needing review. Tapping it opens the
 /// evidence upload sheet. Hidden when there is nothing to report.
+///
+/// Placement: centred directly under the screen's large title. [padding] is
+/// applied only while the capsule is shown.
 class ConnectivityIndicator extends ConsumerWidget {
-  const ConnectivityIndicator({super.key});
+  const ConnectivityIndicator({super.key, this.padding = EdgeInsets.zero});
+
+  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -45,36 +50,14 @@ class ConnectivityIndicator extends ConsumerWidget {
             : active
                 ? AppIcons.upload
                 : AppIcons.savedOnDevice;
-    final colors = AppPalette.of(context);
-    return Center(
-      child: Semantics(
-        liveRegion: true,
-        child: AppPressable(
+    return Padding(
+      padding: padding,
+      child: Center(
+        child: AppGlassStatus(
+          label: label,
+          icon: icon,
           onTap: () => SyncStatusDetailSheet.show(context),
           semanticLabel: '$label. Show evidence uploads',
-          excludeChildSemantics: true,
-          child: ConstrainedBox(
-            constraints:
-                const BoxConstraints(minHeight: AppTokens.minTouchTarget),
-            child: AppGlass(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 18, color: colors.ink),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      style: AppTypography.subheadline.copyWith(
-                          fontWeight: FontWeight.w600, color: colors.ink),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
     );

@@ -188,7 +188,7 @@ class OfflineEarlierMapButton extends ConsumerWidget {
       padding: const EdgeInsets.only(top: 8),
       child: AppSecondaryButton(
         large: false,
-        icon: HeroiconsOutline.clock,
+        icon: AppIcons.history,
         onPressed: () => Navigator.of(context).push<void>(
           MaterialPageRoute(
             builder: (_) => OfflineMediaScreen(
@@ -279,13 +279,11 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
     }
 
     return compact
-        ? Tooltip(
-            message: action,
-            child: AppGlassIconButton(
-              icon: icon,
-              semanticLabel: action,
-              onPressed: cache == null ? null : perform,
-            ),
+        ? AppGlassIconButton(
+            icon: icon,
+            semanticLabel: action,
+            tooltip: action,
+            onPressed: cache == null ? null : perform,
           )
         : AppSecondaryButton(
             onPressed: cache == null ? null : perform,

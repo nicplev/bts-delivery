@@ -282,14 +282,10 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                 const SizedBox(height: AppTokens.sectionGap),
                 AppPanel(
                   padding: EdgeInsets.zero,
-                  child: ExpansionTile(
-                    shape: const Border(),
-                    collapsedShape: const Border(),
-                    leading:
-                        const AppIconTile(icon: AppIcons.signature, size: 29),
-                    title: const Text('Earlier school sign-off'),
-                    subtitle: const Text('No delivery visit was recorded'),
-                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: AppDisclosure(
+                    icon: AppIcons.signature,
+                    title: 'Earlier school sign-off',
+                    subtitle: 'No delivery visit was recorded',
                     children: [_buildCompletedSignOff(legacy)],
                   ),
                 ),
@@ -455,14 +451,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
                       style: AppTypography.body.copyWith(color: colors.ink)),
                 ),
                 const SizedBox(width: 6),
-                AnimatedRotation(
-                  turns: expanded ? 0.5 : 0,
-                  duration: MediaQuery.disableAnimationsOf(context)
-                      ? Duration.zero
-                      : const Duration(milliseconds: 200),
-                  child: Icon(AppIcons.chevronDown,
-                      size: 18, color: colors.chevron),
-                ),
+                AppDisclosureChevron(expanded: expanded),
               ],
             ),
           ),
@@ -1696,16 +1685,13 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
         : '${row['expectedPacks']} expected packs';
     final actual = row['actualPacksDelivered'];
 
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      shape: const Border(),
-      collapsedShape: const Border(),
+    return AppDisclosure(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      childrenPadding: const EdgeInsets.only(bottom: 8),
       leading: AppYearBadge(label: '$level', size: 32),
-      title: Text('$level · $name'),
-      subtitle: Text(
-        '$status\n$expected · ${actual == null ? 'No recorded pack count' : '$actual recorded packs'}',
-      ),
-      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      title: '$level · $name',
+      subtitle:
+          '$status\n$expected · ${actual == null ? 'No recorded pack count' : '$actual recorded packs'}',
       children: [
         for (final note in notes)
           Padding(
@@ -1713,13 +1699,21 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
             child: Text(note as String),
           ),
         for (final item in (row['consumables'] as Map).values)
-          ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            title: Text(item['itemName'] as String),
-            subtitle: Text(
-              '${item['actualQuantityDelivered'] ?? 'Unrecorded'} '
-              'of ${item['expectedQuantity']} ${item['unit']}',
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item['itemName'] as String,
+                    style: AppTypography.subheadline
+                        .copyWith(color: AppPalette.of(context).ink)),
+                Text(
+                  '${item['actualQuantityDelivered'] ?? 'Unrecorded'} '
+                  'of ${item['expectedQuantity']} ${item['unit']}',
+                  style: AppTypography.footnote
+                      .copyWith(color: AppPalette.of(context).muted),
+                ),
+              ],
             ),
           ),
       ],

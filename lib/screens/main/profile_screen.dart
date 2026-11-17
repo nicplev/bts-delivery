@@ -70,7 +70,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ? 'Administrator'
                     : isManager
                         ? 'Manager'
-                        : 'Staff Member',
+                        : 'Staff member',
               ),
               _InfoRow(
                 label: 'Account created',
@@ -94,7 +94,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _InfoRow(label: 'Name', value: staff.name),
                 _InfoRow(
                   label: 'Position',
-                  value: staff.hasManagerAccess ? 'Manager' : 'Staff Member',
+                  value: staff.hasManagerAccess ? 'Manager' : 'Staff member',
                 ),
                 _InfoRow(
                   label: 'Staff since',
@@ -111,7 +111,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               children: [
                 MergeSemantics(
                   child: AppListRow(
-                    icon: HeroiconsOutline.eye,
+                    icon: AppIcons.showAll,
                     title: 'Show all deliveries',
                     subtitle: 'View all deliveries or only yours',
                     showChevron: false,
@@ -148,7 +148,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   onTap: () => context.go('/profile/pre-delivery-checklist'),
                 ),
                 AppListRow(
-                  icon: HeroiconsOutline.documentChartBar,
+                  icon: AppIcons.report,
                   title: 'Season report',
                   subtitle: 'Export end-of-season data',
                   onTap: () => context.go('/profile/season-export'),
@@ -163,7 +163,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               separatorIndent: 57,
               children: [
                 AppListRow(
-                  icon: HeroiconsOutline.link,
+                  icon: AppIcons.link,
                   title: 'Link to staff account',
                   onTap: () => context.go('/staff-link'),
                 ),
@@ -183,7 +183,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       title: 'Profile',
       showBack: false,
       children: [
-        const ConnectivityIndicator(),
+        const ConnectivityIndicator(padding: EdgeInsets.only(bottom: 12)),
         ...content,
       ],
     );
@@ -201,7 +201,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: adminDestructiveStyle(context),
+            style: appDestructiveButtonStyle(context),
             onPressed: () {
               Navigator.pop(context);
               ref.read(authNotifierProvider.notifier).signOut();
@@ -236,14 +236,14 @@ class _ProfileHeader extends StatelessWidget {
         : isManager
             ? 'Manager'
             : linked
-                ? 'Staff Member'
+                ? 'Staff member'
                 : 'Account not linked';
 
     return AppPanel(
       child: Row(
         children: [
           AppIconTile(
-            icon: isAdmin ? HeroiconsOutline.shieldCheck : AppIcons.person,
+            icon: isAdmin ? AppIcons.admin : AppIcons.person,
             size: 48,
           ),
           const SizedBox(width: 14),
@@ -258,7 +258,7 @@ class _ProfileHeader extends StatelessWidget {
                 const SizedBox(height: 6),
                 AppStatusPill(
                   label: role,
-                  icon: linked ? null : HeroiconsOutline.link,
+                  icon: linked ? null : AppIcons.link,
                 ),
               ],
             ),

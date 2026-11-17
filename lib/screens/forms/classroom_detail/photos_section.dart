@@ -301,25 +301,17 @@ class _PhotoCard extends ConsumerWidget {
               Positioned(
                 top: 4,
                 left: 4,
-                child: Material(
-                  color: colors.surface,
-                  shape: const CircleBorder(),
-                  child: OfflineMediaDownloadButton(asset: source!),
-                ),
+                child: OfflineMediaDownloadButton(asset: source!),
               ),
             if (canRemove)
               Positioned(
                 top: 4,
                 right: 4,
-                child: Material(
-                  color: colors.surface,
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    icon: Icon(HeroiconsOutline.minusCircle,
-                        size: 20, color: colors.ink),
-                    tooltip: 'Remove from classroom',
-                    onPressed: onRemove,
-                  ),
+                child: AppGlassIconButton(
+                  icon: AppIcons.removeCircle,
+                  semanticLabel: 'Remove from classroom',
+                  tooltip: 'Remove from classroom',
+                  onPressed: onRemove,
                 ),
               ),
           ],
@@ -330,7 +322,7 @@ class _PhotoCard extends ConsumerWidget {
 }
 
 /// Amber notice for saved photos that need a decision (paused, failed or a
-/// local storage problem); "Review" moves below the text when it is large.
+/// local storage problem).
 class _AttentionNotice extends StatelessWidget {
   const _AttentionNotice({required this.onReview});
 
@@ -338,23 +330,14 @@ class _AttentionNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final review = AppSecondaryButton(
-      label: 'Review',
-      expand: false,
-      large: false,
-      onPressed: onReview,
-    );
-    if (MediaQuery.textScalerOf(context).scale(17) <= 24) {
-      return AppNotice.warning(
-          message: 'Saved photos need attention', trailing: review);
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const AppNotice.warning(message: 'Saved photos need attention'),
-        const SizedBox(height: 8),
-        review,
-      ],
+    return AppNotice.warning(
+      message: 'Saved photos need attention',
+      trailing: AppSecondaryButton(
+        label: 'Review',
+        expand: false,
+        large: false,
+        onPressed: onReview,
+      ),
     );
   }
 }

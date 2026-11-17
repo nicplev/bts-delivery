@@ -42,7 +42,7 @@ class _SchoolsBulkImportScreenState
 
       final result = await Share.shareXFiles(
         [XFile(file.path)],
-        text: 'School Import Template',
+        text: 'School import template',
       );
 
       if (mounted && result.status == ShareResultStatus.success) {
@@ -142,6 +142,7 @@ class _SchoolsBulkImportScreenState
     final colors = AppPalette.of(context);
     const mono = TextStyle(fontFamily: 'monospace', fontSize: 13);
     return AdminPage(
+      backLabel: 'Back to schools',
       title: 'Import schools',
       subtitle: 'Add many schools at once from CSV data.',
       action: AppGlassPrimaryButton(
@@ -180,8 +181,7 @@ class _SchoolsBulkImportScreenState
               decoration: InputDecoration(
                 hintText: 'Paste CSV data',
                 suffixIcon: IconButton(
-                  icon:
-                      const Icon(HeroiconsOutline.clipboardDocument, size: 20),
+                  icon: const Icon(AppIcons.paste, size: 20),
                   onPressed: _pasteFromClipboard,
                   tooltip: 'Paste from clipboard',
                 ),

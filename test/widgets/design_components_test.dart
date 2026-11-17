@@ -281,6 +281,271 @@ void main() {
     expect(pressed, isTrue);
   });
 
+  testWidgets(
+      'floating action area reserves the measured action height and keeps '
+      'the scroll position when the action toggles', (tester) async {
+    late EdgeInsets inner;
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    Widget page({required bool action, double textScale = 1}) => MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: const Size(320, 640),
+              textScaler: TextScaler.linear(textScale),
+            ),
+            child: Scaffold(
+              body: AppFloatingActionArea(
+                action: action
+                    ? AppGlassPrimaryButton(
+                        label: 'Continue to signature and review',
+                        onPressed: () {},
+                      )
+                    : null,
+                child: Builder(builder: (context) {
+                  inner = MediaQuery.paddingOf(context);
+                  return ListView.builder(
+                    controller: controller,
+                    itemCount: 60,
+                    itemBuilder: (_, i) =>
+                        SizedBox(height: 40, child: Text('Row $i')),
+                  );
+                }),
+              ),
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(page(action: false));
+    controller.jumpTo(400);
+    await tester.pump();
+    await tester.pumpWidget(page(action: true));
+    await tester.pumpAndSettle();
+    expect(controller.offset, 400);
+    await tester.pumpWidget(page(action: false));
+    await tester.pumpAndSettle();
+    expect(controller.offset, 400);
+    expect(inner.bottom, 0);
+
+    // A label that wraps at 200 % text reserves its real height.
+    await tester.pumpWidget(page(action: true, textScale: 2));
+    await tester.pumpAndSettle();
+    final button = tester.getSize(find.byType(AppGlassPrimaryButton)).height;
+    expect(button, greaterThan(AppTokens.primaryButtonHeight * 1.5));
+    expect(inner.bottom, button + AppTokens.floatingActionGap * 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('non-expanded buttons wrap their label at 200 % on 320 pt',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: MediaQuery(
+        data: const MediaQueryData(
+            size: Size(320, 640), textScaler: TextScaler.linear(2)),
+        child: Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppSecondaryButton(
+                  label: 'Open previously saved map for this school',
+                  icon: AppIcons.history,
+                  expand: false,
+                  onPressed: () {},
+                ),
+                AppPrimaryButton(
+                  label: 'Download every photo for offline use',
+                  expand: false,
+                  onPressed: () {},
+                ),
+                Row(children: [
+                  AppSecondaryButton(
+                      label: 'Clear', expand: false, onPressed: () {}),
+                ]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.byType(AppSecondaryButton).first).width,
+        lessThanOrEqualTo(288));
+  });
+
+  testWidgets('year filter adds neutral chips with their own keys',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    var tapped = '';
+    await tester.pumpWidget(_app(AppYearFilter(
+      years: const [SchoolYear.year1],
+      selected: const {},
+      onToggle: (year) => tapped = year.name,
+      extras: [
+        AppYearFilterExtra(
+          id: 'level-spec',
+          label: 'Specialist',
+          selected: true,
+          onTap: () => tapped = 'spec',
+        ),
+      ],
+    )));
+    expect(find.byKey(const ValueKey('year-filter-year1')), findsOneWidget);
+    final chip = find.byKey(const ValueKey('year-filter-level-spec'));
+    expect(chip, findsOneWidget);
+    expect(find.text('S'), findsOneWidget);
+    expect(
+      tester.getSemantics(chip),
+      matchesSemantics(
+        label: 'Specialist',
+        isButton: true,
+        isEnabled: true,
+        hasEnabledState: true,
+        hasSelectedState: true,
+        isSelected: true,
+        hasTapAction: true,
+        hasFocusAction: true,
+        isFocusable: true,
+      ),
+    );
+    await tester.tap(chip);
+    expect(tapped, 'spec');
+    semantics.dispose();
+  });
+
+  testWidgets('glass status is tappable with its own label and wraps',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    var taps = 0;
+    await tester.pumpWidget(_app(SizedBox(
+      width: 200,
+      child: AppGlassStatus(
+        label: 'Offline · 3 saved on this device',
+        icon: AppIcons.offline,
+        semanticLabel: 'Offline. Show uploads',
+        onTap: () => taps++,
+      ),
+    )));
+    expect(find.bySemanticsLabel('Offline. Show uploads'), findsOneWidget);
+    expect(tester.getSize(find.byType(AppGlassStatus)).height,
+        greaterThan(AppTokens.minTouchTarget));
+    await tester.tap(find.byType(AppGlassStatus));
+    expect(taps, 1);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('glass icon and menu buttons show tooltips and a spinner',
+      (tester) async {
+    String? chosen;
+    await tester.pumpWidget(_app(Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AppGlassIconButton(
+          icon: AppIcons.retry,
+          semanticLabel: 'Refresh connection',
+          tooltip: 'Refresh connection',
+          loading: true,
+          onPressed: () => chosen = 'pressed',
+        ),
+        AppGlassMenuButton<String>(
+          tooltip: 'Delivery options',
+          onSelected: (value) => chosen = value,
+          itemBuilder: (context) => [
+            appMenuItem(context, 'delete', 'Delete',
+                icon: AppIcons.delete, destructive: true),
+          ],
+        ),
+      ],
+    )));
+    expect(find.byTooltip('Refresh connection'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.tap(find.byType(AppGlassIconButton));
+    expect(chosen, isNull);
+    await tester.tap(find.byTooltip('Delivery options'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Delete'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(chosen, 'delete');
+  });
+
+  testWidgets(
+      'notice and section label move a trailing control under the '
+      'text at large text', (tester) async {
+    Widget page(double scale) => MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: MediaQuery(
+            data: MediaQueryData(
+                size: const Size(320, 640),
+                textScaler: TextScaler.linear(scale)),
+            child: Scaffold(
+              body: SizedBox(
+                width: 320,
+                child: Column(children: [
+                  AppSectionLabel('Photos',
+                      trailing: AppSecondaryButton(
+                          label: 'Add photo',
+                          expand: false,
+                          large: false,
+                          onPressed: () {})),
+                  AppNotice.warning(
+                      message: 'Saved photos need attention',
+                      trailing: AppSecondaryButton(
+                          label: 'Review',
+                          expand: false,
+                          large: false,
+                          onPressed: () {})),
+                ]),
+              ),
+            ),
+          ),
+        );
+    await tester.pumpWidget(page(1));
+    expect(
+        tester.getCenter(find.text('Review')).dy,
+        moreOrLessEquals(
+            tester.getCenter(find.text('Saved photos need attention')).dy,
+            epsilon: 12));
+    await tester.pumpWidget(page(2));
+    expect(tester.takeException(), isNull);
+    expect(
+        tester.getTopLeft(find.text('Review')).dy,
+        greaterThan(
+            tester.getBottomLeft(find.text('Saved photos need attention')).dy));
+    expect(tester.getTopLeft(find.text('Add photo')).dy,
+        greaterThan(tester.getBottomLeft(find.text('Photos')).dy));
+  });
+
+  testWidgets('nav bar shows a centred title with a subtitle', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.lightTheme,
+      home: Scaffold(
+        body: Column(children: [
+          AppNavBar(
+            showBack: true,
+            backLabel: 'Back to review',
+            backTooltip: 'Back to review',
+            onBack: () {},
+            title: 'Signature',
+            subtitle: 'Oakfield Primary · Visit 12',
+          ),
+        ]),
+      ),
+    ));
+    expect(find.byTooltip('Back to review'), findsOneWidget);
+    expect(find.text('Oakfield Primary · Visit 12'), findsOneWidget);
+    final screen = tester.getSize(find.byType(Scaffold)).width;
+    expect(tester.getCenter(find.text('Signature')).dx,
+        moreOrLessEquals(screen / 2, epsilon: 1));
+  });
+
   testWidgets('list rows are tappable and show detail and chevron',
       (tester) async {
     var taps = 0;

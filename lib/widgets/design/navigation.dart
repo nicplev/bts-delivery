@@ -44,12 +44,17 @@ bool _canGoBack(BuildContext context) {
 }
 
 /// Transparent top bar with floating glass buttons: back on the leading side,
-/// [actions] (glass buttons / [AppGlassStatus]) on the trailing side, no title.
+/// [actions] (glass buttons / [AppGlassStatus]) on the trailing side, and an
+/// optional small centred [title] with a [subtitle] under it.
 ///
 /// Pair with `Scaffold(extendBodyBehindAppBar: true)` and put an
 /// [AppLargeTitle] (or [AppYearHeader]) at the top of the scrolling content so
 /// the title scrolls with it. Back uses go_router (`context.pop()`), falling
 /// back to `Navigator.maybePop`.
+///
+/// With a [subtitle] the bar grows with its text (large text sizes), so place
+/// it above the content in a `Column` rather than as `Scaffold.appBar`, whose
+/// height is fixed to [preferredSize].
 class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
   const AppNavBar({
     super.key,
@@ -57,7 +62,10 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
     this.showBack,
     this.onBack,
     this.backLabel = 'Back',
+    this.backTooltip,
+    this.backEnabled = true,
     this.title,
+    this.subtitle,
   });
 
   /// Trailing widgets, spaced 8 pt (e.g. [AppGlassIconButton]).
@@ -72,8 +80,17 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
   /// Semantics label of the back button ("Back" or "Back to Oakfield Primary").
   final String backLabel;
 
+  /// Optional long-press / hover tooltip on the back button.
+  final String? backTooltip;
+
+  /// Disables the back button (e.g. while saving).
+  final bool backEnabled;
+
   /// Optional small centred title (most screens use [AppLargeTitle] instead).
   final String? title;
+
+  /// Muted line (up to two lines) under [title], e.g. the school and visit.
+  final String? subtitle;
 
   static const double height = AppTokens.navButtonSize + 8;
 
@@ -84,6 +101,76 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final back = showBack ?? _canGoBack(context);
     final colors = AppPalette.of(context);
+    final leading = back
+        ? AppGlassIconButton(
+            icon: AppIcons.back,
+            semanticLabel: backLabel,
+            tooltip: backTooltip,
+            onPressed:
+                !backEnabled ? null : onBack ?? () => appNavigateBack(context),
+          )
+        : null;
+    final trailing = actions.isEmpty
+        ? null
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < actions.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                actions[i],
+              ],
+            ],
+          );
+    final titleText = title == null
+        ? null
+        : Semantics(
+            header: true,
+            child: Text(title!,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.headline.copyWith(color: colors.ink)),
+          );
+    if (subtitle != null) {
+      // Grows with the text; the sides reserve one button each so the title
+      // stays centred.
+      const side = SizedBox(width: AppTokens.navButtonSize);
+      return SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppTokens.gutter, 4, AppTokens.gutter, 8),
+          child: ConstrainedBox(
+            constraints:
+                const BoxConstraints(minHeight: AppTokens.navButtonSize),
+            child: Row(
+              children: [
+                leading ?? side,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (titleText != null) titleText,
+                      Text(
+                        subtitle!,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.footnote
+                            .copyWith(color: colors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                trailing ?? side,
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return SafeArea(
       bottom: false,
       child: SizedBox(
@@ -92,34 +179,9 @@ class AppNavBar extends StatelessWidget implements PreferredSizeWidget {
           padding: const EdgeInsets.symmetric(
               horizontal: AppTokens.gutter, vertical: 4),
           child: NavigationToolbar(
-            leading: back
-                ? AppGlassIconButton(
-                    icon: AppIcons.back,
-                    semanticLabel: backLabel,
-                    onPressed: onBack ?? () => appNavigateBack(context),
-                  )
-                : null,
-            middle: title == null
-                ? null
-                : Semantics(
-                    header: true,
-                    child: Text(title!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            AppTypography.headline.copyWith(color: colors.ink)),
-                  ),
-            trailing: actions.isEmpty
-                ? null
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (var i = 0; i < actions.length; i++) ...[
-                        if (i > 0) const SizedBox(width: 8),
-                        actions[i],
-                      ],
-                    ],
-                  ),
+            leading: leading,
+            middle: titleText,
+            trailing: trailing,
           ),
         ),
       ),

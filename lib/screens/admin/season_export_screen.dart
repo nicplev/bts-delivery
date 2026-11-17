@@ -44,6 +44,7 @@ class _SeasonExportScreenState extends ConsumerState<SeasonExportScreen> {
         exportState.error == null;
 
     return AdminPage(
+      backLabel: 'Back to profile',
       title: 'Season report',
       subtitle: 'Export deliveries, signed records and timer history.',
       action: idle || exportState.isExporting

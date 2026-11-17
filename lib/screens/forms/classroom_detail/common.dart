@@ -214,70 +214,15 @@ class _MessageRow extends StatelessWidget {
   }
 }
 
-/// "More" button (44 pt) for a row's edit/delete menu.
-class _RowMenu<T> extends StatelessWidget {
-  const _RowMenu({
-    required this.tooltip,
-    required this.onSelected,
-    required this.items,
-  });
-
-  final String tooltip;
-  final ValueChanged<T> onSelected;
-  final List<PopupMenuEntry<T>> items;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppPalette.of(context);
-    return PopupMenuButton<T>(
-      tooltip: tooltip,
-      icon: Icon(AppIcons.more, color: colors.ink, size: 22),
-      constraints: const BoxConstraints(minWidth: 160),
-      style: IconButton.styleFrom(
-        minimumSize: const Size.square(AppTokens.minTouchTarget),
-      ),
-      onSelected: onSelected,
-      itemBuilder: (_) => items,
-    );
-  }
-}
-
-PopupMenuItem<T> _menuItem<T>(
-  BuildContext context,
-  T value,
-  String label,
-  IconData icon, {
-  bool destructive = false,
-}) {
-  final colors = AppPalette.of(context);
-  final ink = destructive ? colors.error : colors.ink;
-  return PopupMenuItem<T>(
-    value: value,
-    child: Row(
-      children: [
-        Icon(icon, size: 20, color: ink),
-        const SizedBox(width: 12),
-        Flexible(
-          child: Text(label, style: AppTypography.body.copyWith(color: ink)),
-        ),
-      ],
-    ),
-  );
-}
-
 /// Error-red filled button for a destructive confirmation.
 Widget _destructiveButton(
   BuildContext context, {
   required String label,
   required VoidCallback onPressed,
 }) {
-  final colors = AppPalette.of(context);
   return FilledButton(
     onPressed: onPressed,
-    style: FilledButton.styleFrom(
-      backgroundColor: colors.error,
-      foregroundColor: colors.onError,
-    ),
+    style: appDestructiveButtonStyle(context),
     child: Text(label),
   );
 }

@@ -58,7 +58,7 @@ class _StaffLinkScreenState extends ConsumerState<StaffLinkScreen> {
                       children: [
                         Row(
                           children: [
-                            const AppIconTile(icon: HeroiconsOutline.key),
+                            const AppIconTile(icon: AppIcons.invitation),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Semantics(
@@ -77,7 +77,7 @@ class _StaffLinkScreenState extends ConsumerState<StaffLinkScreen> {
                           controller: _code,
                           decoration: const InputDecoration(
                             labelText: 'Invitation code',
-                            prefixIcon: Icon(HeroiconsOutline.key, size: 20),
+                            prefixIcon: Icon(AppIcons.invitation, size: 20),
                           ),
                           inputFormatters: [
                             FilteringTextInputFormatter.allow(

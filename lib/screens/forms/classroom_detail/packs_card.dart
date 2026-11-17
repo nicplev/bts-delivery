@@ -66,17 +66,11 @@ class _PacksCard extends StatelessWidget {
     }
 
     final children = <Widget>[
-      // Wraps (rather than squeezing the label) when the text is large.
-      Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 12,
-        runSpacing: 6,
-        children: [
-          const AppSectionLabel('Packs'),
-          if (showRecorded && room != null)
-            AppStatusPill(label: _statusLabel(room.completionStatus)),
-        ],
+      AppSectionLabel(
+        'Packs',
+        trailing: showRecorded && room != null
+            ? AppStatusPill(label: _statusLabel(room.completionStatus))
+            : null,
       ),
       const SizedBox(height: 8),
       Semantics(
@@ -196,8 +190,7 @@ class _PacksCard extends StatelessWidget {
               _StatusChoice(
                 label: _statusLabel(status),
                 icon: switch (status) {
-                  ClassroomCompletionStatus.notAttended =>
-                    HeroiconsOutline.minusCircle,
+                  ClassroomCompletionStatus.notAttended => AppIcons.notAttended,
                   ClassroomCompletionStatus.incomplete => AppIcons.packs,
                   ClassroomCompletionStatus.complete => AppIcons.check,
                 },

@@ -403,7 +403,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   Widget _buildContactTile(Contact contact, {required bool canEdit}) {
     final hasPhone = contact.phone?.isNotEmpty == true;
     final hasEmail = contact.email?.isNotEmpty == true;
-    final colors = AppPalette.of(context);
     final details = [
       if (hasPhone) contact.phone!,
       if (hasEmail) contact.email!,
@@ -413,18 +412,18 @@ class _InfoTabState extends ConsumerState<InfoTab> {
       title: contact.name,
       subtitle: details.isEmpty ? null : details.join('\n'),
       trailing: canEdit || hasPhone || hasEmail
-          ? PopupMenuButton<String>(
+          ? AppMenuButton<String>(
               tooltip: 'Contact options',
-              icon: Icon(AppIcons.more, size: 20, color: colors.ink),
               itemBuilder: (context) => [
                 if (hasPhone)
-                  _menuItem('call', AppIcons.phone, 'Call', colors.ink),
+                  appMenuItem(context, 'call', 'Call', icon: AppIcons.phone),
                 if (hasEmail)
-                  _menuItem('email', AppIcons.email, 'Email', colors.ink),
+                  appMenuItem(context, 'email', 'Email', icon: AppIcons.email),
                 if (canEdit)
-                  _menuItem('edit', AppIcons.edit, 'Edit', colors.ink),
+                  appMenuItem(context, 'edit', 'Edit', icon: AppIcons.edit),
                 if (canEdit)
-                  _menuItem('delete', AppIcons.delete, 'Delete', colors.error),
+                  appMenuItem(context, 'delete', 'Delete',
+                      icon: AppIcons.delete, destructive: true),
               ],
               onSelected: (value) {
                 switch (value) {
@@ -450,23 +449,6 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           : null,
     );
   }
-
-  PopupMenuItem<String> _menuItem(
-    String value,
-    IconData icon,
-    String label,
-    Color color,
-  ) =>
-      PopupMenuItem(
-        value: value,
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: color),
-            const SizedBox(width: 12),
-            Text(label, style: TextStyle(color: color)),
-          ],
-        ),
-      );
 
   void _showAddContactDialog() {
     _contactNameController.clear();
@@ -593,9 +575,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           ),
           FilledButton(
             onPressed: () => _deleteContact(contact.id),
-            style: FilledButton.styleFrom(
-                backgroundColor: AppPalette.of(context).error,
-                foregroundColor: AppPalette.of(context).onError),
+            style: appDestructiveButtonStyle(context),
             child: const Text('Delete'),
           ),
         ],
@@ -970,9 +950,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
           ),
           FilledButton(
             onPressed: () => _deleteSchoolMap(dialogContext, school),
-            style: FilledButton.styleFrom(
-                backgroundColor: AppPalette.of(context).error,
-                foregroundColor: AppPalette.of(context).onError),
+            style: appDestructiveButtonStyle(context),
             child: const Text('Delete'),
           ),
         ],

@@ -59,55 +59,14 @@ class _SignatureCaptureScreenState extends State<_SignatureCaptureScreen> {
             builder: (captureContext) => Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        AppTokens.gutter, 4, AppTokens.gutter, 8),
-                    child: Row(
-                      children: [
-                        Tooltip(
-                          message: 'Back to review',
-                          excludeFromSemantics: true,
-                          child: AppGlassIconButton(
-                            icon: AppIcons.back,
-                            semanticLabel: 'Back to review',
-                            onPressed: _reviewing
-                                ? null
-                                : () => Navigator.of(context).pop(),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Semantics(
-                                header: true,
-                                child: Text(
-                                  'Signature',
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTypography.headline
-                                      .copyWith(color: colors.ink),
-                                ),
-                              ),
-                              Text(
-                                subtitle,
-                                textAlign: TextAlign.center,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppTypography.footnote
-                                    .copyWith(color: colors.muted),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8 + AppTokens.navButtonSize),
-                      ],
-                    ),
-                  ),
+                AppNavBar(
+                  showBack: true,
+                  backLabel: 'Back to review',
+                  backTooltip: 'Back to review',
+                  backEnabled: !_reviewing,
+                  onBack: () => Navigator.of(context).pop(),
+                  title: 'Signature',
+                  subtitle: subtitle,
                 ),
                 Expanded(
                   child: MediaQuery.removePadding(
@@ -298,7 +257,8 @@ class _BaselinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0xFFD1D1D6)
+      // The canvas is always white, so use the light-mode hairline.
+      ..color = const AppPalette().outline
       ..strokeWidth = 1
       ..strokeCap = StrokeCap.round;
     final y = size.height * 0.78;

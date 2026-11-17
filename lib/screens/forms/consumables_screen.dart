@@ -20,7 +20,7 @@ class ConsumablesScreen extends ConsumerWidget {
 
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: const AppNavBar(),
+      appBar: const AppNavBar(backLabel: 'Back to school'),
       body: AppFloatingActionArea(
         action: AppGlassPrimaryButton(
           key: const ValueKey('add-consumable'),
@@ -78,10 +78,8 @@ class ConsumablesScreen extends ConsumerWidget {
                           onTap: () =>
                               _showConsumableDialog(context, ref, consumable),
                           showChevron: false,
-                          trailing: PopupMenuButton<String>(
+                          trailing: AppMenuButton<String>(
                             tooltip: '${consumable.itemName} options',
-                            icon: Icon(AppIcons.more,
-                                size: 22, color: AppPalette.of(context).ink),
                             onSelected: (value) {
                               switch (value) {
                                 case 'edit':
@@ -93,25 +91,12 @@ class ConsumablesScreen extends ConsumerWidget {
                                   break;
                               }
                             },
-                            itemBuilder: (context) {
-                              final colors = AppPalette.of(context);
-                              return [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: _MenuLabel(
-                                      icon: AppIcons.edit,
-                                      label: 'Edit',
-                                      color: colors.ink),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: _MenuLabel(
-                                      icon: AppIcons.delete,
-                                      label: 'Delete',
-                                      color: colors.error),
-                                ),
-                              ];
-                            },
+                            itemBuilder: (context) => [
+                              appMenuItem(context, 'edit', 'Edit',
+                                  icon: AppIcons.edit),
+                              appMenuItem(context, 'delete', 'Delete',
+                                  icon: AppIcons.delete, destructive: true),
+                            ],
                           ),
                         ),
                     ],
@@ -271,7 +256,6 @@ class ConsumablesScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) {
-        final colors = AppPalette.of(context);
         return AlertDialog(
           title: const Text('Delete consumable?'),
           content:
@@ -282,10 +266,7 @@ class ConsumablesScreen extends ConsumerWidget {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: colors.error,
-                foregroundColor: colors.onError,
-              ),
+              style: appDestructiveButtonStyle(context),
               onPressed: () async {
                 final success = await ref
                     .read(schoolsNotifierProvider.notifier)
@@ -302,31 +283,6 @@ class ConsumablesScreen extends ConsumerWidget {
           ],
         );
       },
-    );
-  }
-}
-
-class _MenuLabel extends StatelessWidget {
-  const _MenuLabel({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: color),
-        const SizedBox(width: 12),
-        Flexible(
-          child: Text(label, style: AppTypography.body.copyWith(color: color)),
-        ),
-      ],
     );
   }
 }

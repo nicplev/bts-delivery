@@ -129,9 +129,7 @@ class SchoolTimerHistory extends ConsumerWidget {
                 );
               }
             },
-            style: FilledButton.styleFrom(
-                backgroundColor: AppPalette.of(context).error,
-                foregroundColor: AppPalette.of(context).onError),
+            style: appDestructiveButtonStyle(context),
             child: const Text('Delete'),
           ),
         ],
@@ -247,9 +245,8 @@ class _TimerHistoryTile extends StatelessWidget {
               ),
             ),
             if (isAdmin)
-              PopupMenuButton<String>(
+              AppMenuButton<String>(
                 tooltip: 'Timer entry options',
-                icon: Icon(AppIcons.more, size: 20, color: colors.ink),
                 onSelected: (value) {
                   if (value == 'edit') {
                     onEdit();
@@ -258,26 +255,9 @@ class _TimerHistoryTile extends StatelessWidget {
                   }
                 },
                 itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
-                        Icon(AppIcons.edit, size: 20, color: colors.ink),
-                        const SizedBox(width: 12),
-                        const Text('Edit'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(AppIcons.delete, size: 20, color: colors.error),
-                        const SizedBox(width: 12),
-                        Text('Delete', style: TextStyle(color: colors.error)),
-                      ],
-                    ),
-                  ),
+                  appMenuItem(context, 'edit', 'Edit', icon: AppIcons.edit),
+                  appMenuItem(context, 'delete', 'Delete',
+                      icon: AppIcons.delete, destructive: true),
                 ],
               ),
           ],

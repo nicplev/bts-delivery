@@ -3,9 +3,9 @@ import 'package:heroicons_flutter/heroicons_flutter.dart';
 
 /// The Heroicons the app uses, by meaning, so screens stay consistent.
 ///
-/// Outline is the default; `*Solid` variants are for selected tabs and status.
-/// For anything not listed use `HeroiconsOutline.*` / `HeroiconsSolid.*`
-/// (re-exported from `design.dart`) directly.
+/// Outline is the default; `*Solid` variants are for selected tabs and status,
+/// `*Mini` (20 pt Heroicons) for small inline metadata. Screens use these names
+/// only; add a semantic name here when a new glyph is needed.
 abstract final class AppIcons {
   // Tabs.
   static const IconData deliveries = HeroiconsOutline.truck;
@@ -20,11 +20,15 @@ abstract final class AppIcons {
   static const IconData more = HeroiconsOutline.ellipsisHorizontal;
   static const IconData chevron = HeroiconsMini.chevronRight;
   static const IconData chevronDown = HeroiconsMini.chevronDown;
+  static const IconData chevronUp = HeroiconsMini.chevronUp;
+  static const IconData previousPage = HeroiconsOutline.chevronLeft;
+  static const IconData nextPage = HeroiconsOutline.chevronRight;
   static const IconData close = HeroiconsOutline.xMark;
   static const IconData search = HeroiconsOutline.magnifyingGlass;
   static const IconData filter = HeroiconsOutline.funnel;
   static const IconData settings = HeroiconsOutline.cog6Tooth;
   static const IconData external = HeroiconsOutline.arrowTopRightOnSquare;
+  static const IconData dragHandle = HeroiconsOutline.bars3;
 
   // Status.
   static const IconData check = HeroiconsOutline.check;
@@ -42,6 +46,9 @@ abstract final class AppIcons {
   static const IconData savedToServer = HeroiconsSolid.checkCircle;
   static const IconData paused = HeroiconsOutline.pauseCircle;
   static const IconData lock = HeroiconsOutline.lockClosed;
+  static const IconData onlineOnly = HeroiconsOutline.cloud;
+  static const IconData history = HeroiconsOutline.clock;
+  static const IconData notAttended = HeroiconsOutline.minusCircle;
 
   // Visit content.
   static const IconData school = HeroiconsOutline.academicCap;
@@ -64,10 +71,33 @@ abstract final class AppIcons {
   static const IconData phone = HeroiconsOutline.phone;
   static const IconData email = HeroiconsOutline.envelope;
   static const IconData logout = HeroiconsOutline.arrowRightStartOnRectangle;
+  static const IconData report = HeroiconsOutline.documentChartBar;
+  static const IconData views = HeroiconsOutline.eye;
+
+  // Accounts and roles.
+  static const IconData admin = HeroiconsOutline.shieldCheck;
+  static const IconData manager = HeroiconsOutline.shieldExclamation;
+  static const IconData role = HeroiconsOutline.identification;
+  static const IconData invitation = HeroiconsOutline.key;
+  static const IconData verificationCode = HeroiconsOutline.shieldCheck;
+  static const IconData link = HeroiconsOutline.link;
+  static const IconData showPassword = HeroiconsOutline.eye;
+  static const IconData hidePassword = HeroiconsOutline.eyeSlash;
+  static const IconData showAll = HeroiconsOutline.eye;
+
+  // Small inline metadata (20 pt mini glyphs).
+  static const IconData timerMini = HeroiconsMini.clock;
+  static const IconData vehiclesMini = HeroiconsMini.truck;
+  static const IconData palletsMini = HeroiconsMini.cube;
+  static const IconData staffMini = HeroiconsMini.users;
 
   // Actions.
   static const IconData add = HeroiconsOutline.plus;
   static const IconData remove = HeroiconsOutline.minus;
+  static const IconData removeCircle = HeroiconsOutline.minusCircle;
+  static const IconData clearField = HeroiconsSolid.xCircle;
+  static const IconData copy = HeroiconsOutline.documentDuplicate;
+  static const IconData paste = HeroiconsOutline.clipboardDocument;
   static const IconData edit = HeroiconsOutline.pencilSquare;
   static const IconData delete = HeroiconsOutline.trash;
   static const IconData download = HeroiconsOutline.arrowDownTray;

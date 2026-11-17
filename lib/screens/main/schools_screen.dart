@@ -88,7 +88,7 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
         if (staff == null && !isAdmin) {
           return [
             DeliveryMessage(
-              icon: HeroiconsOutline.link,
+              icon: AppIcons.link,
               title: 'Account not linked',
               description: 'Link your staff account to see your schools.',
               action: Wrap(
@@ -98,7 +98,7 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
                 children: [
                   AppPrimaryButton(
                     label: 'Link account',
-                    icon: HeroiconsOutline.link,
+                    icon: AppIcons.link,
                     onPressed: () => context.go('/staff-link'),
                   ),
                   AppSecondaryButton(
@@ -194,7 +194,7 @@ class _SchoolsScreenState extends ConsumerState<SchoolsScreen> {
             suffixIcon: _searchQuery.isNotEmpty
                 ? IconButton(
                     tooltip: 'Clear search',
-                    icon: Icon(HeroiconsSolid.xCircle,
+                    icon: Icon(AppIcons.clearField,
                         size: 20, color: colors.muted),
                     onPressed: _clearSearch,
                   )
@@ -496,7 +496,7 @@ class _SchoolRow extends ConsumerWidget {
                 },
               );
             },
-            style: adminDestructiveStyle(context),
+            style: appDestructiveButtonStyle(context),
             child: const Text('Delete'),
           ),
         ],

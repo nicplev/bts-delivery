@@ -81,7 +81,7 @@ class _DistributionSection extends ConsumerWidget {
                   title: breakdown.yearLevelLabel,
                   detail: _plural(breakdown.studentCount, 'student'),
                   trailing: isAdmin
-                      ? _RowMenu<bool>(
+                      ? AppMenuButton<bool>(
                           tooltip: '${breakdown.yearLevelLabel} options',
                           onSelected: (edit) {
                             if (!context.mounted) return;
@@ -91,10 +91,11 @@ class _DistributionSection extends ConsumerWidget {
                               _delete(context, ref, breakdown);
                             }
                           },
-                          items: [
-                            _menuItem(context, true, 'Edit', AppIcons.edit),
-                            _menuItem(context, false, 'Delete', AppIcons.delete,
-                                destructive: true),
+                          itemBuilder: (context) => [
+                            appMenuItem(context, true, 'Edit',
+                                icon: AppIcons.edit),
+                            appMenuItem(context, false, 'Delete',
+                                icon: AppIcons.delete, destructive: true),
                           ],
                         )
                       : null,

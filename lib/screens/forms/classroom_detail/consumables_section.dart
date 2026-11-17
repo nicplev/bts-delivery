@@ -374,13 +374,13 @@ class _ConsumableRow extends StatelessWidget {
                   ],
                 ),
               ),
-              _RowMenu<String>(
+              AppMenuButton<String>(
                 tooltip: '${consumable.itemName} options',
                 onSelected: (value) => value == 'edit' ? onEdit() : onDelete(),
-                items: [
-                  _menuItem(context, 'edit', 'Edit', AppIcons.edit),
-                  _menuItem(context, 'delete', 'Delete', AppIcons.delete,
-                      destructive: true),
+                itemBuilder: (context) => [
+                  appMenuItem(context, 'edit', 'Edit', icon: AppIcons.edit),
+                  appMenuItem(context, 'delete', 'Delete',
+                      icon: AppIcons.delete, destructive: true),
                 ],
               ),
             ],

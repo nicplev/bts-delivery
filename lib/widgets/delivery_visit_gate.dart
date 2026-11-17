@@ -80,6 +80,7 @@ class DeliveryVisitGate extends ConsumerWidget {
       extendBodyBehindAppBar: true,
       appBar: AppNavBar(
         showBack: true,
+        backLabel: 'Back to deliveries',
         onBack: () {
           final router = GoRouter.maybeOf(context);
           if (router == null) {

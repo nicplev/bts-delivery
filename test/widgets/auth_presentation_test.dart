@@ -45,7 +45,7 @@ void main() {
     final fields = find.byType(TextFormField);
     await tester.enterText(fields.at(0), 'driver@example.test');
     await tester.enterText(fields.at(1), 'fixture-password');
-    final signIn = find.widgetWithText(FilledButton, 'Sign In');
+    final signIn = find.widgetWithText(FilledButton, 'Sign in');
     await tester.ensureVisible(signIn);
     await tester.tap(signIn);
     await tester.pumpAndSettle();

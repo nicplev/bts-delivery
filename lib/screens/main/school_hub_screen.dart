@@ -137,6 +137,7 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppNavBar(
+        backLabel: isVisit ? 'Back to deliveries' : 'Back to schools',
         actions: [
           if (showOptions)
             AppGlassIconButton(
@@ -220,7 +221,7 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                       ),
                       const SizedBox(height: 8),
                       const ConnectivityIndicator(),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                       _HubSegmentedControl(
                         controller: _tabController,
                         labels: tabs,
@@ -294,7 +295,7 @@ class _VisitSubtitle extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
-                ready ? AppIcons.savedOnDevice : HeroiconsOutline.cloud,
+                ready ? AppIcons.savedOnDevice : AppIcons.onlineOnly,
                 size: 16,
                 color: ready ? colors.ink : colors.muted,
               ),
@@ -384,11 +385,11 @@ class _HubSegmentedControl extends StatelessWidget {
               ? Border.all(color: colors.ink, width: 1.5)
               : null,
           boxShadow: selected && !colors.highContrast
-              ? const [
+              ? [
                   BoxShadow(
-                    color: Color(0x1F000000),
+                    color: colors.shadow,
                     blurRadius: 8,
-                    offset: Offset(0, 3),
+                    offset: const Offset(0, 3),
                   ),
                 ]
               : null,

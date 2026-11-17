@@ -223,13 +223,13 @@ class _NoteRow extends StatelessWidget {
         ),
         Padding(
           padding: const EdgeInsets.only(top: 4, right: 4),
-          child: _RowMenu<String>(
+          child: AppMenuButton<String>(
             tooltip: 'Note options',
             onSelected: (value) => value == 'edit' ? onEdit() : onDelete(),
-            items: [
-              _menuItem(context, 'edit', 'Edit', AppIcons.edit),
-              _menuItem(context, 'delete', 'Delete', AppIcons.delete,
-                  destructive: true),
+            itemBuilder: (context) => [
+              appMenuItem(context, 'edit', 'Edit', icon: AppIcons.edit),
+              appMenuItem(context, 'delete', 'Delete',
+                  icon: AppIcons.delete, destructive: true),
             ],
           ),
         ),

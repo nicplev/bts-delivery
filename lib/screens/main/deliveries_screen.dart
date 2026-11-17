@@ -52,29 +52,17 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
         showBack: false,
         actions: [
           if (connectivity != null)
-            _GlassNavButton(
-              label: connectivity == ConnectivityStatus.offline
-                  ? 'Reconnect to WiFi'
-                  : 'Refresh connection',
-              onPressed: _isRefreshing ? null : _refreshConnectivity,
-              child: _isRefreshing
-                  ? SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppPalette.of(context).ink,
-                      ),
-                    )
-                  : Icon(
-                      connectivity == ConnectivityStatus.offline
-                          ? AppIcons.offline
-                          : AppIcons.retry,
-                      size: 20,
-                      color: AppPalette.of(context).ink,
-                    ),
+            AppGlassIconButton(
+              icon: connectivity == ConnectivityStatus.offline
+                  ? AppIcons.offline
+                  : AppIcons.retry,
+              semanticLabel: _connectionLabel(connectivity),
+              tooltip: _connectionLabel(connectivity),
+              loading: _isRefreshing,
+              onPressed: _refreshConnectivity,
             ),
           if (canFilter)
-            _GlassMenuButton<String>(
+            AppGlassMenuButton<String>(
               tooltip: showAllDeliveries
                   ? 'Filter deliveries (all schools)'
                   : 'Filter deliveries (my schools)',
@@ -86,24 +74,25 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
                 }
               },
               itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'toggle_filter',
-                  child: Text(showAllDeliveries
-                      ? 'Show My Deliveries'
-                      : 'Show All Deliveries'),
+                appMenuItem(
+                  context,
+                  'toggle_filter',
+                  showAllDeliveries
+                      ? 'Show my deliveries'
+                      : 'Show all deliveries',
                 ),
               ],
             ),
           if (canAssignDeliveries)
-            _GlassNavButton(
-              label: 'Add delivery',
+            AppGlassIconButton(
+              icon: AppIcons.add,
+              iconSize: 22,
+              semanticLabel: 'Add delivery',
+              tooltip: 'Add delivery',
               onPressed: () => context.push('/deliveries/add'),
-              child: Icon(AppIcons.add,
-                  size: 22, color: AppPalette.of(context).ink),
             ),
-          _GlassMenuButton<String>(
+          AppGlassMenuButton<String>(
             tooltip: 'Delivery options',
-            icon: AppIcons.more,
             onSelected: (value) {
               if (value == 'subscribe') {
                 _showCalendarSubscriptionDialog();
@@ -112,10 +101,12 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
               }
             },
             itemBuilder: (context) => [
-              _menuItem(context, 'subscribe', AppIcons.calendar,
-                  'Subscribe to delivery calendar'),
-              _menuItem(context, 'manual_sync', AppIcons.retry,
-                  'Sync external calendar (legacy)'),
+              appMenuItem(
+                  context, 'subscribe', 'Subscribe to delivery calendar',
+                  icon: AppIcons.calendar),
+              appMenuItem(
+                  context, 'manual_sync', 'Sync external calendar (legacy)',
+                  icon: AppIcons.retry),
             ],
           ),
         ],
@@ -124,18 +115,10 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
     );
   }
 
-  PopupMenuItem<String> _menuItem(
-          BuildContext context, String value, IconData icon, String label) =>
-      PopupMenuItem(
-        value: value,
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: AppPalette.of(context).ink),
-            const SizedBox(width: 12),
-            Flexible(child: Text(label)),
-          ],
-        ),
-      );
+  static String _connectionLabel(ConnectivityStatus status) =>
+      status == ConnectivityStatus.offline
+          ? 'Reconnect to WiFi'
+          : 'Refresh connection';
 
   /// Large title, connection status and the Today / Calendar switcher; it
   /// scrolls with the content.
@@ -371,74 +354,6 @@ class _DeliveriesScreenState extends ConsumerState<DeliveriesScreen> {
             content: Text('Couldn’t load your calendar subscription.')),
       );
     }
-  }
-}
-
-/// 44 pt glass nav button with a tooltip (the glass foundation button has a
-/// semantics label but no tooltip, and cannot show a spinner).
-class _GlassNavButton extends StatelessWidget {
-  const _GlassNavButton({
-    required this.label,
-    required this.onPressed,
-    required this.child,
-  });
-
-  final String label;
-  final VoidCallback? onPressed;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: label,
-      excludeFromSemantics: true,
-      child: AppPressable(
-        onTap: onPressed,
-        semanticLabel: label,
-        excludeChildSemantics: true,
-        child: SizedBox.square(
-          dimension: AppTokens.navButtonSize,
-          child: AppGlass(
-            borderRadius: BorderRadius.circular(AppTokens.navButtonSize / 2),
-            child: Center(child: child),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 44 pt glass nav button that opens a menu.
-class _GlassMenuButton<T> extends StatelessWidget {
-  const _GlassMenuButton({
-    required this.tooltip,
-    required this.icon,
-    required this.itemBuilder,
-    required this.onSelected,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final PopupMenuItemBuilder<T> itemBuilder;
-  final PopupMenuItemSelected<T> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<T>(
-      tooltip: tooltip,
-      padding: EdgeInsets.zero,
-      itemBuilder: itemBuilder,
-      onSelected: onSelected,
-      child: SizedBox.square(
-        dimension: AppTokens.navButtonSize,
-        child: AppGlass(
-          borderRadius: BorderRadius.circular(AppTokens.navButtonSize / 2),
-          child: Center(
-            child: Icon(icon, size: 20, color: AppPalette.of(context).ink),
-          ),
-        ),
-      ),
-    );
   }
 }
 

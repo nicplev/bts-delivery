@@ -82,7 +82,7 @@ class ChecklistAdminList extends StatelessWidget {
       proxyDecorator: (child, index, animation) => Material(
         color: colors.surface,
         elevation: 6,
-        shadowColor: const Color(0x33000000),
+        shadowColor: colors.shadow,
         borderRadius: const BorderRadius.all(radius),
         clipBehavior: Clip.antiAlias,
         child: child,
@@ -162,7 +162,7 @@ class _ChecklistRow extends StatelessWidget {
               child: SizedBox.square(
                 dimension: AppTokens.minTouchTarget,
                 child: Center(
-                  child: Icon(HeroiconsOutline.bars3,
+                  child: Icon(AppIcons.dragHandle,
                       size: 22, color: colors.chevron),
                 ),
               ),

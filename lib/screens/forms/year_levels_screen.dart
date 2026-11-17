@@ -366,10 +366,7 @@ void showDeleteYearLevelDialog(
             );
             if (success) onDeleted?.call();
           },
-          style: FilledButton.styleFrom(
-            backgroundColor: AppPalette.of(context).error,
-            foregroundColor: AppPalette.of(context).onError,
-          ),
+          style: appDestructiveButtonStyle(context),
           child: const Text('Delete'),
         ),
       ],

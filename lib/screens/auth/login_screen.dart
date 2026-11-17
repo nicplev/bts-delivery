@@ -134,8 +134,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 suffixIcon: IconButton(
                                   icon: Icon(
                                     _obscurePassword
-                                        ? HeroiconsOutline.eye
-                                        : HeroiconsOutline.eyeSlash,
+                                        ? AppIcons.showPassword
+                                        : AppIcons.hidePassword,
                                     size: 20,
                                   ),
                                   tooltip: _obscurePassword
@@ -175,8 +175,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   labelText: 'Verification code',
                                   hintText:
                                       'Enter code provided by administrator',
-                                  prefixIcon: Icon(HeroiconsOutline.shieldCheck,
-                                      size: 20),
+                                  prefixIcon:
+                                      Icon(AppIcons.verificationCode, size: 20),
                                   helperText:
                                       'Contact your administrator for the verification code',
                                   helperMaxLines: 3,
@@ -193,7 +193,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ],
                             const SizedBox(height: 24),
                             AppPrimaryButton(
-                              label: _isSignUp ? 'Sign Up' : 'Sign In',
+                              label: _isSignUp ? 'Sign up' : 'Sign in',
                               loading: isLoading,
                               onPressed: _handleAuth,
                             ),
@@ -243,8 +243,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       });
                                     },
                               label: _isSignUp
-                                  ? 'Already have an account? Sign In'
-                                  : 'Don\'t have an account? Sign Up',
+                                  ? 'Already have an account? Sign in'
+                                  : 'Don’t have an account? Sign up',
                             ),
                           ],
                         ),

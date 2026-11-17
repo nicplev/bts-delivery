@@ -109,7 +109,6 @@ class _CalendarManagementDialogState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
-        final colors = AppPalette.of(context);
         return AlertDialog(
           scrollable: true,
           title: const Text('Regenerate calendar link?'),
@@ -136,10 +135,7 @@ class _CalendarManagementDialogState
             // Revokes the current link: a destructive action.
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: colors.error,
-                foregroundColor: colors.onError,
-              ),
+              style: appDestructiveButtonStyle(context),
               child: const Text('Regenerate'),
             ),
           ],
@@ -425,8 +421,7 @@ class _CalendarManagementDialogState
                   ),
                 ),
                 IconButton(
-                  icon:
-                      const Icon(HeroiconsOutline.documentDuplicate, size: 20),
+                  icon: const Icon(AppIcons.copy, size: 20),
                   onPressed: _copyUrl,
                   tooltip: 'Copy URL',
                 ),
@@ -462,7 +457,7 @@ class _CalendarManagementDialogState
             _buildStatRow(
               'Total accesses',
               metadata.accessCount.toString(),
-              HeroiconsOutline.eye,
+              AppIcons.views,
             ),
             Divider(height: 24, color: colors.separator),
             _buildStatRow(

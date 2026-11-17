@@ -78,15 +78,41 @@ class _YearCircle extends StatelessWidget {
   }
 }
 
-/// A row of seven 44 pt year circles for filtering; scrolls horizontally when
-/// it does not fit. Selected years show an ink ring. Each circle is a button
-/// labelled "Prep", "Year 1"… with the selected state.
+/// A neutral chip shown by [AppYearFilter] after the year circles, for a
+/// year level that is not one of the seven (specialist, composite…).
+@immutable
+class AppYearFilterExtra {
+  const AppYearFilterExtra({
+    required this.id,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.semanticLabel,
+  });
+
+  /// Keys the chip `ValueKey('year-filter-<id>')`.
+  final String id;
+
+  /// Free-text year level label; drawn as a neutral badge with its initial.
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// Screen-reader label (defaults to [label]).
+  final String? semanticLabel;
+}
+
+/// A row of 44 pt year circles for filtering; scrolls horizontally when it
+/// does not fit. Selected years show an ink ring. Each circle is a button
+/// labelled "Prep", "Year 1"… with the selected state. [extras] add neutral
+/// chips after the years for other year levels.
 class AppYearFilter extends StatelessWidget {
   const AppYearFilter({
     super.key,
     required this.selected,
     required this.onToggle,
     this.years = SchoolYear.values,
+    this.extras = const [],
     this.semanticLabel = 'Filter by year level',
     this.padding = EdgeInsets.zero,
   });
@@ -99,6 +125,9 @@ class AppYearFilter extends StatelessWidget {
 
   /// Which years to show (e.g. only those present at the school).
   final List<SchoolYear> years;
+
+  /// Neutral chips shown after [years].
+  final List<AppYearFilterExtra> extras;
   final String semanticLabel;
 
   /// Scroll padding (use the screen gutter when the row bleeds to the edges).
@@ -109,6 +138,26 @@ class AppYearFilter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
+    final chips = [
+      for (final year in years)
+        _chip(
+          colors,
+          key: ValueKey('year-filter-${year.name}'),
+          style: YearLevelColors.styleFor(year, colors),
+          semanticLabel: year.label,
+          isSelected: selected.contains(year),
+          onTap: () => onToggle(year),
+        ),
+      for (final extra in extras)
+        _chip(
+          colors,
+          key: ValueKey('year-filter-${extra.id}'),
+          style: YearLevelColors.styleForLabel(extra.label, colors),
+          semanticLabel: extra.semanticLabel ?? extra.label,
+          isSelected: extra.selected,
+          onTap: extra.onTap,
+        ),
+    ];
     return Semantics(
       container: true,
       label: semanticLabel,
@@ -118,9 +167,9 @@ class AppYearFilter extends StatelessWidget {
         padding: padding,
         child: Row(
           children: [
-            for (var i = 0; i < years.length; i++) ...[
+            for (var i = 0; i < chips.length; i++) ...[
               if (i > 0) const SizedBox(width: 8),
-              _chip(colors, years[i]),
+              chips[i],
             ],
           ],
         ),
@@ -128,13 +177,18 @@ class AppYearFilter extends StatelessWidget {
     );
   }
 
-  Widget _chip(AppPalette colors, SchoolYear year) {
-    final isSelected = selected.contains(year);
-    final style = YearLevelColors.styleFor(year, colors);
+  Widget _chip(
+    AppPalette colors, {
+    required Key key,
+    required YearLevelStyle style,
+    required String semanticLabel,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
     return AppPressable(
-      key: ValueKey('year-filter-${year.name}'),
-      onTap: () => onToggle(year),
-      semanticLabel: year.label,
+      key: key,
+      onTap: onTap,
+      semanticLabel: semanticLabel,
       selected: isSelected,
       excludeChildSemantics: true,
       child: SizedBox.square(

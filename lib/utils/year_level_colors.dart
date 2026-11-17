@@ -149,20 +149,4 @@ class YearLevelColors {
     final match = RegExp(r'[A-Za-z0-9]').firstMatch(label);
     return match == null ? '' : match.group(0)!.toUpperCase();
   }
-
-  /// Legacy: background colour for a label (year fill or neutral grey).
-  static Color getBackgroundColor(BuildContext context, String label) =>
-      styleOf(context, label).fill;
-
-  /// Legacy: glyph colour on [getBackgroundColor].
-  static Color getIconColor(BuildContext context, String label) =>
-      styleOf(context, label).onFill;
-
-  /// Legacy: whether the badge for [label] needs a hairline border. Without a
-  /// [context] this is true for Prep in any mode; pass one for the exact
-  /// answer (Prep in dark mode only).
-  static bool needsBorder(String label, [BuildContext? context]) {
-    if (context != null) return styleOf(context, label).needsBorder;
-    return SchoolYear.parse(label) == SchoolYear.prep;
-  }
 }

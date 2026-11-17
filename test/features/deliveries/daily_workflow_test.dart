@@ -204,7 +204,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Filter deliveries (my schools)'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Show All Deliveries'));
+    await tester.tap(find.text('Show all deliveries'));
     await tester.pumpAndSettle();
     expect(repository.queries.last.schools, isNull);
 

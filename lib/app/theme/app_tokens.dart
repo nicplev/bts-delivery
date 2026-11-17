@@ -56,9 +56,6 @@ class AppTokens {
       blurStyle: BlurStyle.outer,
     ),
   ];
-
-  /// Legacy panel shadow; content cards no longer use a shadow.
-  static const panelShadow = glassShadow;
 }
 
 /// The spec type scale (SF on iOS). Colours come from the theme.
@@ -213,10 +210,6 @@ class AppPalette extends ThemeExtension<AppPalette> {
         (false, _) => Colors.white,
       };
 
-  /// Label colour for the fixed dark fill returned by the legacy
-  /// `AppTone.accent` (always white). New code should use [onAction].
-  Color get actionInk => Colors.white;
-
   /// Pale amber background of warnings (never a solid fill).
   Color get warningTint => switch ((dark, highContrast)) {
         (true, true) => const Color(0xFF2E240C),
@@ -245,6 +238,10 @@ class AppPalette extends ThemeExtension<AppPalette> {
   Color get tintedGlassFill =>
       dark ? const Color(0xD9F5F5F7) : const Color(0xD91A1A1A);
 
+  /// Soft neutral shadow under raised elements (selected segment, dragged
+  /// row).
+  Color get shadow => const Color(0x1F000000);
+
   /// Modal barrier behind sheets.
   Color get scrim => const Color(0x38000000);
 
@@ -266,36 +263,13 @@ class AppPalette extends ThemeExtension<AppPalette> {
 
 /// Tint/ink pairs for tiles, pills and panels.
 ///
-/// The UI is neutral: only [neutral] and [warning] carry meaning. The old brand
-/// tones remain so existing code compiles, but they resolve to neutral.
+/// The UI is neutral: only [neutral] and [warning] exist.
 enum AppTone {
   /// Grey tint with ink text.
   neutral,
-  @Deprecated(
-      'Colour is reserved for year levels; use neutral or AppTone.warning')
-  green,
-  @Deprecated(
-      'Colour is reserved for year levels; use neutral or AppTone.warning')
-  blue,
-  @Deprecated(
-      'Colour is reserved for year levels; use neutral or AppTone.warning')
-  pink,
-  @Deprecated(
-      'Colour is reserved for year levels; use neutral or AppTone.warning')
-  yellow,
 
   /// Pale amber tint with dark amber ink: something must be decided.
   warning;
-
-  /// Legacy solid fill. Neutral returns muted grey, warning returns amber ink,
-  /// the old brand tones return the fixed light-mode action ink (pair it with
-  /// `AppPalette.actionInk`). Prefer `AppPalette.action` / `onAction`.
-  @Deprecated('Use AppPalette.action with AppPalette.onAction')
-  Color get accent => switch (this) {
-        neutral => const AppPalette().muted,
-        warning => const AppPalette().warningInk,
-        _ => const Color(0xFF1A1A1A),
-      };
 
   Color inkFor(BuildContext context) => inkOn(AppPalette.of(context));
   Color tintFor(BuildContext context) => tintOn(AppPalette.of(context));

@@ -129,7 +129,6 @@ class _CalendarSubscriptionDialogState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
-        final colors = AppPalette.of(context);
         return AlertDialog(
           scrollable: true,
           title: const Text('Regenerate calendar link?'),
@@ -145,10 +144,7 @@ class _CalendarSubscriptionDialogState
             // Revokes the current link: a destructive action.
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: colors.error,
-                foregroundColor: colors.onError,
-              ),
+              style: appDestructiveButtonStyle(context),
               child: const Text('Regenerate'),
             ),
           ],
@@ -306,7 +302,7 @@ class _CalendarSubscriptionDialogState
                     children: [
                       Icon(
                         _showAdvancedOptions
-                            ? HeroiconsMini.chevronUp
+                            ? AppIcons.chevronUp
                             : AppIcons.chevronDown,
                         size: 20,
                         color: colors.muted,
@@ -479,7 +475,7 @@ class _UrlBox extends StatelessWidget {
               ),
             ),
             IconButton(
-              icon: const Icon(HeroiconsOutline.documentDuplicate, size: 20),
+              icon: const Icon(AppIcons.copy, size: 20),
               onPressed: onCopy,
               tooltip: 'Copy URL',
             ),

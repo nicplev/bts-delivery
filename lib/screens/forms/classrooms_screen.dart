@@ -51,6 +51,7 @@ class ClassroomsScreen extends ConsumerWidget {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppNavBar(
+        backLabel: isVisit ? 'Back to visit' : 'Back to school',
         actions: [
           if (canEditYearLevel && yearLevel != null)
             AppGlassIconButton(
@@ -362,9 +363,8 @@ class _ClassroomRow extends ConsumerWidget {
             suffix:
                 '/year/${Uri.encodeComponent(yearLevelId)}/classrooms/${Uri.encodeComponent(classroom.id)}',
           )),
-          action: PopupMenuButton<String>(
+          action: AppMenuButton<String>(
             tooltip: 'Classroom options',
-            icon: Icon(AppIcons.more, size: 20, color: colors.ink),
             onSelected: (value) {
               if (value == 'edit') {
                 _showEditClassroomDialog(context, ref, classroom);
@@ -373,26 +373,9 @@ class _ClassroomRow extends ConsumerWidget {
               }
             },
             itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(AppIcons.edit, size: 20, color: colors.ink),
-                    const SizedBox(width: 12),
-                    const Text('Rename'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(AppIcons.delete, size: 20, color: colors.error),
-                    const SizedBox(width: 12),
-                    Text('Delete', style: TextStyle(color: colors.error)),
-                  ],
-                ),
-              ),
+              appMenuItem(context, 'edit', 'Rename', icon: AppIcons.edit),
+              appMenuItem(context, 'delete', 'Delete',
+                  icon: AppIcons.delete, destructive: true),
             ],
           ),
         ),
@@ -494,10 +477,7 @@ class _ClassroomRow extends ConsumerWidget {
                 }
               }
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: AppPalette.of(context).error,
-              foregroundColor: AppPalette.of(context).onError,
-            ),
+            style: appDestructiveButtonStyle(context),
             child: const Text('Delete'),
           ),
         ],

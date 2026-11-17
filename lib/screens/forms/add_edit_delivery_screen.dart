@@ -126,7 +126,7 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
   /// Loading / error / not-found states under the same chrome as the form.
   Widget _stateScaffold(Widget content) => Scaffold(
         extendBodyBehindAppBar: true,
-        appBar: const AppNavBar(),
+        appBar: const AppNavBar(backLabel: 'Back to deliveries'),
         body: Builder(
           builder: (context) => ListView(
             padding: AppInsets.scroll(context),
@@ -144,7 +144,7 @@ class _AddEditDeliveryScreenState extends ConsumerState<AddEditDeliveryScreen> {
     final colors = AppPalette.of(context);
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: const AppNavBar(),
+      appBar: const AppNavBar(backLabel: 'Back to deliveries'),
       body: AppFloatingActionArea(
         action: AppGlassPrimaryButton(
           label: 'Save delivery',

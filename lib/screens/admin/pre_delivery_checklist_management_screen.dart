@@ -28,6 +28,7 @@ class _PreDeliveryChecklistManagementScreenState
 
     if (!isAdmin) {
       return const AdminPage(
+        backLabel: 'Back to profile',
         title: 'Access denied',
         children: [
           DeliveryMessage(
@@ -47,11 +48,13 @@ class _PreDeliveryChecklistManagementScreenState
 
     return checklistAsync.when(
       loading: () => AdminPage(
+        backLabel: 'Back to profile',
         title: title,
         action: action,
         children: const [AdminLoading()],
       ),
       error: (error, _) => AdminPage(
+        backLabel: 'Back to profile',
         title: title,
         action: action,
         children: [
@@ -67,6 +70,7 @@ class _PreDeliveryChecklistManagementScreenState
         ],
       ),
       data: (items) => AdminPage(
+        backLabel: 'Back to profile',
         title: title,
         action: action,
         slivers: [
@@ -279,7 +283,7 @@ class _PreDeliveryChecklistManagementScreenState
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: adminDestructiveStyle(context),
+            style: appDestructiveButtonStyle(context),
             onPressed: () async {
               Navigator.of(dialogContext).pop();
 

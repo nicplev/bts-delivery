@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_tokens.dart';
 import 'app_icons.dart';
+import 'cards.dart' show appStackTrailing;
 
 /// Completion state shown by [AppStatusRing].
 enum AppCompletion {
@@ -234,7 +235,8 @@ class AppNotice extends StatelessWidget {
   final String message;
   final IconData icon;
 
-  /// Optional action on the right (e.g. a small [TextButton]).
+  /// Optional action on the right (e.g. a small [AppSecondaryButton]); it
+  /// moves under the message at large text / narrow width.
   final Widget? trailing;
   final bool warning;
 
@@ -251,22 +253,39 @@ class AppNotice extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: warning ? ink : colors.muted),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  message,
-                  style: AppTypography.subheadline.copyWith(
-                    color: ink,
-                    fontWeight: warning ? FontWeight.w600 : FontWeight.w400,
-                  ),
-                ),
+          child: LayoutBuilder(builder: (context, constraints) {
+            final text = Text(
+              message,
+              style: AppTypography.subheadline.copyWith(
+                color: ink,
+                fontWeight: warning ? FontWeight.w600 : FontWeight.w400,
               ),
-              if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-            ],
-          ),
+            );
+            final stack =
+                trailing != null && appStackTrailing(context, constraints);
+            return Row(
+              children: [
+                Icon(icon, size: 20, color: warning ? ink : colors.muted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: stack
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            text,
+                            const SizedBox(height: 8),
+                            trailing!
+                          ],
+                        )
+                      : text,
+                ),
+                if (trailing != null && !stack) ...[
+                  const SizedBox(width: 8),
+                  trailing!,
+                ],
+              ],
+            );
+          }),
         ),
       ),
     );

@@ -30,7 +30,11 @@ A comprehensive Flutter mobile application for Back-to-School (BTS) delivery ope
 ### Flutter & Dart
 - **Flutter**: Cross-platform mobile development (iOS/Android)
 - **Dart**: Null-safety enabled language
-- **Material Design 3**: Modern UI components and theming
+- **UI**: Neutral light/dark (and high-contrast) theme; colour is reserved for
+  year levels, defined only in `lib/utils/year_level_colors.dart`
+- **heroicons_flutter**: Icons, named by meaning in `lib/widgets/design/app_icons.dart`
+- **Design components**: Glass navigation, cards, buttons and status widgets in
+  `lib/widgets/design/` (import `design.dart`)
 
 ### State Management & Navigation
 - **Riverpod**: Reactive state management with providers
@@ -64,7 +68,7 @@ lib/
 ├── app/                    # App root configuration
 │   ├── router/            # go_router setup
 │   ├── shell/             # Bottom navigation shell
-│   └── theme/             # Material theme configuration
+│   └── theme/             # Neutral theme and design tokens
 ├── core/                  # Core utilities and configuration
 │   ├── config/            # Firebase configuration
 │   ├── env/               # Environment variables
