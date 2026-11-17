@@ -318,14 +318,40 @@ class _ConsumableRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
     final actual = consumable.actualQuantityDelivered;
+    final differs = actual != null && actual != consumable.quantity;
     final (completion, status) = actual == null
         ? (AppCompletion.notStarted, 'Quantity unrecorded')
-        : actual == consumable.quantity
+        : !differs
             ? (AppCompletion.complete, 'Delivered')
             : (AppCompletion.partial, 'Quantity differs');
     final amount = actual == null
         ? '${consumable.quantity} ${consumable.unit}'
         : '$actual / ${consumable.quantity} ${consumable.unit}';
+    // A differing quantity needs a decision before sign-off: amber pill.
+    final Widget statusLine = differs
+        ? Semantics(
+            label: status,
+            excludeSemantics: true,
+            child: const AppQuantityDiffersPill(
+                key: ValueKey('consumable-quantity-differs')),
+          )
+        : Row(
+            children: [
+              AppStatusRing(
+                status: completion,
+                size: 16,
+                semanticLabel: status,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: ExcludeSemantics(
+                  child: Text(status,
+                      style:
+                          AppTypography.footnote.copyWith(color: colors.muted)),
+                ),
+              ),
+            ],
+          );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
@@ -350,27 +376,8 @@ class _ConsumableRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(amount,
                         style: AppTypography.body.copyWith(color: colors.ink)),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        AppStatusRing(
-                          status: completion,
-                          size: 16,
-                          progress: actual == null || consumable.quantity == 0
-                              ? 0
-                              : actual / consumable.quantity,
-                          semanticLabel: status,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: ExcludeSemantics(
-                            child: Text(status,
-                                style: AppTypography.footnote
-                                    .copyWith(color: colors.muted)),
-                          ),
-                        ),
-                      ],
-                    ),
+                    SizedBox(height: differs ? 6 : 2),
+                    statusLine,
                   ],
                 ),
               ),

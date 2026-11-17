@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:bts_delivery_app/app/theme/app_theme.dart';
 import 'package:bts_delivery_app/models/delivery_visit.dart';
+import 'package:bts_delivery_app/models/offline/offline_media.dart';
 import 'package:bts_delivery_app/models/school.dart';
 import 'package:bts_delivery_app/models/school_timer.dart';
 import 'package:bts_delivery_app/providers/auth_providers.dart';
@@ -11,6 +16,7 @@ import 'package:bts_delivery_app/providers/schools_providers.dart';
 import 'package:bts_delivery_app/screens/forms/classrooms_screen.dart';
 import 'package:bts_delivery_app/screens/main/school_hub_screen.dart';
 import 'package:bts_delivery_app/services/delivery_visit_access.dart';
+import 'package:bts_delivery_app/services/media/offline_media_cache.dart';
 import 'package:bts_delivery_app/services/offline/connectivity_service.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
 import 'package:bts_delivery_app/widgets/design/design.dart';
@@ -56,14 +62,20 @@ List<Override> _overrides({
   bool visit = true,
   bool canEdit = true,
   bool canControlTimer = false,
+  String? mapPath,
+  List<Override> media = const [],
 }) =>
     [
       if (visit) activeDeliveryVisitProvider.overrideWithValue(_visit),
       canEditSchoolDataProvider.overrideWithValue(canEdit),
       isAdminProvider.overrideWithValue(false),
       canControlTimerProvider.overrideWithValue(canControlTimer),
-      schoolByIdProvider.overrideWith((_, id) => Stream.value(
-          School(id: id, name: 'Oakfield Primary', createdAt: _created))),
+      schoolByIdProvider.overrideWith((_, id) => Stream.value(School(
+            id: id,
+            name: 'Oakfield Primary',
+            createdAt: _created,
+            schoolMapStoragePath: mapPath,
+          ))),
       yearLevelsProvider.overrideWith((_, __) => Stream.value(_levels)),
       classroomsProvider
           .overrideWith((_, p) => Stream.value(_rooms[p.yearLevelId]!)),
@@ -75,7 +87,9 @@ List<Override> _overrides({
           .overrideWith((_, __) => Stream<SchoolTimer?>.value(null)),
       schoolTimerHistoryProvider.overrideWith((_, __) => Stream.value([])),
       contactsProvider.overrideWith((_, __) => Stream.value([])),
-      offlineMediaOwnerProvider.overrideWith((_, __) => null),
+      if (media.isEmpty)
+        offlineMediaOwnerProvider.overrideWith((_, __) => null),
+      ...media,
       connectivityStatusProvider
           .overrideWith((_) => Stream.value(ConnectivityStatus.online)),
       evidenceUploadsProvider.overrideWith((_) => Stream.value(
@@ -228,12 +242,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    await tester.dragUntilVisible(
-      find.byKey(const ValueKey('hub-tab-2')),
-      find.byType(NestedScrollView),
-      const Offset(0, 200),
-    );
-    await tester.pumpAndSettle();
+    // The section switch stays pinned: no need to scroll back to it.
+    expect(
+        find.byKey(const ValueKey('hub-tab-2')).hitTestable(), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('hub-tab-2')));
     await tester.pumpAndSettle();
     expect(find.text('School information'), findsOneWidget);
@@ -289,4 +300,250 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Please enter a name'), findsOneWidget);
   });
+
+  testWidgets('section switch stays pinned while the Records list scrolls',
+      (tester) async {
+    _tallPhone(tester);
+    await tester.pumpWidget(_app(
+      const SchoolHubScreen(schoolId: 'school', deliveryId: 'delivery'),
+      _overrides(),
+    ));
+    await tester.pumpAndSettle();
+    // No map on this school: no map card.
+    expect(find.byKey(const ValueKey('records-school-map')), findsNothing);
+
+    final title = find.text('Oakfield Primary');
+    final signOff = find.byKey(const ValueKey('hub-tab-1'));
+    final switchBox = find.byKey(const ValueKey('hub-section-switch'));
+    final restingTop = tester.getRect(switchBox).top;
+    await tester.drag(find.byType(NestedScrollView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+
+    // The title scrolled away; the switch is pinned under the nav buttons
+    // and the list continues below it.
+    expect(title.hitTestable(), findsNothing);
+    final pinned = tester.getRect(switchBox);
+    expect(pinned.top, lessThan(restingTop));
+    expect(pinned.top, moreOrLessEquals(AppNavBar.height + 20));
+    expect(signOff.hitTestable(), findsOneWidget);
+    final list = tester.getRect(find.byType(CustomScrollView).first);
+    expect(list.top, greaterThanOrEqualTo(pinned.bottom - 0.5));
+
+    await tester.tap(signOff);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<AppSegmentedControl<int>>(
+              find.byType(AppSegmentedControl<int>))
+          .selected,
+      1,
+    );
+    expect(
+        find.byKey(const ValueKey('hub-tab-0')).hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'records school map: expanded by default, enlarges and collapses in '
+      'place, and the choice survives tab switches', (tester) async {
+    _tallPhone(tester);
+    final file = _mapPng();
+    await tester.pumpWidget(_app(
+      const SchoolHubScreen(schoolId: 'school', deliveryId: 'delivery'),
+      _overrides(mapPath: _mapPath, media: _mapMedia(localPath: file.path)),
+    ));
+    await tester.pumpAndSettle();
+
+    final card = find.byKey(const ValueKey('records-school-map'));
+    final viewer = find.descendant(
+      of: find.byKey(const ValueKey('records-map-viewer')),
+      matching: find.byKey(const ValueKey('map-viewer')),
+    );
+    final summary = find.byKey(const ValueKey('records-summary'));
+    // Directly under the summary card, the map itself, expanded.
+    expect(card, findsOneWidget);
+    expect(tester.getRect(card).top - tester.getRect(summary).bottom, 16);
+    expect(tester.getSize(viewer).height, 220);
+    expect(tester.getSize(viewer).width, tester.getSize(card).width);
+    expect(
+      tester
+          .widget<Image>(
+              find.descendant(of: viewer, matching: find.byType(Image)))
+          .image,
+      isA<FileImage>(),
+    );
+    expect(find.bySemanticsLabel('School map'), findsWidgets);
+    expect(find.bySemanticsLabel('Enlarge map'), findsOneWidget);
+    expect(find.byKey(const ValueKey('map-reset-zoom')), findsNothing);
+
+    // Enlarge in place (no new route), then shrink back.
+    await tester.tap(find.byKey(const ValueKey('map-enlarge')));
+    await tester.pumpAndSettle();
+    expect(find.byType(SchoolHubScreen), findsOneWidget);
+    expect(tester.getSize(viewer).height, greaterThan(500));
+    // It scrolls up to sit right under the pinned section switch.
+    expect(
+      tester.getRect(viewer).top,
+      moreOrLessEquals(
+          tester
+              .getRect(find.byKey(const ValueKey('hub-section-switch')))
+              .bottom,
+          epsilon: 1),
+    );
+    expect(find.bySemanticsLabel('Shrink map'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('map-enlarge')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(viewer).height, 220);
+    await tester.drag(find.byType(NestedScrollView), const Offset(0, 300));
+    await tester.pumpAndSettle();
+
+    // Collapse to a single 44 pt row.
+    await tester.tap(find.byKey(const ValueKey('records-school-map-toggle')));
+    await tester.pumpAndSettle();
+    expect(viewer, findsNothing);
+    expect(tester.getSize(card).height, 44);
+
+    // Info shows the same viewer, taller, without "Open map".
+    await tester.tap(find.byKey(const ValueKey('hub-tab-2')));
+    await tester.pumpAndSettle();
+    final infoViewer = find.descendant(
+      of: find.byKey(const ValueKey('info-map-viewer')),
+      matching: find.byKey(const ValueKey('map-viewer')),
+    );
+    await tester.dragUntilVisible(
+        infoViewer, find.byType(NestedScrollView), const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(infoViewer).height, 320);
+    expect(find.text('Open map'), findsNothing);
+    expect(find.text('Upload map'), findsNothing);
+    expect(find.text('Replace map'), findsOneWidget);
+    expect(find.text('Delete map'), findsOneWidget);
+
+    // Back on Records the map is still collapsed; expanding restores it.
+    await tester.tap(find.byKey(const ValueKey('hub-tab-0')));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+        card, find.byType(NestedScrollView), const Offset(0, 150));
+    await tester.pumpAndSettle();
+    expect(card, findsOneWidget);
+    expect(viewer, findsNothing);
+    await tester.tap(find.byKey(const ValueKey('records-school-map-toggle')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(viewer).height, 220);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('school map zooms in place without fighting the page scroll',
+      (tester) async {
+    _tallPhone(tester);
+    final file = _mapPng();
+    await tester.pumpWidget(_app(
+      const SchoolHubScreen(schoolId: 'school', deliveryId: 'delivery'),
+      _overrides(mapPath: _mapPath, media: _mapMedia(localPath: file.path)),
+    ));
+    await tester.pumpAndSettle();
+    final viewer = find.descendant(
+      of: find.byKey(const ValueKey('records-map-viewer')),
+      matching: find.byKey(const ValueKey('map-viewer')),
+    );
+    final transform = find.descendant(
+      of: viewer,
+      matching: find.byType(Transform),
+    );
+
+    // Un-zoomed: a vertical drag on the map scrolls the page.
+    final before = tester.getRect(viewer).top;
+    await tester.dragFrom(tester.getCenter(viewer), const Offset(0, -80));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(viewer).top, lessThan(before - 40));
+    expect(tester.widget<Transform>(transform.first).transform.isIdentity(),
+        isTrue);
+
+    // Double-tap zooms in place and shows "Reset zoom".
+    final center = tester.getCenter(viewer);
+    await tester.tapAt(center);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(center);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('map-reset-zoom')), findsOneWidget);
+    expect(find.bySemanticsLabel('Reset zoom'), findsOneWidget);
+    final zoomed = tester.widget<Transform>(transform.first).transform.clone();
+    expect(zoomed.getMaxScaleOnAxis(), greaterThan(1));
+
+    // Zoomed: drags pan the map and the page stays put.
+    final pinnedTop = tester.getRect(viewer).top;
+    await tester.dragFrom(center, const Offset(0, 50));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(viewer).top, pinnedTop);
+    expect(tester.widget<Transform>(transform.first).transform,
+        isNot(equals(zoomed)));
+
+    await tester.tap(find.byKey(const ValueKey('map-reset-zoom')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('map-reset-zoom')), findsNothing);
+    expect(tester.widget<Transform>(transform.first).transform.isIdentity(),
+        isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('school map not saved on this device says so while offline',
+      (tester) async {
+    _tallPhone(tester);
+    await tester.pumpWidget(_app(
+      const SchoolHubScreen(schoolId: 'school', deliveryId: 'delivery'),
+      _overrides(
+          mapPath: _mapPath, media: _mapMedia(localPath: null, online: false)),
+    ));
+    await tester.pumpAndSettle();
+    final card = find.byKey(const ValueKey('records-school-map'));
+    expect(
+      find.descendant(
+          of: card,
+          matching: find.text('Download this file before going offline')),
+      findsOneWidget,
+    );
+    // Nothing to enlarge or zoom while there is no map to show.
+    expect(find.byKey(const ValueKey('map-enlarge')), findsNothing);
+    expect(find.byType(Image), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
+
+const _mapPath = 'schools/school/map/map.png';
+
+void _tallPhone(WidgetTester tester) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(390, 844);
+  tester.view.padding = const FakeViewPadding(top: 20);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetPadding);
+}
+
+File _mapPng() {
+  final directory = Directory.systemTemp.createTempSync('school-map');
+  addTearDown(() => directory.deleteSync(recursive: true));
+  return File('${directory.path}/map.png')
+    ..writeAsBytesSync(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+sp1QAAAAASUVORK5CYII='));
+}
+
+List<Override> _mapMedia({required String? localPath, bool online = true}) => [
+      offlineMediaOwnerProvider.overrideWith((_, __) => 'staff'),
+      offlineMediaBucketProvider
+          .overrideWithValue('approved.firebasestorage.app'),
+      offlineMediaAssetStateProvider.overrideWith((_, __) => Stream.value((
+            phase: localPath == null
+                ? OfflineMediaPhase.available
+                : OfflineMediaPhase.ready,
+            issue: null,
+            localPath: localPath,
+            verifiedAt: localPath == null ? null : DateTime(2026, 11, 17, 8),
+            progress: null,
+          ))),
+      offlineMediaVisitStateProvider
+          .overrideWith((_, __) => const Stream.empty()),
+      offlineMediaWorkerProvider
+          .overrideWith((_) => Completer<OfflineMediaCache>().future),
+      isOnlineProvider.overrideWithValue(online),
+    ];

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/app_tokens.dart';
@@ -508,5 +509,281 @@ class AppYearHeader extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// A large-title header that scrolls away with a control (e.g. a segmented
+/// switch) under it that stays pinned directly below the transparent
+/// [AppNavBar] — for the header slivers of a [NestedScrollView] (or any
+/// vertical scroll view) under `Scaffold(extendBodyBehindAppBar: true)`.
+///
+/// [header] starts at the very top (pad it by the `MediaQuery` top padding);
+/// [pinned] follows it and stops at [pinTop] (by default the `MediaQuery` top
+/// padding: status bar + nav bar). Content laid out after this sliver starts
+/// below the pinned control, so nothing scrolls beneath it; a short canvas
+/// fade (a hairline in high contrast) separates it from the content, and the
+/// nav area above it turns to the canvas colour as the header leaves.
+///
+/// When the pinned part would take more than a third of the viewport
+/// (very large text on a small screen) it scrolls away with the header.
+class AppPinnedControlSliver extends StatelessWidget {
+  const AppPinnedControlSliver({
+    super.key,
+    required this.header,
+    required this.pinned,
+    this.pinTop,
+  });
+
+  final Widget header;
+
+  /// Paint it on the canvas colour (it covers the content scrolling by).
+  final Widget pinned;
+
+  /// Where the control sticks; defaults to `MediaQuery.paddingOf.top`.
+  final double? pinTop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    return _PinnedControlSliver(
+      header: header,
+      pinned: pinned,
+      pinTop: pinTop ?? MediaQuery.paddingOf(context).top,
+      canvas: colors.canvas,
+      hairline: colors.highContrast ? colors.outline : null,
+    );
+  }
+}
+
+enum _PinnedSlot { header, pinned }
+
+class _PinnedControlSliver
+    extends SlottedMultiChildRenderObjectWidget<_PinnedSlot, RenderBox> {
+  const _PinnedControlSliver({
+    required this.header,
+    required this.pinned,
+    required this.pinTop,
+    required this.canvas,
+    required this.hairline,
+  });
+
+  final Widget header;
+  final Widget pinned;
+  final double pinTop;
+  final Color canvas;
+  final Color? hairline;
+
+  @override
+  Iterable<_PinnedSlot> get slots => _PinnedSlot.values;
+
+  @override
+  Widget? childForSlot(_PinnedSlot slot) => switch (slot) {
+        _PinnedSlot.header => header,
+        _PinnedSlot.pinned => pinned,
+      };
+
+  @override
+  _RenderPinnedControlSliver createRenderObject(BuildContext context) =>
+      _RenderPinnedControlSliver(
+        pinTop: pinTop,
+        canvas: canvas,
+        hairline: hairline,
+      );
+
+  @override
+  void updateRenderObject(
+      BuildContext context, _RenderPinnedControlSliver renderObject) {
+    renderObject
+      ..pinTop = pinTop
+      ..canvas = canvas
+      ..hairline = hairline;
+  }
+}
+
+class _RenderPinnedControlSliver extends RenderSliver
+    with SlottedContainerRenderObjectMixin<_PinnedSlot, RenderBox> {
+  _RenderPinnedControlSliver({
+    required double pinTop,
+    required Color canvas,
+    required Color? hairline,
+  })  : _pinTop = pinTop,
+        _canvas = canvas,
+        _hairline = hairline;
+
+  /// Height of the fade under the pinned control.
+  static const double _fade = 8;
+
+  /// The nav area turns opaque over the header's last [_coverRamp] points.
+  static const double _coverRamp = 24;
+
+  double get pinTop => _pinTop;
+  double _pinTop;
+  set pinTop(double value) {
+    if (value == _pinTop) return;
+    _pinTop = value;
+    markNeedsLayout();
+  }
+
+  Color get canvas => _canvas;
+  Color _canvas;
+  set canvas(Color value) {
+    if (value == _canvas) return;
+    _canvas = value;
+    markNeedsPaint();
+  }
+
+  Color? get hairline => _hairline;
+  Color? _hairline;
+  set hairline(Color? value) {
+    if (value == _hairline) return;
+    _hairline = value;
+    markNeedsPaint();
+  }
+
+  RenderBox? get _header => childForSlot(_PinnedSlot.header);
+  RenderBox? get _pinned => childForSlot(_PinnedSlot.pinned);
+
+  double _headerY = 0;
+  double _pinnedY = 0;
+  double _cover = 0;
+  bool _stuck = false;
+
+  /// Whether the control is currently pinning (false when too tall).
+  bool get pins => _pins;
+  bool _pins = true;
+
+  @override
+  void performLayout() {
+    assert(constraints.axisDirection == AxisDirection.down,
+        'AppPinnedControlSliver supports top-to-bottom scrolling only');
+    final header = _header;
+    final pinned = _pinned;
+    final box = constraints.asBoxConstraints();
+    header?.layout(box, parentUsesSize: true);
+    pinned?.layout(box, parentUsesSize: true);
+    final h1 = header?.size.height ?? 0;
+    final h2 = pinned?.size.height ?? 0;
+    final s = constraints.scrollOffset;
+    final viewport = constraints.viewportMainAxisExtent;
+    _pins = viewport.isFinite && _pinTop + h2 <= viewport / 3;
+    _headerY = -s;
+    if (!_pins) {
+      final total = h1 + h2;
+      final paintExtent = calculatePaintOffset(constraints, from: 0, to: total);
+      _pinnedY = h1 - s;
+      _stuck = false;
+      _cover = 0;
+      geometry = SliverGeometry(
+        scrollExtent: total,
+        paintExtent: paintExtent,
+        maxPaintExtent: total,
+        hitTestExtent: paintExtent,
+        hasVisualOverflow: total > paintExtent || s > 0,
+      );
+      return;
+    }
+    // Only the part of the header above the pin line scrolls; the control
+    // keeps its layout extent, so the content after it starts below it.
+    final scrollExtent = math.max(0.0, h1 - _pinTop);
+    _pinnedY = math.max(h1 - s, _pinTop);
+    _stuck = s >= scrollExtent - 1e-6;
+    _cover = scrollExtent <= 0
+        ? 1
+        : ((s - (scrollExtent - _coverRamp)) / _coverRamp).clamp(0.0, 1.0);
+    final paintExtent =
+        math.min(_pinnedY + h2, constraints.remainingPaintExtent);
+    geometry = SliverGeometry(
+      scrollExtent: scrollExtent,
+      paintExtent: paintExtent,
+      layoutExtent: paintExtent,
+      maxPaintExtent: math.max(h1 + h2, paintExtent),
+      maxScrollObstructionExtent: _pinTop + h2,
+      hitTestExtent: paintExtent,
+      hasVisualOverflow: true,
+    );
+  }
+
+  double _positionOf(RenderObject child) =>
+      identical(child, _pinned) ? _pinnedY : _headerY;
+
+  @override
+  double childMainAxisPosition(covariant RenderObject child) =>
+      _positionOf(child);
+
+  @override
+  double childScrollOffset(covariant RenderObject child) =>
+      identical(child, _pinned) ? (_header?.size.height ?? 0) : 0;
+
+  @override
+  void applyPaintTransform(covariant RenderObject child, Matrix4 transform) {
+    transform.translateByDouble(0.0, _positionOf(child), 0.0, 1.0);
+  }
+
+  @override
+  bool hitTestChildren(
+    SliverHitTestResult result, {
+    required double mainAxisPosition,
+    required double crossAxisPosition,
+  }) {
+    final boxResult = BoxHitTestResult.wrap(result);
+    for (final child in [_pinned, _header]) {
+      if (child == null) continue;
+      final y = _positionOf(child);
+      if (mainAxisPosition < y || mainAxisPosition >= y + child.size.height) {
+        continue;
+      }
+      // The header beneath the opaque nav area is not tappable.
+      if (identical(child, _header) &&
+          _cover >= 1 &&
+          mainAxisPosition < _pinnedY) {
+        continue;
+      }
+      final hit = boxResult.addWithPaintOffset(
+        offset: Offset(0, y),
+        position: Offset(crossAxisPosition, mainAxisPosition),
+        hitTest: (result, position) =>
+            child.hitTest(result, position: position),
+      );
+      if (hit) return true;
+    }
+    return false;
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final header = _header;
+    final pinned = _pinned;
+    if (header != null && _headerY + header.size.height > 0) {
+      context.paintChild(header, offset + Offset(0, _headerY));
+    }
+    if (pinned == null) return;
+    final width = constraints.crossAxisExtent;
+    final canvas = context.canvas;
+    if (_cover > 0 && _pinnedY > 0) {
+      canvas.drawRect(
+        Rect.fromLTWH(offset.dx, offset.dy, width, _pinnedY),
+        Paint()..color = _canvas.withValues(alpha: _canvas.a * _cover),
+      );
+    }
+    if (_stuck) {
+      final top = offset.dy + _pinnedY + pinned.size.height;
+      final line = _hairline;
+      if (line != null) {
+        canvas.drawRect(
+            Rect.fromLTWH(offset.dx, top - 1, width, 1), Paint()..color = line);
+      } else {
+        final rect = Rect.fromLTWH(offset.dx, top, width, _fade);
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [_canvas, _canvas.withValues(alpha: 0)],
+            ).createShader(rect),
+        );
+      }
+    }
+    context.paintChild(pinned, offset + Offset(0, _pinnedY));
   }
 }

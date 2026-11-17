@@ -177,6 +177,22 @@ class AppStatusPill extends StatelessWidget {
   }
 }
 
+/// Amber "Quantity differs" pill (warning triangle + words): a recorded
+/// quantity that differs from the expected one needs a decision before
+/// sign-off. Delivered-as-expected stays neutral (solid ink check).
+class AppQuantityDiffersPill extends StatelessWidget {
+  const AppQuantityDiffersPill({super.key, this.label = 'Quantity differs'});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => AppStatusPill(
+        label: label,
+        icon: AppIcons.warning,
+        tone: AppTone.warning,
+      );
+}
+
 /// 4 pt ink progress bar on a grey track, with a semantics label and value.
 class AppProgressBar extends StatelessWidget {
   const AppProgressBar({

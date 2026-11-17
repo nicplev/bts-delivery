@@ -382,8 +382,8 @@ void main() {
     expect(find.text('Room A').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    // The section switch scrolls with the large title.
-    await scrollVisitTo(find.text('Sign-off'), delta: 160);
+    // The section switch stays pinned while the records scroll.
+    expect(find.text('Sign-off').hitTestable(), findsOneWidget);
     await tester.tap(find.text('Sign-off'));
     await tester.pumpAndSettle();
     expect(find.text('of 10 packs recorded'), findsOneWidget);
@@ -585,7 +585,7 @@ void main() {
     container.read(queue.notifier).state = emptyQueue;
     await tester.pumpAndSettle();
 
-    await scrollVisitTo(find.text('Info'), delta: 320);
+    expect(find.text('Info').hitTestable(), findsOneWidget);
     await tester.tap(find.text('Info'));
     await tester.pumpAndSettle();
     await scrollVisitTo(find.text('School information'));
@@ -598,7 +598,7 @@ void main() {
     expect(find.byType(GoogleMap), findsNothing);
     expect(tester.takeException(), isNull);
 
-    await scrollVisitTo(find.text('Records'), delta: 160);
+    expect(find.text('Records').hitTestable(), findsOneWidget);
     await tester.tap(find.text('Records'));
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
@@ -608,7 +608,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Room A').hitTestable(), findsOneWidget);
-    await scrollVisitTo(find.text('Sign-off'), delta: 160);
+    expect(find.text('Sign-off').hitTestable(), findsOneWidget);
     await tester.tap(find.text('Sign-off'));
     await tester.pumpAndSettle();
     await openCapture();

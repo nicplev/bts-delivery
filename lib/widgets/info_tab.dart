@@ -34,6 +34,9 @@ class _InfoTabState extends ConsumerState<InfoTab> {
   final _schoolNameController = TextEditingController();
   final _schoolAddressController = TextEditingController();
 
+  /// The inline map shown at most of the screen height.
+  bool _mapEnlarged = false;
+
   @override
   void dispose() {
     _contactNameController.dispose();
@@ -222,31 +225,13 @@ class _InfoTabState extends ConsumerState<InfoTab> {
             reference: reference,
             visit: visit,
           );
-    final owner = ref.watch(offlineMediaOwnerProvider(school.id));
     final colors = AppPalette.of(context);
 
+    // The map itself is viewed (and zoomed / enlarged) in place, so there is
+    // no separate "Open map" screen any more.
     final actions = <Widget>[
-      if (asset != null) ...[
-        AppSecondaryButton(
-          key: const ValueKey('open-school-map'),
-          label: 'Open map',
-          icon: AppIcons.gallery,
-          large: false,
-          onPressed: owner == null
-              ? null
-              : () => Navigator.of(context).push<void>(
-                    MaterialPageRoute(
-                      builder: (_) => OfflineMediaScreen(
-                        asset: asset,
-                        ownerUid: owner,
-                        title: 'School map',
-                      ),
-                    ),
-                  ),
-        ),
-        if (visit != null)
-          OfflineMediaDownloadButton(asset: asset, compact: false),
-      ],
+      if (asset != null && visit != null)
+        OfflineMediaDownloadButton(asset: asset, compact: false),
       if (canEdit)
         AppSecondaryButton(
           key: const ValueKey('upload-school-map'),
@@ -265,47 +250,60 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         ),
     ];
 
+    final details = <Widget>[
+      if (reference == null || asset == null)
+        Row(
+          children: [
+            const AppIconTile(icon: AppIcons.map, size: 29),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                reference == null
+                    ? 'No school map uploaded'
+                    : 'This school map cannot be opened from its saved reference',
+                style: AppTypography.body.copyWith(color: colors.muted),
+              ),
+            ),
+          ],
+        )
+      else if (visit != null)
+        OfflineMediaDownloadStatus(asset: asset),
+      if (actions.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        for (var i = 0; i < actions.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          actions[i],
+        ],
+      ],
+      if (visit != null)
+        OfflineEarlierMapButton(visit: visit, currentMap: asset),
+    ];
+
     return [
       _label('School map'),
       AppPanel(
+        key: const ValueKey('info-school-map'),
+        padding: EdgeInsets.zero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (reference == null || asset == null)
-              Row(
-                children: [
-                  const AppIconTile(icon: AppIcons.map, size: 29),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      reference == null
-                          ? 'No school map uploaded'
-                          : 'This school map cannot be opened from its saved reference',
-                      style: AppTypography.body.copyWith(color: colors.muted),
-                    ),
-                  ),
-                ],
-              )
-            else ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppTokens.controlRadius),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 250,
-                  child: OfflineMediaPreview(asset: asset),
-                ),
+            if (asset != null)
+              OfflineMapViewer(
+                key: const ValueKey('info-map-viewer'),
+                asset: asset,
+                height: 320,
+                enlarged: _mapEnlarged,
+                onEnlargedChanged: (value) =>
+                    setState(() => _mapEnlarged = value),
               ),
-              if (visit != null) OfflineMediaDownloadStatus(asset: asset),
-            ],
-            if (actions.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              for (var i = 0; i < actions.length; i++) ...[
-                if (i > 0) const SizedBox(height: 8),
-                actions[i],
-              ],
-            ],
-            if (visit != null)
-              OfflineEarlierMapButton(visit: visit, currentMap: asset),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  16, asset == null ? 16 : 6, 16, actions.isEmpty ? 10 : 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: details,
+              ),
+            ),
           ],
         ),
       ),

@@ -29,6 +29,9 @@ abstract final class AppIcons {
   static const IconData settings = HeroiconsOutline.cog6Tooth;
   static const IconData external = HeroiconsOutline.arrowTopRightOnSquare;
   static const IconData dragHandle = HeroiconsOutline.bars3;
+  static const IconData enlarge = HeroiconsOutline.arrowsPointingOut;
+  static const IconData shrink = HeroiconsOutline.arrowsPointingIn;
+  static const IconData resetZoom = HeroiconsOutline.magnifyingGlassMinus;
 
   // Status.
   static const IconData check = HeroiconsOutline.check;
