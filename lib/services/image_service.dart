@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -100,6 +101,91 @@ class ImageService {
       return Result.failure('Failed to compress image bytes: $e');
     }
   }
+
+  /// Longest side of an uploaded school logo, in pixels.
+  static const int schoolLogoMaxSide = 512;
+
+  /// Largest school logo the storage rules accept.
+  static const int schoolLogoMaxBytes = 2 * 1024 * 1024;
+
+  /// Turns a picked image into a small JPEG for a school logo: scaled so its
+  /// longest side is at most [maxSide] (never enlarged), drawn on white so a
+  /// transparent PNG logo doesn't turn black as a JPEG, then encoded at
+  /// [quality]. [encodeJpeg] defaults to the native compressor (tests replace
+  /// it).
+  static Future<Result<Uint8List>> prepareSchoolLogo(
+    Uint8List bytes, {
+    int maxSide = schoolLogoMaxSide,
+    int quality = _quality,
+    Future<Uint8List> Function(Uint8List png, int width, int height, int quality)?
+        encodeJpeg,
+  }) async {
+    ui.Codec? codec;
+    ui.Image? frame;
+    ui.Image? flattened;
+    try {
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      final descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final sourceWidth = descriptor.width;
+      final sourceHeight = descriptor.height;
+      if (sourceWidth <= 0 || sourceHeight <= 0) {
+        descriptor.dispose();
+        buffer.dispose();
+        return const Result.failure('This image can’t be used');
+      }
+      final longest = sourceWidth > sourceHeight ? sourceWidth : sourceHeight;
+      final scale = longest > maxSide ? maxSide / longest : 1.0;
+      final width = (sourceWidth * scale).round().clamp(1, maxSide);
+      final height = (sourceHeight * scale).round().clamp(1, maxSide);
+      codec = await descriptor.instantiateCodec(
+          targetWidth: width, targetHeight: height);
+      frame = (await codec.getNextFrame()).image;
+      descriptor.dispose();
+      buffer.dispose();
+
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      final bounds =
+          ui.Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble());
+      canvas.drawRect(bounds, ui.Paint()..color = const ui.Color(0xFFFFFFFF));
+      canvas.drawImageRect(
+        frame,
+        ui.Rect.fromLTWH(
+            0, 0, frame.width.toDouble(), frame.height.toDouble()),
+        bounds,
+        ui.Paint()..filterQuality = ui.FilterQuality.medium,
+      );
+      final picture = recorder.endRecording();
+      flattened = await picture.toImage(width, height);
+      picture.dispose();
+      final png = await flattened.toByteData(format: ui.ImageByteFormat.png);
+      if (png == null) {
+        return const Result.failure('This image can’t be used');
+      }
+      final jpeg = await (encodeJpeg ?? _encodeJpeg)(
+          png.buffer.asUint8List(), width, height, quality);
+      if (jpeg.isEmpty || jpeg.length > schoolLogoMaxBytes) {
+        return const Result.failure('This image can’t be used');
+      }
+      return Result.success(jpeg);
+    } catch (e) {
+      return Result.failure('Failed to prepare the logo: $e');
+    } finally {
+      frame?.dispose();
+      flattened?.dispose();
+      codec?.dispose();
+    }
+  }
+
+  static Future<Uint8List> _encodeJpeg(
+          Uint8List png, int width, int height, int quality) =>
+      FlutterImageCompress.compressWithList(
+        png,
+        minWidth: width,
+        minHeight: height,
+        quality: quality,
+        format: CompressFormat.jpeg,
+      );
 
   static Future<Result<void>> _requestPermissions() async {
     try {

@@ -8,6 +8,7 @@ import '../../providers/repository_providers.dart';
 import '../../providers/staff_providers.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
+import '../../widgets/school_logo.dart';
 import 'admin_page.dart';
 
 class SchoolStaffAllocationScreen extends ConsumerStatefulWidget {
@@ -130,7 +131,7 @@ class _SchoolStaffAllocationScreenState
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppIconTile(icon: AppIcons.school),
+          SchoolLogo(school: widget.school),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

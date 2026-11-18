@@ -12,6 +12,7 @@ import '../providers/repository_providers.dart';
 import '../providers/offline_media_providers.dart';
 import 'package:uuid/uuid.dart';
 import 'offline_media_view.dart';
+import 'school_logo.dart';
 import 'school_timer_history.dart';
 import 'design/design.dart';
 import '../services/date_utils.dart';
@@ -156,6 +157,7 @@ class _InfoTabState extends ConsumerState<InfoTab> {
 
   List<Widget> _buildSchoolInfoSection(School school) {
     final isAdmin = ref.watch(isAdminProvider);
+    final canEditLogo = ref.watch(canEditSchoolDataProvider);
     final address = school.address?.trim() ?? '';
 
     return [
@@ -172,9 +174,11 @@ class _InfoTabState extends ConsumerState<InfoTab> {
         children: [
           _InfoRow(
             icon: AppIcons.school,
+            leading: SchoolLogo(school: school, size: 29),
             label: 'School name',
             value: school.name,
           ),
+          if (canEditLogo) SchoolLogoEditor(school: school),
           _InfoRow(
             icon: AppIcons.location,
             label: 'Address',
@@ -1014,9 +1018,13 @@ class _InfoRow extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.leading,
   });
 
   final IconData icon;
+
+  /// Replaces the icon tile (e.g. the school's logo).
+  final Widget? leading;
   final String label;
   final String value;
 
@@ -1030,7 +1038,7 @@ class _InfoRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
-              AppIconTile(icon: icon, size: 29),
+              leading ?? AppIconTile(icon: icon, size: 29),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

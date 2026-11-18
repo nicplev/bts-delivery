@@ -10,6 +10,10 @@ abstract class StorageRepository {
   Future<Result<String>> uploadImage(String path, File file);
   Future<Result<String>> uploadImageBytes(String path, Uint8List bytes);
   Future<Result<String>> uploadFile(String path, File file);
+
+  /// Uploads JPEG bytes with an `image/jpeg` content type (required by the
+  /// storage rules for school logos) and returns the download URL.
+  Future<Result<String>> uploadJpegBytes(String path, Uint8List bytes);
   Future<Result<void>> deleteFile(String path);
   Future<Result<String>> getDownloadUrl(String path);
 }
@@ -161,6 +165,18 @@ class FirebaseStorageRepository implements StorageRepository {
       return Result.success(downloadUrl);
     } catch (e) {
       return Result.failure('Failed to upload file: $e');
+    }
+  }
+
+  @override
+  Future<Result<String>> uploadJpegBytes(String path, Uint8List bytes) async {
+    try {
+      final ref = _storage.ref().child(path);
+      await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      final downloadUrl = await ref.getDownloadURL();
+      return Result.success(downloadUrl);
+    } catch (e) {
+      return Result.failure('Failed to upload image: $e');
     }
   }
 

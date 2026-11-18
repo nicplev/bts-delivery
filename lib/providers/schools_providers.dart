@@ -269,6 +269,31 @@ class SchoolsNotifier extends StateNotifier<AsyncValue<void>> {
     );
   }
 
+  /// Sets or (with nulls) clears the school's logo fields only.
+  Future<bool> updateSchoolLogo(
+    String schoolId, {
+    required String? logoUrl,
+    required String? logoStoragePath,
+  }) async {
+    state = const AsyncValue.loading();
+    final result = await _schoolsRepository.updateSchoolLogo(
+      schoolId,
+      logoUrl: logoUrl,
+      logoStoragePath: logoStoragePath,
+    );
+
+    return result.when(
+      success: (_) {
+        state = const AsyncValue.data(null);
+        return true;
+      },
+      failure: (message, exception) {
+        state = AsyncValue.error(message, StackTrace.current);
+        return false;
+      },
+    );
+  }
+
   Future<bool> createYearLevel(String schoolId, YearLevel yearLevel) async {
     state = const AsyncValue.loading();
     final result =

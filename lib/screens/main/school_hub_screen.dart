@@ -9,6 +9,7 @@ import '../../widgets/connectivity_indicator.dart';
 import '../../widgets/design/design.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/records_tab.dart';
+import '../../widgets/school_logo.dart';
 import '../../widgets/signoff_tab.dart';
 import '../../widgets/info_tab.dart';
 import '../forms/year_levels_screen.dart';
@@ -215,6 +216,19 @@ class _SchoolHubScreenState extends ConsumerState<SchoolHubScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // The logo, when the school has one, sits above the
+                      // large title so it never crowds it at large text.
+                      if (school.logoUrl?.trim().isNotEmpty == true)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                          child: Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: SchoolLogo(
+                              key: const ValueKey('hub-school-logo'),
+                              school: school,
+                            ),
+                          ),
+                        ),
                       AppLargeTitle(
                         title: school.name,
                         subtitleWidget: isVisit

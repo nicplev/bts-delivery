@@ -103,14 +103,14 @@ async function call(functionName, user, data, expected = 200) {
   return body.result;
 }
 
-function upload(path, user, uid, contentType = "image/png") {
+function upload(path, user, uid, contentType = "image/png", content = "test-bytes") {
   const boundary = "bts-test-boundary";
   const metadata = JSON.stringify({
     contentType, metadata: {uploadedBy: uid, sha256: "a".repeat(64)},
   });
   const body = [
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,
-    `--${boundary}\r\nContent-Type: ${contentType}\r\n\r\ntest-bytes\r\n`,
+    `--${boundary}\r\nContent-Type: ${contentType}\r\n\r\n${content}\r\n`,
     `--${boundary}--\r\n`,
   ].join("");
   return request(`${storage}?name=${encodeURIComponent(path)}&uploadType=multipart`, user, {
@@ -419,6 +419,36 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
     await status(await request(`${storage}/${encodeURIComponent(photo)}`, field), 200);
     await status(await upload(photo, field, field.uid, "image/jpeg"), 403);
 
+  });
+
+  await t.test("school logos are small JPEGs managed by admins and managers", async () => {
+    const logo = "schools/alpha/logo/cccccccc-cccc-cccc-cccc-cccccccccccc.jpg";
+    const logoUrl = `${storage}/${encodeURIComponent(logo)}`;
+    // Assigned field staff and outsiders cannot write a logo.
+    await status(await upload(logo, field, field.uid, "image/jpeg"), 403);
+    await status(await upload(logo, outsider, outsider.uid, "image/jpeg"), 403);
+    // Wrong content type, bad file name, oversize and empty files are rejected.
+    await status(await upload(logo, manager, manager.uid, "image/png"), 403);
+    await status(await upload(logo, manager, manager.uid, "text/html"), 403);
+    await status(await upload("schools/alpha/logo/logo.jpg", manager, manager.uid, "image/jpeg"), 403);
+    await status(await upload(
+        "schools/alpha/logo/cccccccc-cccc-cccc-cccc-cccccccccccc.png", manager, manager.uid, "image/jpeg"), 403);
+    await status(await upload(logo, manager, manager.uid, "image/jpeg", "x".repeat(2 * 1024 * 1024 + 1)), 403);
+    await status(await upload(logo, manager, manager.uid, "image/jpeg", ""), 403);
+    // A manager can add one and an admin can replace it.
+    await status(await upload(logo, manager, manager.uid, "image/jpeg"), 200);
+    await status(await upload(logo, adminUser, adminUser.uid, "image/jpeg"), 200);
+    // Staff with access to the school can read it; others cannot.
+    await status(await request(logoUrl, field), 200);
+    await status(await request(logoUrl, outsider), 403);
+    const betaLogo = "schools/beta/logo/dddddddd-dddd-dddd-dddd-dddddddddddd.jpg";
+    await status(await upload(betaLogo, adminUser, adminUser.uid, "image/jpeg"), 200);
+    await status(await request(`${storage}/${encodeURIComponent(betaLogo)}`, field), 403);
+    // Only management can delete it.
+    await status(await request(logoUrl, field, {method: "DELETE"}), 403);
+    await status(await request(logoUrl, outsider, {method: "DELETE"}), 403);
+    await status(await request(logoUrl, manager, {method: "DELETE"}), 204);
+    await status(await request(logoUrl, field), 404);
   });
 
   await t.test("manager timer stop is atomic and history is immutable to managers", async () => {

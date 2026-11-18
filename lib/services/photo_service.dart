@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import '../repositories/storage_repository.dart';
+import '../services/image_service.dart';
 import '../services/result.dart';
 import '../widgets/design/design.dart';
 
@@ -284,6 +286,66 @@ class PhotoService {
       }
     }
 
+    return null;
+  }
+
+  /// Picks a school logo with the same glass sheet as photos (camera or
+  /// library) and returns it as a small JPEG ready to upload (longest side
+  /// 512 px, quality 85). Images only. Null when cancelled or unusable (the
+  /// reason is shown).
+  Future<Uint8List?> pickSchoolLogo(BuildContext context) async {
+    final source = await _choose<ImageSource>(
+      context,
+      title: 'Add school logo',
+      options: const [
+        (ImageSource.camera, AppIcons.photos, 'Take photo'),
+        (ImageSource.gallery, AppIcons.gallery, 'Choose from gallery'),
+      ],
+    );
+    if (source == null) return null;
+
+    final hasPermission = await _requestPermission(source);
+    if (!hasPermission) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              source == ImageSource.camera
+                  ? 'Camera permission is required to take photos'
+                  : 'Photo library permission is required to select photos',
+            ),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () => openAppSettings(),
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+
+    try {
+      // The picker applies the photo's orientation; the logo is then
+      // flattened, resized and compressed by the image service.
+      final image = await _picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+      );
+      if (image == null) return null;
+      final prepared =
+          await ImageService.prepareSchoolLogo(await image.readAsBytes());
+      if (prepared.isSuccess) return prepared.dataOrNull;
+    } catch (e) {
+      debugPrint('Error preparing school logo: $e');
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Couldn’t use that image. Try another one.'),
+        ),
+      );
+    }
     return null;
   }
 
