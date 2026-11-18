@@ -19,6 +19,15 @@ abstract class SchoolsRepository {
   Future<Result<List<School>>> getSchools();
   Future<Result<School>> createSchool(School school);
   Future<Result<School>> updateSchool(School school);
+
+  /// Sets (or, with nulls, clears) the school's optional logo. The logo
+  /// fields are only written here, so an edit made from an older copy of the
+  /// school never brings back or drops a logo.
+  Future<Result<void>> updateSchoolLogo(
+    String schoolId, {
+    required String? logoUrl,
+    required String? logoStoragePath,
+  });
   Future<Result<void>> deleteSchool(String schoolId);
 
   // Year Levels
@@ -343,7 +352,7 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
   @override
   Future<Result<School>> createSchool(School school) async {
     try {
-      final data = school.toJson();
+      final data = _withoutLogo(school.toJson());
       // Remove the id field as Firestore will generate it
       data.remove('id');
 
@@ -361,10 +370,32 @@ class FirebaseSchoolsRepository implements SchoolsRepository {
       await _firestore
           .collection('schools')
           .doc(school.id)
-          .update(school.toJson());
+          .update(_withoutLogo(school.toJson()));
       return Result.success(school);
     } catch (e) {
       return Result.failure('Failed to update school: $e');
+    }
+  }
+
+  /// School edits (name, address, map…) leave the logo fields alone: they
+  /// are owned by [updateSchoolLogo].
+  static Map<String, dynamic> _withoutLogo(Map<String, dynamic> data) =>
+      data..remove('logoUrl')..remove('logoStoragePath');
+
+  @override
+  Future<Result<void>> updateSchoolLogo(
+    String schoolId, {
+    required String? logoUrl,
+    required String? logoStoragePath,
+  }) async {
+    try {
+      await _firestore.collection('schools').doc(schoolId).update({
+        'logoUrl': logoUrl,
+        'logoStoragePath': logoStoragePath,
+      });
+      return const Result.success(null);
+    } catch (e) {
+      return Result.failure('Failed to update school logo: $e');
     }
   }
 

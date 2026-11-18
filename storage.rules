@@ -53,5 +53,15 @@ service firebase.storage {
     match /schools/{schoolId}/maps/{fileName} {
       allow write: if canAccess(schoolId, true);
     }
+
+    // Optional school logo: a small JPEG managed by admins and managers.
+    match /schools/{schoolId}/logo/{fileName} {
+      allow create, update: if canAccess(schoolId, true) &&
+        fileName.matches('^[a-f0-9-]{36}[.]jpg$') &&
+        request.resource.contentType == 'image/jpeg' &&
+        request.resource.size > 0 && request.resource.size <= 2 * 1024 * 1024;
+      allow delete: if canAccess(schoolId, true) &&
+        fileName.matches('^[a-f0-9-]{36}[.]jpg$');
+    }
   }
 }

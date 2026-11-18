@@ -6,6 +6,7 @@ import '../../providers/auth_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../models/school.dart';
 import '../../widgets/delivery_day_list.dart';
+import '../../widgets/school_logo.dart';
 import '../../widgets/design/design.dart';
 import '../admin/admin_page.dart';
 
@@ -326,6 +327,26 @@ void _showSchoolFormDialog(
               textCapitalization: TextCapitalization.words,
               maxLines: 2,
             ),
+            if (school != null)
+              Consumer(
+                builder: (context, ref, _) {
+                  if (!ref.watch(canEditSchoolDataProvider)) {
+                    return const SizedBox.shrink();
+                  }
+                  // Logo changes save straight away, so show the live school.
+                  final current = ref
+                          .watch(schoolByIdProvider(school.id))
+                          .valueOrNull ??
+                      school;
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: SchoolLogoEditor(
+                      school: current,
+                      padding: EdgeInsets.zero,
+                    ),
+                  );
+                },
+              ),
           ],
         ),
       ),
@@ -391,7 +412,7 @@ class _SchoolRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final address = school.address?.isNotEmpty == true ? school.address : null;
     return AppListRow(
-      icon: AppIcons.school,
+      leading: SchoolLogo(school: school, size: 29),
       title: school.name,
       subtitle: address,
       titleStyle:

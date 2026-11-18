@@ -33,6 +33,10 @@ class School with _$School {
     String? signedBy,
     String? schoolMapUrl, // URL to school map image/PDF in Firebase Storage
     String? schoolMapStoragePath, // Storage path for deletion
+    /// Optional school logo shown in place of the default school icon.
+    /// Written only by `SchoolsRepository.updateSchoolLogo`.
+    String? logoUrl, // Download URL of the logo JPEG in Firebase Storage
+    String? logoStoragePath, // schools/{schoolId}/logo/{uuid}.jpg, for deletion
   }) = _School;
 
   factory School.fromJson(Map<String, dynamic> json) => _$SchoolFromJson(json);

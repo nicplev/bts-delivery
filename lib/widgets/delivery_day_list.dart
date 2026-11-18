@@ -13,6 +13,7 @@ import '../services/date_utils.dart';
 import '../services/offline/connectivity_service.dart';
 import 'design/design.dart';
 import 'pre_delivery_checklist_dialog.dart';
+import 'school_logo.dart';
 
 /// "Tue 17 Nov 2026" — the day line used by the deliveries screens.
 String deliveryDayLabel(DateTime date) => DateTimeUtils.formatWeekdayDate(date);
@@ -314,8 +315,8 @@ class _NextVisitCard extends ConsumerWidget {
         children: [
           Row(
             children: [
-              const ExcludeSemantics(
-                child: AppIconTile(icon: AppIcons.school, size: 48),
+              ExcludeSemantics(
+                child: SchoolLogoForId(schoolId: delivery.schoolId, size: 48),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -599,8 +600,8 @@ class _VisitRow extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
           child: Row(
             children: [
-              const ExcludeSemantics(
-                child: AppIconTile(icon: AppIcons.school, size: 29),
+              ExcludeSemantics(
+                child: SchoolLogoForId(schoolId: delivery.schoolId, size: 29),
               ),
               const SizedBox(width: 12),
               Expanded(
