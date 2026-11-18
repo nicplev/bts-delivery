@@ -455,7 +455,7 @@ class _ChecklistRow extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (complete) ...[
-                          Icon(AppIcons.complete, size: 16, color: colors.ink),
+                          const AppDoneIcon(size: 16),
                           const SizedBox(width: 4),
                         ],
                         Flexible(
@@ -635,10 +635,9 @@ class _VisitRow extends ConsumerWidget {
                         ),
                       ),
                     if (signedOff)
-                      _RowStatus(
-                        key: const ValueKey('visit-row-signed-off'),
-                        icon: Icon(AppIcons.complete,
-                            size: 16, color: colors.ink),
+                      const _RowStatus(
+                        key: ValueKey('visit-row-signed-off'),
+                        icon: AppDoneIcon(size: 16),
                         label: 'Signed off',
                       )
                     else if (checklist != null)
