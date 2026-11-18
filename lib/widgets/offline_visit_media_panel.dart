@@ -306,9 +306,13 @@ class _VisitMediaSheetState extends ConsumerState<_VisitMediaSheet> {
     );
   }
 
-  Widget _check(String label) => AppStatusRing(
-        status: AppCompletion.complete,
-        semanticLabel: label,
+  // Saved / available is a confirmation, not a finished task: ink, not the
+  // green done mark.
+  Widget _check(String label) => Semantics(
+        label: label,
+        excludeSemantics: true,
+        child: Icon(AppIcons.complete,
+            size: 22, color: AppPalette.of(context).ink),
       );
 
   Widget _mapRow(_MediaSummary summary, MediaInventory? inventory,

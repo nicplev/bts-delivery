@@ -437,13 +437,10 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
               children: [
                 SizedBox(
                   width: 36,
-                  child: Icon(
-                    complete == 0
-                        ? AppIcons.completeOutline
-                        : AppIcons.complete,
-                    size: 26,
-                    color: complete == 0 ? colors.inactive : colors.ink,
-                  ),
+                  child: complete == 0
+                      ? Icon(AppIcons.completeOutline,
+                          size: 26, color: colors.inactive)
+                      : const AppDoneIcon(size: 26),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1271,7 +1268,7 @@ class _SignOffTabState extends ConsumerState<SignOffTab> {
       children: [
         Row(
           children: [
-            Icon(AppIcons.complete, color: colors.ink),
+            const AppDoneIcon(),
             const SizedBox(width: 8),
             Expanded(
               child: Text(

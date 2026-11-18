@@ -370,10 +370,11 @@ class _CalendarManagementDialogState
         final isActive = metadata?.isActive ?? false;
         return _statusTile(
           icon: isActive
-              ? const AppStatusRing(
-                  status: AppCompletion.complete,
-                  size: 28,
-                  semanticLabel: 'Active',
+              // An active subscription is a state, not a finished task: ink.
+              ? Semantics(
+                  label: 'Active',
+                  excludeSemantics: true,
+                  child: Icon(AppIcons.complete, color: colors.ink, size: 28),
                 )
               : Icon(AppIcons.paused, color: colors.muted, size: 28),
           title: isActive ? 'Calendar active' : 'Calendar inactive',

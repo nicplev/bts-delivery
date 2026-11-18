@@ -38,6 +38,77 @@ void main() {
     semantics.dispose();
   });
 
+  for (final (name, theme, colors) in [
+    ('light', AppTheme.lightTheme, const AppPalette()),
+    ('dark', AppTheme.darkTheme, const AppPalette(dark: true)),
+    (
+      'high contrast light',
+      AppTheme.highContrastLightTheme,
+      const AppPalette(highContrast: true)
+    ),
+    (
+      'high contrast dark',
+      AppTheme.highContrastDarkTheme,
+      const AppPalette(dark: true, highContrast: true)
+    ),
+  ]) {
+    testWidgets('status ring: green done disc, amber partial ring ($name)',
+        (tester) async {
+      Future<List<int>> paintColours(Widget ring) async {
+        await tester
+            .pumpWidget(_app(RepaintBoundary(child: ring), theme: theme));
+        await tester.pumpAndSettle();
+        final paint = tester.widget<CustomPaint>(find.descendant(
+            of: find.byType(ring.runtimeType),
+            matching: find.byType(CustomPaint)));
+        final recorder = _ColourRecorder();
+        paint.painter!.paint(recorder, const Size.square(24));
+        return recorder.colours;
+      }
+
+      final complete = await paintColours(
+          const AppStatusRing(status: AppCompletion.complete));
+      expect(
+          complete, [colors.success.toARGB32(), colors.onSuccess.toARGB32()]);
+      expect(complete, isNot(contains(colors.ink.toARGB32())));
+
+      final partial = await paintColours(
+          const AppStatusRing(status: AppCompletion.partial, progress: 0.5));
+      expect(
+          partial, [colors.ringTrack.toARGB32(), colors.progress.toARGB32()]);
+
+      final empty = await paintColours(
+          const AppStatusRing(status: AppCompletion.notStarted));
+      expect(empty, [colors.inactive.toARGB32()]);
+
+      // The shared done mark is the complete ring's disc + tick.
+      final done = await paintColours(const AppDoneIcon(size: 16));
+      expect(done, complete);
+      expect(tester.getSize(find.byType(AppDoneIcon)), const Size.square(16));
+    });
+  }
+
+  testWidgets('done icon is decorative unless labelled; ring is 24 pt',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(_app(const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AppDoneIcon(key: ValueKey('plain')),
+        AppDoneIcon(semanticLabel: 'Signed off'),
+        AppStatusRing(status: AppCompletion.partial, progress: 0.3),
+      ],
+    )));
+    expect(find.bySemanticsLabel('Signed off'), findsOneWidget);
+    expect(find.bySemanticsLabel('Partial'), findsOneWidget);
+    expect(tester.getSemantics(find.byKey(const ValueKey('plain'))).label,
+        isEmpty);
+    expect(tester.getSize(find.byKey(const ValueKey('plain'))),
+        const Size.square(24));
+    expect(tester.getSize(find.byType(AppStatusRing)), const Size.square(24));
+    semantics.dispose();
+  });
+
   testWidgets('progress bar exposes label and value', (tester) async {
     final semantics = tester.ensureSemantics();
     await tester.pumpWidget(_app(const SizedBox(
@@ -635,4 +706,24 @@ extension<T> on Set<T> {
   void toggle(T value) {
     if (!remove(value)) add(value);
   }
+}
+
+/// Records the colour of every shape a painter draws, in order.
+class _ColourRecorder implements Canvas {
+  final colours = <int>[];
+
+  @override
+  void drawCircle(Offset c, double radius, Paint paint) =>
+      colours.add(paint.color.toARGB32());
+
+  @override
+  void drawArc(Rect rect, double startAngle, double sweepAngle, bool useCenter,
+          Paint paint) =>
+      colours.add(paint.color.toARGB32());
+
+  @override
+  void drawPath(Path path, Paint paint) => colours.add(paint.color.toARGB32());
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

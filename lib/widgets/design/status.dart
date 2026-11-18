@@ -25,15 +25,17 @@ enum AppCompletion {
   }
 }
 
-/// Status without colour: complete = solid ink check-circle, partial = ink
-/// arc for [progress] (0–1) on a grey track, not started = empty grey ring.
-/// Always carries a semantics label (defaults to the state's words).
+/// Completion status, readable at a glance and by shape alone:
+/// complete = solid green disc with a tick ([AppDoneIcon]); partial = hollow
+/// amber ring whose arc shows [progress] (0–1) on a grey track; not started =
+/// thin hollow grey ring. Always carries a semantics label (defaults to the
+/// state's words).
 class AppStatusRing extends StatelessWidget {
   const AppStatusRing({
     super.key,
     required this.status,
     this.progress = 0,
-    this.size = 22,
+    this.size = 24,
     this.semanticLabel,
   });
 
@@ -42,7 +44,7 @@ class AppStatusRing extends StatelessWidget {
     Key? key,
     required int done,
     required int total,
-    double size = 22,
+    double size = 24,
     String? semanticLabel,
   }) =>
       AppStatusRing(
@@ -63,34 +65,92 @@ class AppStatusRing extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
-    final Widget glyph = switch (status) {
+    final painter = switch (status) {
       AppCompletion.complete =>
-        Icon(AppIcons.complete, size: size, color: colors.ink),
-      AppCompletion.partial => CustomPaint(
-          size: Size.square(size),
-          painter: _RingPainter(
-            track: colors.ringTrack,
-            arc: colors.ink,
-            progress: progress.clamp(0.0, 1.0),
-            stroke: size * 3 / 22,
-          ),
+        _DonePainter(disc: colors.success, tick: colors.onSuccess),
+      AppCompletion.partial => _RingPainter(
+          track: colors.ringTrack,
+          arc: colors.progress,
+          progress: progress.clamp(0.0, 1.0),
+          stroke: size * _partialStroke,
         ),
-      AppCompletion.notStarted => CustomPaint(
-          size: Size.square(size),
-          painter: _RingPainter(
-            track: colors.inactive,
-            arc: colors.inactive,
-            progress: 0,
-            stroke: size * 2 / 22,
-          ),
+      AppCompletion.notStarted => _RingPainter(
+          track: colors.inactive,
+          arc: colors.inactive,
+          progress: 0,
+          stroke: size * _emptyStroke,
         ),
     };
     return Semantics(
       label: semanticLabel ?? status.label,
       excludeSemantics: true,
-      child: SizedBox.square(dimension: size, child: Center(child: glyph)),
+      child: CustomPaint(size: Size.square(size), painter: painter),
     );
   }
+}
+
+/// The shared "done" mark: the same solid green disc + tick as a complete
+/// [AppStatusRing]. Use it for task completion only (packs complete, delivered,
+/// checklist complete, signed off) — "saved"/"available" confirmations keep
+/// the ink [AppIcons.complete]. A drop-in for
+/// `Icon(AppIcons.complete, size: s, color: colors.ink)`; with no
+/// [semanticLabel] it is decorative, like that icon.
+class AppDoneIcon extends StatelessWidget {
+  const AppDoneIcon({super.key, this.size = 24, this.semanticLabel});
+
+  final double size;
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppPalette.of(context);
+    final mark = CustomPaint(
+      size: Size.square(size),
+      painter: _DonePainter(disc: colors.success, tick: colors.onSuccess),
+    );
+    if (semanticLabel == null) return ExcludeSemantics(child: mark);
+    return Semantics(
+        label: semanticLabel, excludeSemantics: true, image: true, child: mark);
+  }
+}
+
+// Geometry, as fractions of the box: the partial ring's outer edge and the done
+// disc share one diameter so rows line up whatever the state.
+const _ringRadius = 0.375;
+const _partialStroke = 0.145;
+const _emptyStroke = 0.085;
+const _discRadius = _ringRadius + _partialStroke / 2;
+
+class _DonePainter extends CustomPainter {
+  _DonePainter({required this.disc, required this.tick});
+
+  final Color disc;
+  final Color tick;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    final origin = Offset((size.width - s) / 2, (size.height - s) / 2);
+    canvas.drawCircle(
+        size.center(Offset.zero), s * _discRadius, Paint()..color = disc);
+    Offset p(double x, double y) => origin + Offset(s * x, s * y);
+    final path = Path()
+      ..moveTo(p(0.31, 0.51).dx, p(0.31, 0.51).dy)
+      ..lineTo(p(0.44, 0.64).dx, p(0.44, 0.64).dy)
+      ..lineTo(p(0.69, 0.37).dx, p(0.69, 0.37).dy);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = s * 0.095
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = tick,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_DonePainter old) => old.disc != disc || old.tick != tick;
 }
 
 class _RingPainter extends CustomPainter {
@@ -108,8 +168,7 @@ class _RingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Matches the mockup: r = 8.5 in a 22 box.
-    final radius = size.shortestSide * 8.5 / 22;
+    final radius = size.shortestSide * _ringRadius;
     final center = size.center(Offset.zero);
     final paint = Paint()
       ..style = PaintingStyle.stroke
@@ -179,7 +238,7 @@ class AppStatusPill extends StatelessWidget {
 
 /// Amber "Quantity differs" pill (warning triangle + words): a recorded
 /// quantity that differs from the expected one needs a decision before
-/// sign-off. Delivered-as-expected stays neutral (solid ink check).
+/// sign-off. Delivered-as-expected shows the green done mark.
 class AppQuantityDiffersPill extends StatelessWidget {
   const AppQuantityDiffersPill({super.key, this.label = 'Quantity differs'});
 

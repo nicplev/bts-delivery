@@ -95,6 +95,40 @@ void main() {
         isNot(AppTheme.darkTheme.scaffoldBackgroundColor));
   });
 
+  test('completion status colours: done green and partial amber read clearly',
+      () {
+    for (final colors in _palettes) {
+      final reason =
+          'dark=${colors.dark}, high contrast=${colors.highContrast}';
+      final graphicMinimum = colors.highContrast ? 4.5 : 3.0;
+      for (final background in [colors.surface, colors.canvas]) {
+        expect(_contrast(background, colors.success),
+            greaterThanOrEqualTo(graphicMinimum),
+            reason: 'success, $reason');
+        expect(_contrast(background, colors.progress),
+            greaterThanOrEqualTo(graphicMinimum),
+            reason: 'progress, $reason');
+      }
+      expect(
+          _contrast(colors.success, colors.onSuccess), greaterThanOrEqualTo(3),
+          reason: 'tick on green, $reason');
+      // Status green is a real hue, clearly not near-black ink, and not the
+      // Year 3 identity colour.
+      expect(_isNeutral(colors.success), isFalse, reason: reason);
+      expect(_isNeutral(colors.progress), isFalse, reason: reason);
+      expect(colors.success,
+          isNot(YearLevelColors.styleFor(SchoolYear.year3, colors).fill),
+          reason: reason);
+      expect(colors.success, isNot(colors.progress), reason: reason);
+      final green = HSLColor.fromColor(colors.success).hue;
+      final amber = HSLColor.fromColor(colors.progress).hue;
+      expect(green, inInclusiveRange(120, 160), reason: reason);
+      expect(amber, inInclusiveRange(30, 45), reason: reason);
+      // The warning tint/ink pair is unchanged and distinct from the ring.
+      expect(colors.progress, isNot(colors.warningInk), reason: reason);
+    }
+  });
+
   test('tones are neutral grey or warning amber only', () {
     expect(AppTone.values, [AppTone.neutral, AppTone.warning]);
     for (final colors in _palettes) {

@@ -99,8 +99,9 @@ class AppTypography {
 /// Neutral colour tokens for light/dark × normal/high-contrast.
 ///
 /// Colour is reserved for year levels (see `YearLevelColors`); everything here
-/// is neutral except [warningTint]/[warningInk] (amber, tint only) and the
-/// error tokens.
+/// is neutral except [warningTint]/[warningInk] (amber, tint only), the
+/// completion status pair [success] (done green) / [progress] (partial amber
+/// ring) and the error tokens.
 @immutable
 class AppPalette extends ThemeExtension<AppPalette> {
   const AppPalette({this.dark = false, this.highContrast = false});
@@ -196,6 +197,34 @@ class AppPalette extends ThemeExtension<AppPalette> {
       : dark
           ? const Color(0xFF3A3A3C)
           : const Color(0xFFD1D1D6);
+
+  /// "Done" green: the solid disc of a completed task (classroom packs
+  /// complete, consumable delivered, checklist complete, visit signed off).
+  /// Status only — never buttons, links or tiles. ≥ 3:1 against [surface] and
+  /// [canvas] (≥ 4.5:1 in high contrast); deliberately not the Year 3 fill.
+  Color get success => switch ((dark, highContrast)) {
+        (true, true) => const Color(0xFF3DDC68),
+        (true, false) => const Color(0xFF30D158),
+        (false, true) => const Color(0xFF0D7F3F),
+        (false, false) => const Color(0xFF1A9850),
+      };
+
+  /// Tick drawn on [success] (≥ 3:1 against it).
+  Color get onSuccess => switch ((dark, highContrast)) {
+        (true, true) => Colors.black,
+        (true, false) => const Color(0xFF0B1611),
+        (false, _) => Colors.white,
+      };
+
+  /// Solid amber arc of a partial ("in progress") ring. ≥ 3:1 against
+  /// [surface] and [canvas] (≥ 4.5:1 in high contrast). Warnings keep the
+  /// pale [warningTint] / [warningInk] pair.
+  Color get progress => switch ((dark, highContrast)) {
+        (true, true) => const Color(0xFFFFC65E),
+        (true, false) => const Color(0xFFFFB340),
+        (false, true) => const Color(0xFF975C00),
+        (false, false) => const Color(0xFFC27000),
+      };
 
   /// Primary action fill (ink; inverted in dark mode).
   Color get action => ink;
