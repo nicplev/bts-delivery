@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import '../models/staff.dart';
@@ -20,6 +21,62 @@ abstract class StaffRepository {
   Future<Result<String>> regenerateCalendarToken(String staffId);
   Future<Result<String>> getCalendarSubscriptionUrl(String staffId);
   Future<Result<String?>> getExistingCalendarHttpsUrl(String staffId);
+
+  // Team control — super admins only; the server refuses anyone else.
+  Future<Result<TeamDirectory>> getTeamAccounts();
+
+  /// Creates a sign-in for [email]. Pass [staffId] to give an existing
+  /// person a sign-in, or [name] and [role] to add someone new.
+  Future<Result<String>> createTeamAccount({
+    required String email,
+    String? staffId,
+    String? name,
+    String? role,
+  });
+  Future<Result<void>> setTeamSuperAdmin(String staffId, bool superAdmin);
+  Future<Result<void>> setTeamSignIn(String staffId, bool enabled);
+  Future<Result<void>> deleteTeamMember(String staffId);
+
+  /// Emails [email] a link to choose a new password.
+  Future<Result<void>> sendPasswordReset(String email);
+}
+
+/// Sign-in details for one person, visible to super admins.
+class TeamAccount {
+  const TeamAccount({
+    required this.staffId,
+    required this.hasLogin,
+    this.email,
+    this.signInEnabled = false,
+    this.superAdmin = false,
+    this.lastSignInAt,
+  });
+
+  factory TeamAccount.fromJson(Map<String, dynamic> json) => TeamAccount(
+        staffId: json['staffId'] as String,
+        hasLogin: json['hasLogin'] == true,
+        email: json['email'] as String?,
+        signInEnabled: json['signInEnabled'] == true,
+        superAdmin: json['superAdmin'] == true,
+        lastSignInAt: json['lastSignInAt'] is num
+            ? DateTime.fromMillisecondsSinceEpoch(
+                (json['lastSignInAt'] as num).toInt())
+            : null,
+      );
+
+  final String staffId;
+  final bool hasLogin;
+  final String? email;
+  final bool signInEnabled;
+  final bool superAdmin;
+  final DateTime? lastSignInAt;
+}
+
+class TeamDirectory {
+  const TeamDirectory({required this.callerStaffId, required this.accounts});
+
+  final String callerStaffId;
+  final Map<String, TeamAccount> accounts;
 }
 
 class FirebaseStaffRepository implements StaffRepository {
@@ -34,7 +91,9 @@ class FirebaseStaffRepository implements StaffRepository {
       final doc = await _staff.doc(staffId).get();
       final data = doc.data();
       if (data == null) return const Result.failure('Staff member not found');
-      return Result.success(Staff.fromJson({...data, 'id': doc.id}));
+      // Super admin comes only from the server-owned access link.
+      return Result.success(
+          Staff.fromJson({...data, 'id': doc.id, 'superAdmin': false}));
     } catch (e) {
       return Result.failure('Failed to get staff: $e');
     }
@@ -125,6 +184,83 @@ class FirebaseStaffRepository implements StaffRepository {
       return Result.success(data['code'] as String);
     } catch (e) {
       return Result.failure('Failed to issue an invitation: $e');
+    }
+  }
+
+  @override
+  Future<Result<TeamDirectory>> getTeamAccounts() async {
+    try {
+      final result = await callStaffAccess('listTeamAccounts', {});
+      final accounts = [
+        for (final entry in result['accounts'] as List)
+          TeamAccount.fromJson(Map<String, dynamic>.from(entry as Map)),
+      ];
+      return Result.success(TeamDirectory(
+        callerStaffId: result['callerStaffId'] as String,
+        accounts: {for (final account in accounts) account.staffId: account},
+      ));
+    } catch (e) {
+      return Result.failure('Could not load sign-in details: $e');
+    }
+  }
+
+  @override
+  Future<Result<String>> createTeamAccount({
+    required String email,
+    String? staffId,
+    String? name,
+    String? role,
+  }) async {
+    try {
+      final result = await callStaffAccess('createTeamAccount', {
+        'email': email,
+        if (staffId != null) 'staffId': staffId,
+        if (name != null) 'name': name,
+        if (role != null) 'role': role,
+      });
+      return Result.success(result['staffId'] as String);
+    } catch (e) {
+      return Result.failure('Could not create the sign-in: $e');
+    }
+  }
+
+  @override
+  Future<Result<void>> setTeamSuperAdmin(String staffId, bool superAdmin) =>
+      _teamCall(
+          'setTeamSuperAdmin',
+          {'staffId': staffId, 'superAdmin': superAdmin},
+          'Could not change super admin access');
+
+  @override
+  Future<Result<void>> setTeamSignIn(String staffId, bool enabled) => _teamCall(
+      'setTeamSignIn',
+      {'staffId': staffId, 'enabled': enabled},
+      'Could not change sign-in');
+
+  @override
+  Future<Result<void>> deleteTeamMember(String staffId) => _teamCall(
+      'deleteTeamMember', {'staffId': staffId}, 'Could not delete this person');
+
+  Future<Result<void>> _teamCall(
+    String function,
+    Map<String, dynamic> data,
+    String failure,
+  ) async {
+    try {
+      await callStaffAccess(function, data);
+      return const Result.success(null);
+    } catch (e) {
+      return Result.failure('$failure: $e');
+    }
+  }
+
+  @override
+  Future<Result<void>> sendPasswordReset(String email) async {
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      return const Result.success(null);
+    } catch (e) {
+      return Result.failure('Could not send the password reset email: $e');
     }
   }
 

@@ -11,9 +11,14 @@ class Staff with _$Staff {
     required String name,
     String? uid,
     @Default('staff') String role, // 'manager', 'admin', or 'staff'
-    @Default([]) List<String> assignedSchoolIds, // Schools this staff member is assigned to
+    @Default([])
+    List<String> assignedSchoolIds, // Schools this staff member is assigned to
     String? linkPin, // 4-digit PIN for account linking verification
     String? calendarToken, // Unique token for calendar subscription URL
+    // Read from the server-owned staff_access link, never from the staff
+    // document. Super admins manage the team (people, sign-ins, roles).
+    // ignore: invalid_annotation_target
+    @JsonKey(includeToJson: false) @Default(false) bool superAdmin,
     @TimestampConverter() required DateTime createdAt,
   }) = _Staff;
 
@@ -23,10 +28,12 @@ class Staff with _$Staff {
 
   bool get isManager => role == 'manager';
   bool get isAdmin => role == 'admin';
+  bool get isSuperAdmin => isAdmin && superAdmin;
   bool get hasManagerAccess => role == 'manager' || role == 'admin';
   bool get hasAssignedSchools => assignedSchoolIds.isNotEmpty;
   bool get isLinked => uid != null;
-  bool get hasCalendarToken => calendarToken != null && calendarToken!.isNotEmpty;
+  bool get hasCalendarToken =>
+      calendarToken != null && calendarToken!.isNotEmpty;
 }
 
 class TimestampConverter implements JsonConverter<DateTime, Timestamp> {

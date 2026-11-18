@@ -153,7 +153,9 @@ async function ensureAccount(account) {
     createdAt,
   }]]);
   const mapping = `staff_access/${account.uid}`;
-  await createFixture(mapping, [[mapping, {staffId: account.uid}]]);
+  // The demo administrator is also a super admin so team control can be tried.
+  await createFixture(mapping, [[mapping, account.role === "admin" ?
+    {staffId: account.uid, superAdmin: true} : {staffId: account.uid}]]);
   const link = await getDocument(mapping);
   if (link?.fields?.staffId?.stringValue !== account.uid) {
     throw new Error("An existing demo Auth ID has a different staff link.");

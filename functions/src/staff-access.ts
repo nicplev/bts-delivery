@@ -60,8 +60,9 @@ export const issueStaffInvite = functions.https.onCall(async (data, context) => 
 
   await db.runTransaction(async (tx) => {
     const caller = await linkedStaff(db, tx, uid);
-    if (caller?.role !== "admin") {
-      throw new HttpsError("permission-denied", "Only an administrator can issue an invite.");
+    const callerLink = await tx.get(db.collection("staff_access").doc(uid));
+    if (caller?.role !== "admin" || callerLink.get("superAdmin") !== true) {
+      throw new HttpsError("permission-denied", "Only a super admin can issue an invite.");
     }
     const staff = (await tx.get(db.collection("staff").doc(staffId))).data();
     if (!staff || !validRole(staff.role)) {

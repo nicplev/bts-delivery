@@ -3,17 +3,32 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/auth_providers.dart';
 import '../../providers/deliveries_providers.dart';
 import '../../providers/repository_providers.dart';
 import '../../providers/staff_providers.dart';
 import '../../providers/calendar_metadata_provider.dart';
 import '../../models/staff.dart';
+import '../../repositories/staff_repository.dart';
+import '../../services/date_utils.dart';
+import '../../services/result.dart';
 import '../../widgets/delivery_day_list.dart';
 import '../../widgets/design/design.dart';
 import '../../widgets/admin/calendar_management_dialog.dart';
 import 'admin_page.dart';
 
-enum _StaffChoice { edit, invite, calendar, delete }
+enum _StaffChoice {
+  edit,
+  addSignIn,
+  invite,
+  passwordReset,
+  signInOff,
+  signInOn,
+  makeSuperAdmin,
+  removeSuperAdmin,
+  calendar,
+  delete,
+}
 
 class StaffManagementScreen extends ConsumerStatefulWidget {
   const StaffManagementScreen({super.key});
@@ -31,9 +46,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     super.initState();
     // Set up auto-refresh every 30 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (mounted) {
-        ref.invalidate(staffListProvider);
-      }
+      if (mounted) _refresh();
     });
   }
 
@@ -43,9 +56,17 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     super.dispose();
   }
 
+  void _refresh() {
+    ref.invalidate(staffListProvider);
+    ref.invalidate(teamDirectoryProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final staffListAsync = ref.watch(staffListProvider);
+    final superAdmin = ref.watch(isSuperAdminProvider);
+    final team = superAdmin ? ref.watch(teamDirectoryProvider) : null;
+    final directory = team?.valueOrNull;
     final count = staffListAsync.valueOrNull?.length;
 
     final List<Widget> content = staffListAsync.when(
@@ -57,7 +78,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           action: AppSecondaryButton(
             label: 'Retry',
             icon: AppIcons.retry,
-            onPressed: () => ref.invalidate(staffListProvider),
+            onPressed: _refresh,
           ),
         ),
       ],
@@ -72,6 +93,17 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           ];
         }
         return [
+          if (team != null && team.hasError)
+            DeliveryMessage(
+              icon: AppIcons.error,
+              title: 'Sign-in details could not be loaded',
+              description: '${team.error}',
+              action: AppSecondaryButton(
+                label: 'Retry',
+                icon: AppIcons.retry,
+                onPressed: _refresh,
+              ),
+            ),
           AppGroupedList(
             separatorIndent: 57,
             children: [
@@ -79,7 +111,13 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                 _StaffRow(
                   key: ValueKey(staff.id),
                   staff: staff,
-                  onOptions: () => _showStaffOptions(staff),
+                  account: directory?.accounts[staff.id],
+                  isSelf: directory?.callerStaffId == staff.id,
+                  onOptions: () => _showStaffOptions(
+                    staff,
+                    superAdmin: superAdmin,
+                    directory: directory,
+                  ),
                 ),
             ],
           ),
@@ -98,7 +136,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           icon: AppIcons.retry,
           semanticLabel: 'Refresh',
           onPressed: () {
-            ref.invalidate(staffListProvider);
+            _refresh();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Refreshing staff list...'),
@@ -108,55 +146,282 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           },
         ),
       ],
-      action: AppGlassPrimaryButton(
-        label: 'Add staff',
-        icon: AppIcons.add,
-        onPressed: _showAddStaffDialog,
-      ),
+      // Only super admins add people; other admins manage calendars here.
+      action: superAdmin
+          ? AppGlassPrimaryButton(
+              label: 'Add staff',
+              icon: AppIcons.add,
+              onPressed: _showAddStaffDialog,
+            )
+          : null,
       children: content,
     );
   }
 
-  Future<void> _showStaffOptions(Staff staff) async {
-    final choice = await showAdminActionSheet<_StaffChoice>(
-      context,
-      title: staff.name,
-      actions: const [
-        AdminSheetAction(
+  Future<void> _showStaffOptions(
+    Staff staff, {
+    required bool superAdmin,
+    required TeamDirectory? directory,
+  }) async {
+    final account = directory?.accounts[staff.id];
+    final isSelf = directory?.callerStaffId == staff.id;
+    final hasLogin = account?.hasLogin ?? false;
+    final actions = <AdminSheetAction<_StaffChoice>>[
+      if (superAdmin) ...[
+        const AdminSheetAction(
             value: _StaffChoice.edit, label: 'Edit', icon: AppIcons.edit),
-        AdminSheetAction(
-            value: _StaffChoice.invite,
-            label: 'Create invitation',
-            icon: AppIcons.invitation),
-        AdminSheetAction(
-            value: _StaffChoice.calendar,
-            label: 'Manage calendar',
-            icon: AppIcons.calendar),
-        AdminSheetAction(
+        if (directory != null && !hasLogin) ...[
+          const AdminSheetAction(
+              value: _StaffChoice.addSignIn,
+              label: 'Create sign-in',
+              icon: AppIcons.addSignIn),
+          const AdminSheetAction(
+              value: _StaffChoice.invite,
+              label: 'Create invitation',
+              icon: AppIcons.invitation),
+        ],
+        if (hasLogin && account?.email != null)
+          const AdminSheetAction(
+              value: _StaffChoice.passwordReset,
+              label: 'Send password reset email',
+              icon: AppIcons.passwordReset),
+        if (hasLogin && !isSelf && staff.isAdmin)
+          account!.superAdmin
+              ? const AdminSheetAction(
+                  value: _StaffChoice.removeSuperAdmin,
+                  label: 'Remove super admin',
+                  icon: AppIcons.superAdmin)
+              : const AdminSheetAction(
+                  value: _StaffChoice.makeSuperAdmin,
+                  label: 'Make super admin',
+                  icon: AppIcons.superAdmin),
+        if (hasLogin && !isSelf && !account!.superAdmin)
+          account.signInEnabled
+              ? const AdminSheetAction(
+                  value: _StaffChoice.signInOff,
+                  label: 'Turn off sign-in',
+                  icon: AppIcons.signInOff)
+              : const AdminSheetAction(
+                  value: _StaffChoice.signInOn,
+                  label: 'Turn on sign-in',
+                  icon: AppIcons.signInOn),
+      ],
+      const AdminSheetAction(
+          value: _StaffChoice.calendar,
+          label: 'Manage calendar',
+          icon: AppIcons.calendar),
+      if (superAdmin &&
+          directory != null &&
+          !isSelf &&
+          !(account?.superAdmin ?? false))
+        const AdminSheetAction(
             value: _StaffChoice.delete,
             label: 'Delete',
             icon: AppIcons.delete,
             destructive: true),
-      ],
+    ];
+    final choice = await showAdminActionSheet<_StaffChoice>(
+      context,
+      title: staff.name,
+      actions: actions,
     );
     if (!mounted || choice == null) return;
     switch (choice) {
       case _StaffChoice.edit:
-        _showEditStaffDialog(staff);
+        _showEditStaffDialog(staff, isSelf: isSelf, account: account);
+      case _StaffChoice.addSignIn:
+        _showAddSignInDialog(staff);
       case _StaffChoice.invite:
         _issueInvite(staff);
+      case _StaffChoice.passwordReset:
+        _confirmPasswordReset(staff, account!.email!);
+      case _StaffChoice.signInOff:
+        _confirmSignIn(staff, enabled: false);
+      case _StaffChoice.signInOn:
+        _confirmSignIn(staff, enabled: true);
+      case _StaffChoice.makeSuperAdmin:
+        _confirmSuperAdmin(staff, superAdmin: true);
+      case _StaffChoice.removeSuperAdmin:
+        _confirmSuperAdmin(staff, superAdmin: false);
       case _StaffChoice.calendar:
         _showCalendarManagementDialog(staff);
       case _StaffChoice.delete:
-        _showDeleteStaffDialog(staff);
+        _showDeleteStaffDialog(staff, hasLogin: hasLogin);
     }
+  }
+
+  /// Asks before a team change, then runs it and reports the outcome.
+  Future<void> _confirmTeamChange({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool destructive = false,
+    required Future<Result<void>> Function() change,
+    required String done,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: destructive ? appDestructiveButtonStyle(context) : null,
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final result = await change();
+    if (!mounted) return;
+    if (result.isFailure) {
+      _showError(result.errorOrNull ?? 'That change could not be made.');
+      return;
+    }
+    _refresh();
+    _showMessage(done);
+  }
+
+  void _confirmPasswordReset(Staff staff, String email) {
+    _confirmTeamChange(
+      title: 'Reset password',
+      message: 'Send ${staff.name} an email at $email with a link to choose '
+          'a new password? Their current password keeps working until they '
+          'change it.',
+      confirmLabel: 'Send email',
+      change: () => ref.read(staffRepositoryProvider).sendPasswordReset(email),
+      done: 'Password reset email sent to $email',
+    );
+  }
+
+  void _confirmSignIn(Staff staff, {required bool enabled}) {
+    _confirmTeamChange(
+      title: enabled ? 'Turn on sign-in' : 'Turn off sign-in',
+      message: enabled
+          ? '${staff.name} will be able to sign in again.'
+          : '${staff.name} will be signed out on their devices within an '
+              'hour and won\'t be able to sign in until you turn it back on. '
+              'Their records are kept.',
+      confirmLabel: enabled ? 'Turn on' : 'Turn off',
+      destructive: !enabled,
+      change: () =>
+          ref.read(staffRepositoryProvider).setTeamSignIn(staff.id, enabled),
+      done: enabled
+          ? '${staff.name} can sign in again'
+          : 'Sign-in turned off for ${staff.name}',
+    );
+  }
+
+  void _confirmSuperAdmin(Staff staff, {required bool superAdmin}) {
+    _confirmTeamChange(
+      title: superAdmin ? 'Make super admin' : 'Remove super admin',
+      message: superAdmin
+          ? '${staff.name} will be able to add and remove people, change '
+              'access levels, manage sign-ins and make other super admins.'
+          : '${staff.name} will stay an admin but will no longer manage the '
+              'team.',
+      confirmLabel: superAdmin ? 'Make super admin' : 'Remove',
+      destructive: !superAdmin,
+      change: () => ref
+          .read(staffRepositoryProvider)
+          .setTeamSuperAdmin(staff.id, superAdmin),
+      done: superAdmin
+          ? '${staff.name} is now a super admin'
+          : '${staff.name} is no longer a super admin',
+    );
+  }
+
+  void _showAddSignInDialog(Staff staff) {
+    final emailController = TextEditingController();
+    showDialog<void>(
+      context: context,
+      useRootNavigator: false,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        title: Text('Create sign-in for ${staff.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'They will get an email with a link to choose their password.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              keyboardType: TextInputType.emailAddress,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(AppIcons.email, size: 20),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final email = emailController.text.trim();
+              if (email.isEmpty) return;
+              Navigator.of(dialogContext).pop();
+              _createSignIn(email: email, staffId: staff.id, name: staff.name);
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Creates the sign-in, then emails the person a set-password link.
+  Future<void> _createSignIn({
+    required String email,
+    String? staffId,
+    required String name,
+    String? role,
+  }) async {
+    final repository = ref.read(staffRepositoryProvider);
+    final created = await repository.createTeamAccount(
+      email: email,
+      staffId: staffId,
+      name: staffId == null ? name : null,
+      role: staffId == null ? role : null,
+    );
+    if (!mounted) return;
+    if (created.isFailure) {
+      _showError(created.errorOrNull ?? 'Could not create the sign-in.');
+      return;
+    }
+    _refresh();
+    final sent = await repository.sendPasswordReset(email.toLowerCase());
+    if (!mounted) return;
+    _showMessage(sent.isSuccess
+        ? '$name can sign in once they choose a password from the email sent '
+            'to ${email.toLowerCase()}'
+        : 'Sign-in created for $name, but the email could not be sent. Use '
+            'Send password reset email to try again.');
   }
 
   void _showAddStaffDialog() {
     _showStaffDialog(null);
   }
 
-  void _showEditStaffDialog(Staff staff) {
+  void _showEditStaffDialog(
+    Staff staff, {
+    required bool isSelf,
+    TeamAccount? account,
+  }) {
     // Debug: Check if staff ID is empty
     if (staff.id.isEmpty) {
       _showError(
@@ -167,11 +432,22 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
       return;
     }
 
-    _showStaffDialog(staff);
+    // A super admin's role is fixed until super admin is removed, and
+    // nobody changes their own role.
+    final roleLocked = isSelf || (account?.superAdmin ?? false);
+    _showStaffDialog(
+      staff,
+      roleNote: !roleLocked
+          ? null
+          : isSelf
+              ? 'You can\'t change your own role.'
+              : 'Remove super admin before changing this role.',
+    );
   }
 
-  void _showStaffDialog(Staff? staff) {
+  void _showStaffDialog(Staff? staff, {String? roleNote}) {
     final nameController = TextEditingController(text: staff?.name ?? '');
+    final emailController = TextEditingController();
     String selectedRole = staff?.role ?? 'staff';
 
     showDialog(
@@ -208,12 +484,38 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                     DropdownMenuItem(value: 'manager', child: Text('Manager')),
                     DropdownMenuItem(value: 'admin', child: Text('Admin')),
                   ],
-                  onChanged: (value) {
-                    setState(() {
-                      selectedRole = value ?? 'staff';
-                    });
-                  },
+                  onChanged: roleNote != null
+                      ? null
+                      : (value) {
+                          setState(() {
+                            selectedRole = value ?? 'staff';
+                          });
+                        },
                 ),
+                if (roleNote != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    roleNote,
+                    style: AppTypography.subheadline
+                        .copyWith(color: AppPalette.of(context).muted),
+                  ),
+                ],
+                if (staff == null) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Sign-in email (optional)',
+                      helperText:
+                          'They get an email to choose a password. Leave '
+                          'blank to share an invitation code instead.',
+                      helperMaxLines: 3,
+                      prefixIcon: Icon(AppIcons.email, size: 20),
+                    ),
+                  ),
+                ],
               ],
             ),
             actions: [
@@ -222,8 +524,8 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
-                onPressed: () =>
-                    _saveStaff(staff, nameController.text, selectedRole),
+                onPressed: () => _saveStaff(staff, nameController.text,
+                    selectedRole, emailController.text.trim()),
                 child: Text(staff == null ? 'Add' : 'Save'),
               ),
             ],
@@ -234,7 +536,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
   }
 
   Future<void> _saveStaff(
-      Staff? existingStaff, String name, String role) async {
+      Staff? existingStaff, String name, String role, String email) async {
     if (name.trim().isEmpty) {
       _showError('Please enter a name');
       return;
@@ -242,7 +544,9 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
 
     Navigator.of(context, rootNavigator: false).pop();
 
-    if (existingStaff == null) {
+    if (existingStaff == null && email.isNotEmpty) {
+      await _createSignIn(email: email, name: name.trim(), role: role);
+    } else if (existingStaff == null) {
       final newStaff = Staff(
         id: '',
         name: name.trim(),
@@ -380,7 +684,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     });
   }
 
-  void _showDeleteStaffDialog(Staff staff) {
+  void _showDeleteStaffDialog(Staff staff, {required bool hasLogin}) {
     // Debug: Check if staff ID is empty
     if (staff.id.isEmpty) {
       _showError(
@@ -404,9 +708,9 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
             children: [
               Text('Are you sure you want to delete "${staff.name}"?'),
               const SizedBox(height: 8),
-              if (staff.uid != null)
+              if (hasLogin)
                 Text(
-                  'Warning: This staff member is linked to a user account. Deleting will unlink their account.',
+                  'Their sign-in will be deleted too. Past visit records keep their name.',
                   style:
                       AppTypography.subheadline.copyWith(color: colors.muted),
                 ),
@@ -428,7 +732,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                 // Close dialog first
                 Navigator.of(context).pop();
                 // Then delete
-                await _deleteStaff(staff);
+                await _deleteStaff(staff, hasLogin: hasLogin);
               },
               style: appDestructiveButtonStyle(context),
               child: const Text('Delete'),
@@ -439,14 +743,17 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     );
   }
 
-  Future<void> _deleteStaff(Staff staff) async {
+  Future<void> _deleteStaff(Staff staff, {required bool hasLogin}) async {
     try {
-      final deliveriesRepository = ref.read(deliveriesRepositoryProvider);
-      final result = await deliveriesRepository.deleteStaff(staff.id);
+      // People with a sign-in are removed on the server so their access link
+      // and sign-in go too; a record without one is deleted directly.
+      final result = hasLogin
+          ? await ref.read(staffRepositoryProvider).deleteTeamMember(staff.id)
+          : await ref.read(deliveriesRepositoryProvider).deleteStaff(staff.id);
 
       result.when(
         success: (_) {
-          ref.invalidate(staffListProvider);
+          _refresh();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -468,6 +775,13 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
     }
   }
 
+  void _showMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
   void _showError(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -482,15 +796,26 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
 /// One staff member: role icon tile, name, neutral status pills (role, account
 /// link, calendar subscription) and the options control.
 class _StaffRow extends StatelessWidget {
-  const _StaffRow({super.key, required this.staff, required this.onOptions});
+  const _StaffRow({
+    super.key,
+    required this.staff,
+    required this.onOptions,
+    this.account,
+    this.isSelf = false,
+  });
 
   final Staff staff;
   final VoidCallback onOptions;
 
+  /// Sign-in details, present only for super admins.
+  final TeamAccount? account;
+  final bool isSelf;
+
   @override
   Widget build(BuildContext context) {
     final colors = AppPalette.of(context);
-    final isLinked = staff.uid != null;
+    final account = this.account;
+    final isLinked = account?.hasLogin ?? staff.uid != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
       child: Row(
@@ -512,19 +837,47 @@ class _StaffRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(staff.name,
+                Text(isSelf ? '${staff.name} (you)' : staff.name,
                     style: AppTypography.headline.copyWith(color: colors.ink)),
+                if (account?.email != null) ...[
+                  const SizedBox(height: 2),
+                  Text(account!.email!,
+                      style: AppTypography.subheadline
+                          .copyWith(color: colors.muted)),
+                ],
+                if (account?.lastSignInAt != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                      'Last signed in '
+                      '${DateTimeUtils.formatDate(account!.lastSignInAt!)}',
+                      style:
+                          AppTypography.footnote.copyWith(color: colors.muted)),
+                ],
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: [
+                    if (account?.superAdmin ?? false)
+                      const AppStatusPill(
+                          label: 'Super admin', icon: AppIcons.superAdmin),
+                    if (account != null &&
+                        account.hasLogin &&
+                        !account.signInEnabled)
+                      const AppStatusPill(
+                          label: 'Sign-in off',
+                          icon: AppIcons.signInOff,
+                          tone: AppTone.warning),
                     if (staff.isAdmin)
                       const AppStatusPill(label: 'Admin')
                     else if (staff.isManager)
                       const AppStatusPill(label: 'Manager'),
                     AppStatusPill(
-                      label: isLinked ? 'Linked to user account' : 'Not linked',
+                      label: isLinked
+                          ? (account == null
+                              ? 'Linked to user account'
+                              : 'Has sign-in')
+                          : (account == null ? 'Not linked' : 'No sign-in'),
                       icon: isLinked ? AppIcons.check : AppIcons.link,
                     ),
                     Consumer(

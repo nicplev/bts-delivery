@@ -112,8 +112,9 @@ class FirebaseAuthRepository implements AuthRepository {
         return const Result.success(null);
       }
       final doc = await _firestore.collection('staff').doc(staffId).get();
-      return Result.success(
-          currentUser?.uid == user.uid ? _staff(doc, user) : null);
+      return Result.success(currentUser?.uid == user.uid
+          ? _staff(doc, user, superAdmin: link.data()?['superAdmin'] == true)
+          : null);
     } catch (e) {
       return Result.failure('Failed to get current staff: $e');
     }
@@ -129,25 +130,30 @@ class FirebaseAuthRepository implements AuthRepository {
                 (link) {
                   final staffId = link.data()?['staffId'] as String?;
                   if (staffId == null) return Stream<Staff?>.value(null);
+                  final superAdmin = link.data()?['superAdmin'] == true;
                   return _firestore
                       .collection('staff')
                       .doc(staffId)
                       .snapshots()
-                      .map((doc) => _staff(doc, user));
+                      .map((doc) => _staff(doc, user, superAdmin: superAdmin));
                 },
                 reset: () => null,
               ),
         reset: () => null,
       );
 
-  Staff? _staff(DocumentSnapshot<Map<String, dynamic>> doc, User user) {
+  Staff? _staff(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+    User user, {
+    bool superAdmin = false,
+  }) {
     final data = doc.data();
     if (data == null ||
         data['uid'] != user.uid ||
         !const ['admin', 'manager', 'staff'].contains(data['role'])) {
       return null;
     }
-    return Staff.fromJson({...data, 'id': doc.id});
+    return Staff.fromJson({...data, 'id': doc.id, 'superAdmin': superAdmin});
   }
 
   @override

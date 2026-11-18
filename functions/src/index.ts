@@ -23,3 +23,11 @@ export {
 } from "./staff-access";
 
 export {prepareVisit} from "./prepare-visit";
+
+export {
+  createTeamAccount,
+  deleteTeamMember,
+  listTeamAccounts,
+  setTeamSignIn,
+  setTeamSuperAdmin,
+} from "./team-admin";

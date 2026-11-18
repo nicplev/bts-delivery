@@ -128,9 +128,16 @@ const staffData = (name, role, assignedSchoolIds = [], uid = null) => ({
   name, role, assignedSchoolIds, uid, createdAt: now,
 });
 
-async function link(user, id, role, schools) {
+async function link(user, id, role, schools, superAdmin = false) {
   await db.doc(`staff/${id}`).set(staffData(id, role, schools, user.uid));
-  await db.doc(`staff_access/${user.uid}`).set({staffId: id});
+  await db.doc(`staff_access/${user.uid}`).set(superAdmin ? {staffId: id, superAdmin} : {staffId: id});
+}
+
+function patch(path, user, data) {
+  const mask = Object.keys(data).map((key) => `updateMask.fieldPaths=${key}`).join("&");
+  return request(`${documents}/${path}?${mask}&currentDocument.exists=true`, user, {
+    method: "PATCH", body: JSON.stringify({fields: fields(data)}),
+  });
 }
 
 function delivery(schoolId) {
@@ -144,7 +151,7 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
   const outsider = await signUp("outside");
   const newUser = await signUp("invite");
   const duplicate = await signUp("duplicate");
-  await link(adminUser, "admin", "admin");
+  await link(adminUser, "admin", "admin", [], true);
   await link(manager, "manager", "manager");
   await link(field, "field", "staff", ["alpha", "charlie"]);
   await link(outsider, "outside", "staff", []);
@@ -202,6 +209,90 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
     const {code: staleRole} = await call("issueStaffInvite", adminUser, {staffId: "dup"});
     await db.doc("staff/dup").update({role: "manager"});
     await call("redeemStaffInvite", duplicate, {code: staleRole}, 400);
+  });
+
+  await t.test("team control belongs to super admins", async () => {
+    const plainAdmin = await signUp("plainadmin");
+    await link(plainAdmin, "plainadmin", "admin");
+    await db.doc("staff/target").set(staffData("Target", "staff"));
+    await db.doc("staff/nologin").set(staffData("No login", "staff"));
+
+    const newStaff = {name: "Made", role: "staff", assignedSchoolIds: [], createdAt: now};
+
+    // Ordinary admins allocate schools but cannot manage people.
+    await call("issueStaffInvite", plainAdmin, {staffId: "target"}, 403);
+    await call("listTeamAccounts", plainAdmin, {}, 403);
+    await call("createTeamAccount", plainAdmin, {name: "X", email: "x@example.test", role: "staff"}, 403);
+    await call("setTeamSuperAdmin", plainAdmin, {staffId: "plainadmin", superAdmin: true}, 403);
+    await call("setTeamSignIn", plainAdmin, {staffId: "field", enabled: false}, 403);
+    await call("deleteTeamMember", plainAdmin, {staffId: "target"}, 403);
+    await status(await write("staff/made-by-admin", plainAdmin, newStaff), 403);
+    await status(await patch("staff/target", plainAdmin, {role: "admin"}), 403);
+    await status(await patch("staff/target", plainAdmin, {name: "Renamed"}), 403);
+    await status(await patch("staff/target", plainAdmin, {assignedSchoolIds: ["alpha"]}), 200);
+    await status(await remove("staff/target", plainAdmin), 403);
+
+    // Super admins manage records directly.
+    await status(await write("staff/made-by-super", adminUser, newStaff), 200);
+    await status(await patch("staff/target", adminUser, {name: "Renamed", role: "manager"}), 200);
+    await status(await remove("staff/made-by-super", adminUser), 200);
+
+    // Sign-ins are created without a password and linked at once.
+    const created = await call("createTeamAccount", adminUser, {
+      name: "Created Person", email: " Created@Example.test ", role: "staff",
+    });
+    assert.equal(created.email, "created@example.test");
+    const createdUser = await admin.auth().getUserByEmail("created@example.test");
+    assert.equal((await db.doc(`staff_access/${createdUser.uid}`).get()).get("staffId"), created.staffId);
+    assert.equal((await db.doc(`staff/${created.staffId}`).get()).get("uid"), createdUser.uid);
+    await call("createTeamAccount", adminUser, {name: "Again", email: "created@example.test", role: "staff"}, 409);
+    await call("createTeamAccount", adminUser, {name: "Bad", email: "not-an-email", role: "staff"}, 400);
+    await call("createTeamAccount", adminUser, {name: "Bad", email: "y@example.test", role: "owner"}, 400);
+    const attached = await call("createTeamAccount", adminUser, {staffId: "nologin", email: "nologin@example.test"});
+    assert.equal(attached.staffId, "nologin");
+    await call("createTeamAccount", adminUser, {staffId: "nologin", email: "other@example.test"}, 409);
+    await assert.rejects(admin.auth().getUserByEmail("other@example.test"));
+
+    const listed = await call("listTeamAccounts", adminUser, {});
+    assert.equal(listed.callerStaffId, "admin");
+    const row = listed.accounts.find(({staffId}) => staffId === created.staffId);
+    assert.deepEqual(
+      {email: row.email, hasLogin: row.hasLogin, signInEnabled: row.signInEnabled, superAdmin: row.superAdmin},
+      {email: "created@example.test", hasLogin: true, signInEnabled: true, superAdmin: false},
+    );
+    assert.equal(listed.accounts.find(({staffId}) => staffId === "admin").superAdmin, true);
+    assert.equal(listed.accounts.find(({staffId}) => staffId === "target").hasLogin, false);
+
+    // Super admin can be granted to admins only, and never changed on oneself.
+    await call("setTeamSuperAdmin", adminUser, {staffId: "admin", superAdmin: false}, 400);
+    await call("setTeamSuperAdmin", adminUser, {staffId: created.staffId, superAdmin: true}, 400);
+    await call("setTeamSuperAdmin", adminUser, {staffId: "target", superAdmin: true}, 400);
+    await call("setTeamSuperAdmin", adminUser, {staffId: "plainadmin", superAdmin: true});
+    await call("listTeamAccounts", plainAdmin, {});
+    await status(await patch("staff/plainadmin", adminUser, {role: "staff"}), 403);
+    await status(await patch("staff/plainadmin", adminUser, {name: "Renamed admin"}), 200);
+    await status(await remove("staff/plainadmin", adminUser), 403);
+    await call("setTeamSignIn", adminUser, {staffId: "plainadmin", enabled: false}, 400);
+    await call("deleteTeamMember", adminUser, {staffId: "plainadmin"}, 400);
+    await status(await patch("staff/admin", adminUser, {role: "staff"}), 403);
+    await call("setTeamSuperAdmin", adminUser, {staffId: "plainadmin", superAdmin: false});
+    await call("listTeamAccounts", plainAdmin, {}, 403);
+
+    // Sign-in can be turned off and back on, never for oneself.
+    await call("setTeamSignIn", adminUser, {staffId: "admin", enabled: false}, 400);
+    await call("setTeamSignIn", adminUser, {staffId: created.staffId, enabled: false});
+    assert.equal((await admin.auth().getUser(createdUser.uid)).disabled, true);
+    await call("setTeamSignIn", adminUser, {staffId: created.staffId, enabled: true});
+    assert.equal((await admin.auth().getUser(createdUser.uid)).disabled, false);
+
+    // Deleting removes the record, the access link and the sign-in.
+    await call("deleteTeamMember", adminUser, {staffId: "admin"}, 400);
+    await call("deleteTeamMember", adminUser, {staffId: created.staffId});
+    assert.equal((await db.doc(`staff/${created.staffId}`).get()).exists, false);
+    assert.equal((await db.doc(`staff_access/${createdUser.uid}`).get()).exists, false);
+    await assert.rejects(admin.auth().getUser(createdUser.uid));
+    await call("deleteTeamMember", adminUser, {staffId: "target"});
+    await call("deleteTeamMember", adminUser, {staffId: "target"}, 404);
   });
 
   await t.test("assigned-school list queries and descendants work", async () => {

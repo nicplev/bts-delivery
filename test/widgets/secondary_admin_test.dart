@@ -13,6 +13,9 @@ import 'package:bts_delivery_app/providers/schools_providers.dart';
 import 'package:bts_delivery_app/providers/season_export_providers.dart';
 import 'package:bts_delivery_app/repositories/checklist_repository.dart';
 import 'package:bts_delivery_app/repositories/season_export_repository.dart';
+import 'package:bts_delivery_app/repositories/staff_repository.dart';
+import 'package:bts_delivery_app/providers/staff_providers.dart';
+import 'package:bts_delivery_app/services/result.dart';
 import 'package:bts_delivery_app/screens/admin/admin_page.dart';
 import 'package:bts_delivery_app/screens/admin/checklist_management_screen.dart';
 import 'package:bts_delivery_app/screens/admin/season_export_screen.dart';
@@ -33,6 +36,49 @@ final _admin = Staff(
   role: 'admin',
   createdAt: DateTime(2026),
 );
+
+final _otherAdmin = Staff(
+  id: 'other',
+  uid: 'uid-other',
+  name: 'Sam Admin',
+  role: 'admin',
+  createdAt: DateTime(2026),
+);
+
+final _team = TeamDirectory(callerStaffId: 'admin', accounts: {
+  'admin': const TeamAccount(
+      staffId: 'admin',
+      hasLogin: true,
+      email: 'robin@example.test',
+      signInEnabled: true,
+      superAdmin: true),
+  'other': TeamAccount(
+      staffId: 'other',
+      hasLogin: true,
+      email: 'sam@example.test',
+      signInEnabled: true,
+      lastSignInAt: DateTime(2026, 11, 3)),
+});
+
+/// Records team changes instead of calling the server.
+class _TeamRepository implements StaffRepository {
+  final calls = <String>[];
+
+  @override
+  Future<Result<void>> setTeamSignIn(String staffId, bool enabled) async {
+    calls.add('signIn:$staffId:$enabled');
+    return const Result.success(null);
+  }
+
+  @override
+  Future<Result<void>> sendPasswordReset(String email) async {
+    calls.add('reset:$email');
+    return const Result.success(null);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 final _schools = [
   for (var i = 1; i <= 7; i++)
@@ -231,6 +277,8 @@ void main() {
       overrides: [
         staffListProvider.overrideWith((_) async => [_admin]),
         calendarMetadataProvider.overrideWith((_, __) async => null),
+        isSuperAdminProvider.overrideWithValue(true),
+        teamDirectoryProvider.overrideWith((_) async => null),
       ],
     );
 
@@ -238,7 +286,6 @@ void main() {
     await _reveal(tester, find.byType(AdminOptionsButton));
     await tester.tap(find.byType(AdminOptionsButton));
     await tester.pumpAndSettle();
-    expect(find.text('Create invitation'), findsOneWidget);
     expect(find.text('Manage calendar'), findsOneWidget);
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
@@ -246,6 +293,81 @@ void main() {
     await tester.tap(find.widgetWithText(AppGlassPrimaryButton, 'Add staff'));
     await tester.pumpAndSettle();
     expect(find.text('Full name'), findsOneWidget);
+    expect(find.text('Sign-in email (optional)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('super admins see sign-ins and manage other people',
+      (tester) async {
+    final repository = _TeamRepository();
+    await _pump(
+      tester,
+      const StaffManagementScreen(),
+      overrides: [
+        staffListProvider.overrideWith((_) async => [_admin, _otherAdmin]),
+        calendarMetadataProvider.overrideWith((_, __) async => null),
+        isSuperAdminProvider.overrideWithValue(true),
+        teamDirectoryProvider.overrideWith((_) async => _team),
+        staffRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+
+    expect(find.text('${_admin.name} (you)'), findsOneWidget);
+    expect(find.text('Super admin'), findsOneWidget);
+    expect(find.text('sam@example.test'), findsOneWidget);
+    expect(find.text('Has sign-in'), findsNWidgets(2));
+
+    // Nobody can demote, switch off or delete themselves.
+    await _reveal(tester, find.byType(AdminOptionsButton).first);
+    await tester.tap(find.byType(AdminOptionsButton).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Send password reset email'), findsOneWidget);
+    expect(find.text('Remove super admin'), findsNothing);
+    expect(find.text('Turn off sign-in'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    await _reveal(tester, find.byType(AdminOptionsButton).last);
+    await tester.tap(find.byType(AdminOptionsButton).last);
+    await tester.pumpAndSettle();
+    expect(find.text('Make super admin'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+    await tester.ensureVisible(find.text('Turn off sign-in'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Turn off sign-in'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('signed out on their devices'), findsOneWidget);
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Turn off'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Turn off'));
+    await tester.pumpAndSettle();
+    expect(repository.calls, ['signIn:other:false']);
+    expect(find.text('Sign-in turned off for Sam Admin'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ordinary admins only manage calendars on the staff screen',
+      (tester) async {
+    await _pump(
+      tester,
+      const StaffManagementScreen(),
+      overrides: [
+        staffListProvider.overrideWith((_) async => [_admin, _otherAdmin]),
+        calendarMetadataProvider.overrideWith((_, __) async => null),
+        isSuperAdminProvider.overrideWithValue(false),
+      ],
+    );
+
+    expect(
+        find.widgetWithText(AppGlassPrimaryButton, 'Add staff'), findsNothing);
+    await _reveal(tester, find.byType(AdminOptionsButton).last);
+    await tester.tap(find.byType(AdminOptionsButton).last);
+    await tester.pumpAndSettle();
+    expect(find.text('Manage calendar'), findsOneWidget);
+    expect(find.text('Edit'), findsNothing);
+    expect(find.text('Create invitation'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

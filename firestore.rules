@@ -34,6 +34,22 @@ service cloud.firestore {
       return isLinked() && staff().role == 'admin';
     }
 
+    // Super admins are admins whose server-owned access link carries
+    // superAdmin: true. Only reviewed server functions set that flag.
+    function isSuperAdmin() {
+      return isAdmin() && link().get('superAdmin', false) == true;
+    }
+
+    // True when staffId's linked account is a super admin. Their role cannot
+    // be changed and their record cannot be deleted until that is removed.
+    function targetIsSuperAdmin(staffId) {
+      let uid = resource.data.get('uid', null);
+      let path = /databases/$(database)/documents/staff_access/$(uid);
+      return uid is string && uid.size() > 0 && exists(path) &&
+        get(path).data.get('staffId', null) == staffId &&
+        get(path).data.get('superAdmin', false) == true;
+    }
+
     function canManageDeliveries() {
       return isLinked() && staff().role in ['admin', 'manager'];
     }
@@ -74,12 +90,17 @@ service cloud.firestore {
     match /staff/{staffId} {
       allow get: if isAdmin() || (ownStaffRecord(staffId) &&
         (resource == null || resource.data.get('uid', null) == request.auth.uid));
-      allow create: if isAdmin() && staffFieldsValid(request.resource.data) &&
+      // Adding, renaming, changing roles and removing people is team control
+      // for super admins. Any admin may still allocate staff to schools.
+      allow create: if isSuperAdmin() && staffFieldsValid(request.resource.data) &&
         request.resource.data.keys().hasOnly(['name', 'role', 'assignedSchoolIds', 'createdAt']);
-      allow update: if isAdmin() && staffFieldsValid(request.resource.data) &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'role', 'assignedSchoolIds']);
-      allow delete: if isAdmin();
+      allow update: if staffFieldsValid(request.resource.data) && (
+        (isAdmin() && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['assignedSchoolIds'])) ||
+        (isSuperAdmin() && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'role', 'assignedSchoolIds']) &&
+          (request.resource.data.role == resource.data.role || !targetIsSuperAdmin(staffId))));
+      allow delete: if isSuperAdmin() && !targetIsSuperAdmin(staffId);
     }
 
     function validTimer(data, schoolId) {

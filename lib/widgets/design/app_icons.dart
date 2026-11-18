@@ -82,6 +82,11 @@ abstract final class AppIcons {
   static const IconData manager = HeroiconsOutline.briefcase;
   static const IconData role = HeroiconsOutline.identification;
   static const IconData invitation = HeroiconsOutline.key;
+  static const IconData superAdmin = HeroiconsOutline.star;
+  static const IconData addSignIn = HeroiconsOutline.userPlus;
+  static const IconData signInOff = HeroiconsOutline.noSymbol;
+  static const IconData signInOn = HeroiconsOutline.lockOpen;
+  static const IconData passwordReset = HeroiconsOutline.envelope;
   static const IconData verificationCode = HeroiconsOutline.shieldCheck;
   static const IconData link = HeroiconsOutline.link;
   static const IconData showPassword = HeroiconsOutline.eye;

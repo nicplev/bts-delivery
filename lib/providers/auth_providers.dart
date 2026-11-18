@@ -31,6 +31,14 @@ final isAdminProvider = Provider<bool>((ref) {
   );
 });
 
+/// Super admins manage the team: people, sign-ins, roles and super admin.
+final isSuperAdminProvider = Provider<bool>((ref) {
+  final staff = ref.watch(currentStaffProvider).valueOrNull;
+  return staff != null &&
+      staff.uid == ref.watch(authStateProvider).valueOrNull?.uid &&
+      staff.isSuperAdmin;
+});
+
 final isManagerProvider = Provider<bool>((ref) {
   final staffAsync = ref.watch(currentStaffProvider);
   return staffAsync.when(
