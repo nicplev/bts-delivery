@@ -4,8 +4,10 @@ import 'dart:typed_data';
 
 import 'package:bts_delivery_app/models/offline/evidence_upload.dart';
 import 'package:bts_delivery_app/models/offline/offline_models.dart';
+import 'package:bts_delivery_app/models/photo_subject.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
 import 'package:bts_delivery_app/services/offline/offline_storage_service.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 
@@ -339,5 +341,258 @@ void main() {
     expect(legacy.id, 'unknown');
     expect(await (await store.legacyPhotoFile(legacy))!.readAsBytes(), [2]);
     expect(await unknown.exists(), isTrue);
+  });
+
+  group('photo attachment', () {
+    final tissues = PhotoSubject.consumable(id: 'tissues-1', label: 'Tissues');
+    FirebaseException denied() =>
+        FirebaseException(plugin: 'cloud_firestore', code: 'permission-denied');
+
+    Future<EvidenceUpload> enqueuePhoto(
+      EvidenceUploadWorker worker, {
+      PhotoSubject? subject,
+      String name = 'camera',
+    }) async {
+      final source =
+          await File('${documents.path}/$name.jpg').writeAsBytes([7, 7]);
+      await worker.enqueuePhoto(
+        ownerUid: 'uid-a',
+        schoolId: 'school-a',
+        yearLevelId: 'year-a',
+        classroomId: 'class-a',
+        deliveryId: 'visit-a',
+        source: source,
+        subject: subject,
+      );
+      return worker.status.items.last;
+    }
+
+    StartUpload countingUpload(List<String> uploads) => (item, file) {
+          uploads.add(item.id);
+          return (completion: Future.value(), cancel: () async {});
+        };
+
+    Future<EvidenceUploadStatus> attention(EvidenceUploadWorker worker) =>
+        worker
+            .watch()
+            .firstWhere(
+                (state) => state.items.any((item) => item.needsAttention))
+            .timeout(const Duration(seconds: 3));
+
+    test('the attachment is kept on the device through a restart', () async {
+      final offline = start(
+        upload: (_, __) => throw StateError('offline'),
+        save: (_, __) async => throw StateError('offline'),
+      );
+      final queued = await enqueuePhoto(offline, subject: tissues);
+      expect(queued.subject, tissues);
+      expect(queued.subjectType, 'consumable');
+      expect(queued.subjectId, 'tissues-1');
+      expect(queued.subjectLabel, 'Tissues');
+      final packs =
+          await enqueuePhoto(offline, subject: PhotoSubject.packs, name: 'p');
+
+      await restart();
+      final reopened = start(
+        upload: (_, __) => throw StateError('offline'),
+        save: (_, __) async => throw StateError('offline'),
+      );
+      final items = {
+        for (final item in reopened.status.items) item.id: item,
+      };
+      expect(items[queued.id]!.subject, tissues);
+      expect(items[packs.id]!.subject, PhotoSubject.packs);
+      expect(items[packs.id]!.toRecord().containsKey('subjectId'), isFalse);
+      expect(items[packs.id]!.toRecord().containsKey('subjectLabel'), isFalse);
+    });
+
+    test('a general photo entry has no attachment keys', () async {
+      final offline = start(
+        upload: (_, __) => throw StateError('offline'),
+        save: (_, __) async => throw StateError('offline'),
+      );
+      final queued = await enqueuePhoto(offline);
+      expect(queued.hasSubject, isFalse);
+      final keys = store.get(queued.id)!.toRecord().keys;
+      expect(keys, isNot(contains('subjectType')));
+      expect(keys, isNot(contains('subjectId')));
+      expect(keys, isNot(contains('subjectLabel')));
+    });
+
+    test('an entry saved by the previous app version loads and uploads',
+        () async {
+      final file = await File('${documents.path}/pending_evidence/old.jpg')
+          .create(recursive: true);
+      await file.writeAsBytes([3]);
+      // The exact record shape written before photo attachments existed.
+      await Hive.box<Map>(OfflineStorageService.evidenceBoxName).put('old', {
+        'id': 'old',
+        'kind': 'photo',
+        'ownerUid': 'uid-a',
+        'schoolId': 'school-a',
+        'localFileName': 'pending_evidence/old.jpg',
+        'storagePath':
+            'schools/school-a/yearLevels/year-a/classrooms/class-a/photos/old.jpg',
+        'createdAt': DateTime.utc(2026, 11, 1),
+        'deliveryId': null,
+        'yearLevelId': 'year-a',
+        'classroomId': 'class-a',
+        'payload': '{}',
+        'attempts': 0,
+        'retryAt': null,
+        'error': null,
+        'paused': false,
+        'uploaded': false,
+        'acknowledged': false,
+      });
+      await restart();
+      final old = store.get('old')!;
+      expect(old.hasSubject, isFalse);
+      expect(old.subject, isNull);
+      expect(old.yearLevelId, 'year-a');
+
+      final uploads = <String>[];
+      final saved = <EvidenceUpload>[];
+      online = true;
+      final worker = start(
+        upload: countingUpload(uploads),
+        save: (item, requireOwner) async {
+          requireOwner();
+          saved.add(item);
+        },
+      );
+      await idle(worker);
+      expect(uploads, ['old']);
+      expect(saved.single.id, 'old');
+      expect(saved.single.hasSubject, isFalse);
+      expect(await file.exists(), isFalse);
+    });
+
+    test('rules that accept attachments store the photo tagged, once',
+        () async {
+      final uploads = <String>[];
+      final saved = <EvidenceUpload>[];
+      final worker = start(
+        upload: countingUpload(uploads),
+        save: (item, requireOwner) async {
+          requireOwner();
+          saved.add(item);
+        },
+      );
+      final queued = await enqueuePhoto(worker, subject: tissues);
+      online = true;
+      worker.wake();
+      await idle(worker);
+      expect(uploads, [queued.id]);
+      expect(saved, hasLength(1));
+      expect(saved.single.subject, tissues);
+      expect(store.get(queued.id), isNull);
+    });
+
+    test(
+        'rules that predate attachments store the photo untagged exactly '
+        'once', () async {
+      final uploads = <String>[];
+      final attempts = <EvidenceUpload>[];
+      final stored = <String, EvidenceUpload>{};
+      final worker = start(
+        upload: countingUpload(uploads),
+        save: (item, requireOwner) async {
+          requireOwner();
+          attempts.add(item);
+          // The deployed rules refuse any key they do not know.
+          if (item.hasSubject) throw denied();
+          stored.putIfAbsent(item.id, () => item);
+        },
+      );
+      final queued = await enqueuePhoto(worker, subject: PhotoSubject.packs);
+      online = true;
+      worker.wake();
+      await idle(worker);
+      expect(uploads, [queued.id]);
+      expect(
+          attempts.map((item) => item.subject), [PhotoSubject.packs, null]);
+      expect(attempts.last.id, queued.id);
+      expect(attempts.last.storagePath, queued.storagePath);
+      expect(stored.keys, [queued.id]);
+      expect(stored[queued.id]!.hasSubject, isFalse);
+      expect(store.get(queued.id), isNull);
+      expect(await store.fileFor(queued).exists(), isFalse);
+    });
+
+    test('a general photo is saved as before: one write, no retry on denial',
+        () async {
+      final uploads = <String>[];
+      final attempts = <EvidenceUpload>[];
+      final worker = start(
+        upload: countingUpload(uploads),
+        save: (item, requireOwner) async {
+          requireOwner();
+          attempts.add(item);
+          throw denied();
+        },
+      );
+      final queued = await enqueuePhoto(worker);
+      online = true;
+      worker.wake();
+      final failed = (await attention(worker)).items.single;
+      expect(attempts, hasLength(1));
+      expect(attempts.single.toRecord(),
+          {...queued.toRecord(), 'uploaded': true});
+      expect(uploads, [queued.id]);
+      expect(failed.error, EvidenceUploadError.accessDenied);
+      expect(failed.retryAt, isNull);
+      expect(failed.attempts, 1);
+      expect(await store.fileFor(queued).exists(), isTrue);
+    });
+
+    test('a tagged photo refused for another reason keeps the existing failure',
+        () async {
+      final uploads = <String>[];
+      final attempts = <EvidenceUpload>[];
+      final worker = start(
+        upload: countingUpload(uploads),
+        save: (item, requireOwner) async {
+          requireOwner();
+          attempts.add(item);
+          throw denied(); // e.g. no longer assigned to the school
+        },
+      );
+      final queued = await enqueuePhoto(worker, subject: tissues);
+      online = true;
+      worker.wake();
+      final failed = (await attention(worker)).items.single;
+      expect(attempts.map((item) => item.subject), [tissues, null]);
+      expect(uploads, [queued.id]);
+      expect(failed.error, EvidenceUploadError.accessDenied);
+      expect(failed.retryAt, isNull);
+      expect(failed.attempts, 1);
+      // The queue entry keeps its attachment and its file.
+      expect(failed.subject, tissues);
+      expect(await store.fileFor(queued).exists(), isTrue);
+    });
+
+    test('other record errors on a tagged photo are retried tagged', () async {
+      final uploads = <String>[];
+      final attempts = <EvidenceUpload>[];
+      final worker = start(
+        upload: countingUpload(uploads),
+        save: (item, requireOwner) async {
+          requireOwner();
+          attempts.add(item);
+          throw FirebaseException(
+              plugin: 'cloud_firestore', code: 'unavailable');
+        },
+      );
+      final queued = await enqueuePhoto(worker, subject: tissues);
+      online = true;
+      worker.wake();
+      final failed = (await attention(worker)).items.single;
+      // maxAttempts is 2: two ordinary attempts with backoff, never untagged.
+      expect(attempts.map((item) => item.subject), [tissues, tissues]);
+      expect(uploads, [queued.id]);
+      expect(failed.error, EvidenceUploadError.saveFailed);
+      expect(failed.retryAt, isNull);
+    });
   });
 }

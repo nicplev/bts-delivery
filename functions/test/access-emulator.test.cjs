@@ -421,6 +421,64 @@ test("roles, scoped queries, evidence and timers enforce the same boundary", asy
 
   });
 
+  await t.test("photo records accept only the optional subject tags", async () => {
+    let next = 0;
+    const photoAt = (base) => {
+      const id = `dddddddd-dddd-dddd-dddd-${String(++next).padStart(12, "0")}`;
+      const doc = `${base}/photos/${id}`;
+      return {doc, data: {id, storagePath: `${doc}.jpg`, uploadedBy: field.uid, uploadedAt: now}};
+    };
+    const school = "schools/alpha/yearLevels/year/classrooms/base";
+    const visit = "deliveries/alpha/workspace/alpha/yearLevels/year/classrooms/base";
+    const accepts = async (base, extra) => {
+      const {doc, data} = photoAt(base);
+      await status(await write(doc, field, {...data, ...extra}), 200);
+      return {doc, data: {...data, ...extra}};
+    };
+    const rejects = async (extra) => {
+      const {doc, data} = photoAt(school);
+      await status(await write(doc, field, {...data, ...extra}), 403);
+    };
+    const tissues = {subjectType: "consumable", subjectId: "Xk3pQ9aB7cD1eF2gH4iJ", subjectLabel: "Tissues"};
+
+    // Untagged photos keep the original document shape on both paths.
+    const general = await accepts(school, {});
+    await accepts(visit, {});
+    // Packs and consumable photos on both paths.
+    await accepts(school, {subjectType: "packs"});
+    await accepts(visit, {subjectType: "packs"});
+    const tagged = await accepts(school, tissues);
+    await accepts(visit, tissues);
+    await accepts(visit, {...tissues, subjectId: "paper"});
+    await accepts(school, {...tissues, subjectLabel: "x".repeat(100)});
+    assert.deepEqual((await db.doc(tagged.doc).get()).data().subjectLabel, "Tissues");
+
+    await rejects({subjectType: "headphones"});
+    await rejects({subjectType: null});
+    await rejects({subjectType: "packs", subjectId: "Xk3pQ9aB7cD1eF2gH4iJ"});
+    await rejects({subjectType: "packs", subjectLabel: "Packs"});
+    await rejects({subjectType: "consumable", subjectLabel: "Tissues"});
+    await rejects({subjectType: "consumable", subjectId: "", subjectLabel: "Tissues"});
+    await rejects({...tissues, subjectId: "../other"});
+    await rejects({...tissues, subjectId: "x".repeat(129)});
+    await rejects({subjectType: "consumable", subjectId: "Xk3pQ9aB7cD1eF2gH4iJ"});
+    await rejects({...tissues, subjectLabel: "x".repeat(101)});
+    await rejects({...tissues, subjectLabel: 7});
+    await rejects({subjectId: "Xk3pQ9aB7cD1eF2gH4iJ"});
+    await rejects({subjectLabel: "Tissues"});
+    await rejects({subjectId: "Xk3pQ9aB7cD1eF2gH4iJ", subjectLabel: "Tissues"});
+    await rejects({...tissues, caption: "Tissues"});
+    await rejects({caption: "General"});
+
+    // Photo records stay create/delete only: no retagging or untagging.
+    await status(await write(general.doc, field, {...general.data, subjectType: "packs"}), 403);
+    await status(await write(tagged.doc, field, {...tagged.data, subjectLabel: "Headphones"}), 403);
+    const untagged = {...tagged.data};
+    for (const key of ["subjectType", "subjectId", "subjectLabel"]) delete untagged[key];
+    await status(await write(tagged.doc, field, untagged), 403);
+    await status(await write(tagged.doc, field, tagged.data), 403);
+  });
+
   await t.test("school logos are small JPEGs managed by admins and managers", async () => {
     const logo = "schools/alpha/logo/cccccccc-cccc-cccc-cccc-cccccccccccc.jpg";
     const logoUrl = `${storage}/${encodeURIComponent(logo)}`;

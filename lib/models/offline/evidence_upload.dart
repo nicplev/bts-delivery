@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../delivery_visit.dart';
+import '../photo_subject.dart';
 
 enum EvidenceKind { photo, signature }
 
@@ -25,6 +26,9 @@ class EvidenceUpload {
     this.paused = false,
     this.uploaded = false,
     this.acknowledged = false,
+    this.subjectType,
+    this.subjectId,
+    this.subjectLabel,
   });
 
   final String id;
@@ -44,6 +48,18 @@ class EvidenceUpload {
   final bool paused;
   final bool uploaded;
   final bool acknowledged;
+
+  /// What a photo shows (see [PhotoSubject]); all null for a general photo,
+  /// a signature, and every entry saved by an earlier app version.
+  final String? subjectType;
+  final String? subjectId;
+  final String? subjectLabel;
+
+  PhotoSubject? get subject =>
+      PhotoSubject.fromFields(subjectType, subjectId, subjectLabel);
+
+  bool get hasSubject =>
+      subjectType != null || subjectId != null || subjectLabel != null;
 
   bool get needsAttention => paused || (error != null && retryAt == null);
 
@@ -80,6 +96,9 @@ class EvidenceUpload {
         paused: json['paused'] as bool,
         uploaded: json['uploaded'] as bool,
         acknowledged: json['acknowledged'] as bool,
+        subjectType: json['subjectType'] as String?,
+        subjectId: json['subjectId'] as String?,
+        subjectLabel: json['subjectLabel'] as String?,
       );
 
   Map<String, dynamic> toRecord() => {
@@ -100,6 +119,10 @@ class EvidenceUpload {
         'paused': paused,
         'uploaded': uploaded,
         'acknowledged': acknowledged,
+        // Written only when present, so a general photo's entry is unchanged.
+        if (subjectType != null) 'subjectType': subjectType,
+        if (subjectId != null) 'subjectId': subjectId,
+        if (subjectLabel != null) 'subjectLabel': subjectLabel,
       };
 
   EvidenceUpload updateProgress({
@@ -128,6 +151,31 @@ class EvidenceUpload {
         paused: paused ?? this.paused,
         uploaded: uploaded ?? this.uploaded,
         acknowledged: acknowledged ?? this.acknowledged,
+        subjectType: subjectType,
+        subjectId: subjectId,
+        subjectLabel: subjectLabel,
+      );
+
+  /// The same entry as a general photo: used only for the one record write
+  /// retried without the subject when the server rules do not accept it yet.
+  EvidenceUpload withoutSubject() => EvidenceUpload(
+        id: id,
+        kind: kind,
+        ownerUid: ownerUid,
+        schoolId: schoolId,
+        localFileName: localFileName,
+        storagePath: storagePath,
+        createdAt: createdAt,
+        deliveryId: deliveryId,
+        yearLevelId: yearLevelId,
+        classroomId: classroomId,
+        payload: payload,
+        attempts: attempts,
+        retryAt: retryAt,
+        error: error,
+        paused: paused,
+        uploaded: uploaded,
+        acknowledged: acknowledged,
       );
 }
 

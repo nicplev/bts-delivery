@@ -1,5 +1,10 @@
+// Freezed forwards @JsonKey on constructor parameters to the generated fields.
+// ignore_for_file: invalid_annotation_target
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
+
+import 'photo_subject.dart';
 
 part 'school.freezed.dart';
 part 'school.g.dart';
@@ -129,9 +134,23 @@ class Photo with _$Photo {
     required String storagePath,
     String? uploadedBy, // UID of the user who uploaded this photo
     @TimestampConverter() required DateTime uploadedAt,
+
+    /// What the photo shows, fixed when it is taken: [PhotoSubject.packs] or
+    /// [PhotoSubject.consumable] (with [subjectId] and [subjectLabel]).
+    /// All three are absent on general and older photos, and are never
+    /// written as nulls so a general photo keeps its original document shape.
+    @JsonKey(includeIfNull: false) String? subjectType,
+    @JsonKey(includeIfNull: false) String? subjectId,
+    @JsonKey(includeIfNull: false) String? subjectLabel,
   }) = _Photo;
 
   factory Photo.fromJson(Map<String, dynamic> json) => _$PhotoFromJson(json);
+}
+
+extension PhotoSubjectOf on Photo {
+  /// What the photo shows; null for a general (or older) classroom photo.
+  PhotoSubject? get subject =>
+      PhotoSubject.fromFields(subjectType, subjectId, subjectLabel);
 }
 
 @freezed

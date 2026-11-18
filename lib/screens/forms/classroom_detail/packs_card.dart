@@ -7,8 +7,8 @@ String _statusLabel(ClassroomCompletionStatus status) => switch (status) {
     };
 
 /// The packs card: delivery status pill, the recorded number (never shown as
-/// 0 when nothing was recorded), the ink progress bar and what is left, plus
-/// the pack delivery status choice.
+/// 0 when nothing was recorded), the ink progress bar and what is left, the
+/// pack delivery status choice and the packs' photos.
 class _PacksCard extends StatelessWidget {
   const _PacksCard({
     required this.classroomsAsync,
@@ -16,6 +16,7 @@ class _PacksCard extends StatelessWidget {
     required this.packTotalAsync,
     required this.showRecorded,
     required this.onStatusSelected,
+    this.photos,
   });
 
   final AsyncValue<List<Classroom>> classroomsAsync;
@@ -26,6 +27,9 @@ class _PacksCard extends StatelessWidget {
   /// total is shown.
   final bool showRecorded;
   final ValueChanged<ClassroomCompletionStatus> onStatusSelected;
+
+  /// The packs' photos row (count, camera control and thumbnails).
+  final Widget? photos;
 
   @override
   Widget build(BuildContext context) {
@@ -193,6 +197,25 @@ class _PacksCard extends StatelessWidget {
               AppSegment(value: status, label: _statusLabel(status)),
           ],
         ),
+      ]);
+    }
+
+    final photosRow = photos;
+    if (photosRow != null) {
+      children.addAll([
+        const SizedBox(height: 16),
+        Divider(height: 1, thickness: 1, color: colors.separator),
+        const SizedBox(height: 14),
+        Semantics(
+          header: true,
+          child: Text(
+            'Photos',
+            style: AppTypography.footnote
+                .copyWith(fontWeight: FontWeight.w600, color: colors.muted),
+          ),
+        ),
+        const SizedBox(height: 8),
+        photosRow,
       ]);
     }
 

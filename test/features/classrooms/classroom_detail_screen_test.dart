@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:bts_delivery_app/app/theme/app_theme.dart';
 import 'package:bts_delivery_app/models/delivery_visit.dart';
+import 'package:bts_delivery_app/models/offline/evidence_upload.dart';
+import 'package:bts_delivery_app/models/offline/offline_media.dart';
+import 'package:bts_delivery_app/models/photo_subject.dart';
 import 'package:bts_delivery_app/models/offline/saved_edit.dart';
 import 'package:bts_delivery_app/models/school.dart';
 import 'package:bts_delivery_app/models/staff.dart';
@@ -18,9 +22,11 @@ import 'package:bts_delivery_app/repositories/classroom_edit.dart';
 import 'package:bts_delivery_app/repositories/schools_repository.dart';
 import 'package:bts_delivery_app/screens/forms/classroom_detail_screen.dart';
 import 'package:bts_delivery_app/screens/forms/consumables_screen.dart';
+import 'package:bts_delivery_app/services/media/offline_media_cache.dart';
 import 'package:bts_delivery_app/services/offline/connectivity_service.dart';
 import 'package:bts_delivery_app/services/offline/evidence_upload_worker.dart';
 import 'package:bts_delivery_app/services/offline/field_draft_store.dart';
+import 'package:bts_delivery_app/services/photo_service.dart';
 import 'package:bts_delivery_app/services/result.dart';
 import 'package:bts_delivery_app/widgets/design/design.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -280,6 +286,212 @@ void main() {
     }
   });
 
+  testWidgets(
+      'a photo taken from a card is attached to that item and previewed on '
+      'it; the section add makes a general photo', (tester) async {
+    final worker = _Worker();
+    await _pumpRoom(tester, _Schools(actual: 13, consumables: [_tissues]),
+        worker: worker);
+    expect(find.text('No photos'), findsNWidgets(2));
+    expect(find.text('No other photos'), findsOneWidget);
+
+    // Packs card.
+    final addPacks = find.bySemanticsLabel('Add photo of packs');
+    await _reveal(tester, addPacks);
+    await tester.tap(addPacks);
+    await tester.pumpAndSettle();
+    expect(worker.items.single.subject, PhotoSubject.packs);
+    expect(find.text('Photo saved on this device'), findsOneWidget);
+    final packsStrip = find.byKey(const ValueKey('photo-strip-packs'));
+    expect(packsStrip, findsOneWidget);
+    expect(
+        find.descendant(
+            of: packsStrip,
+            matching: find.bySemanticsLabel('Photo of packs, waiting to upload')),
+        findsOneWidget);
+    expect(find.text('1 photo'), findsOneWidget);
+    expect(find.text('1 waiting to upload'), findsOneWidget);
+
+    // Consumable card.
+    final addTissues = find.bySemanticsLabel('Add photo of Tissues');
+    await _reveal(tester, addTissues);
+    await tester.tap(addTissues);
+    await tester.pumpAndSettle();
+    expect(worker.items.last.subject,
+        PhotoSubject.consumable(id: 'tissues', label: 'Tissues'));
+    final tissuesStrip = find.byKey(const ValueKey('photo-strip-tissues'));
+    expect(
+        find.descendant(
+            of: tissuesStrip,
+            matching:
+                find.bySemanticsLabel('Photo of Tissues, waiting to upload')),
+        findsOneWidget);
+    expect(find.descendant(of: packsStrip, matching: find.byType(Image)),
+        findsOneWidget);
+    expect(find.text('1 waiting to upload'), findsNWidgets(2));
+
+    // "Other photos" adds an unattached photo.
+    final addOther = find.bySemanticsLabel('Add photo');
+    await _reveal(tester, addOther.first);
+    await tester.tap(addOther.first);
+    await tester.pumpAndSettle();
+    expect(worker.items.last.subject, isNull);
+    expect(worker.items.last.hasSubject, isFalse);
+    expect(find.text('No other photos'), findsNothing);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('photo-strip-other')),
+            matching: find.bySemanticsLabel(
+                'Classroom photo, waiting to upload')),
+        findsOneWidget);
+    expect(worker.items, hasLength(3));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'saved photos group by item; a removed item\'s photos stay under Other '
+      'photos with its saved name', (tester) async {
+    final schools = _Schools(actual: 13, consumables: [
+      _tissues,
+      _paper,
+    ], photos: [
+      _photo('packs-1', subject: PhotoSubject.packs, minute: 9),
+      _photo('tissues-1',
+          subject: PhotoSubject.consumable(id: 'tissues', label: 'Tissues'),
+          minute: 8),
+      _photo('tissues-2',
+          subject: PhotoSubject.consumable(id: 'tissues', label: 'Tissue'),
+          minute: 7),
+      _photo('old-1', minute: 6),
+      _photo('removed-1',
+          subject: PhotoSubject.consumable(id: 'gone', label: 'Headphones'),
+          minute: 5),
+    ]);
+    await _pumpRoom(tester, schools, worker: _Worker());
+
+    Finder inStrip(String key, String label) => find.descendant(
+        of: find.byKey(ValueKey(key)), matching: find.bySemanticsLabel(label));
+
+    expect(inStrip('photo-strip-packs', 'Photo of packs, 1 of 1'),
+        findsOneWidget);
+    expect(find.text('2 photos'), findsOneWidget);
+    expect(inStrip('photo-strip-tissues', 'Photo of Tissues, 1 of 2'),
+        findsOneWidget);
+    // Renamed after the photo was taken: still on the same card.
+    expect(inStrip('photo-strip-tissues', 'Photo of Tissues, 2 of 2'),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('photo-strip-paper')), findsNothing);
+    final other = find.byKey(const ValueKey('photo-strip-other'));
+    await tester.scrollUntilVisible(other, 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(inStrip('photo-strip-other', 'Classroom photo, 1 of 1'),
+        findsOneWidget);
+    expect(find.text('General'), findsOneWidget);
+    expect(find.text('Headphones (removed item)'), findsOneWidget);
+    expect(
+        inStrip('photo-strip-removed-gone',
+            'Photo of Headphones (removed item), 1 of 1'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'a strip scrolls sideways, a vertical drag on it scrolls the page, and '
+      'remove keeps its confirmation', (tester) async {
+    final schools = _Schools(actual: 13, photos: [
+      for (var i = 0; i < 15; i++)
+        _photo('packs-$i', subject: PhotoSubject.packs, minute: 20 - i),
+    ]);
+    await _pumpRoom(tester, schools, worker: _Worker());
+    final strip = find.byKey(const ValueKey('photo-strip-packs'));
+    await _reveal(tester, strip);
+    expect(find.bySemanticsLabel('Photo of packs, 1 of 15'), findsOneWidget);
+    ScrollPosition position() => tester
+        .state<ScrollableState>(find
+            .descendant(of: strip, matching: find.byType(Scrollable))
+            .first)
+        .position;
+    final stripTop = tester.getTopLeft(strip).dy;
+
+    await tester.drag(strip, const Offset(-200, 0));
+    await tester.pumpAndSettle();
+    expect(position().pixels, greaterThan(150));
+    expect(tester.getTopLeft(strip).dy, stripTop);
+
+    final pixels = position().pixels;
+    await tester.drag(strip, const Offset(0, 150));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(strip).dy, greaterThan(stripTop + 100));
+    expect(position().pixels, pixels);
+
+    await _reveal(tester, strip);
+    await tester.drag(strip, const Offset(400, 0));
+    await tester.pumpAndSettle();
+    final remove = find.descendant(
+        of: strip, matching: find.bySemanticsLabel('Remove from classroom'));
+    expect(remove, findsWidgets);
+    await tester.tap(remove.first);
+    await tester.pumpAndSettle();
+    expect(find.text('Remove photo from classroom?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(schools.deletedPhotos, isEmpty);
+
+    await tester.tap(remove.first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+    expect(schools.deletedPhotos, ['packs-0']);
+    expect(find.text('Photo removed from classroom'), findsOneWidget);
+    expect(find.text('14 photos'), findsOneWidget);
+  });
+
+  testWidgets('photos at 320 pt and 200 % text, dark and high contrast',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    for (final (theme, scale) in [
+      (AppTheme.lightTheme, 2.0),
+      (AppTheme.darkTheme, 1.0),
+      (AppTheme.highContrastLightTheme, 1.0),
+      (AppTheme.highContrastDarkTheme, 2.0),
+    ]) {
+      // A fresh provider scope for each theme.
+      await tester.pumpWidget(const SizedBox());
+      final worker = _Worker();
+      final schools = _Schools(actual: 13, consumables: [
+        _tissues.copyWith(itemName: 'Tissues for the whole class, large'),
+      ], photos: [
+        _photo('packs-1', subject: PhotoSubject.packs),
+        _photo('tissues-1',
+            subject: PhotoSubject.consumable(id: 'tissues', label: 'Tissues')),
+        _photo('old-1'),
+      ]);
+      await _pumpRoom(tester, schools,
+          worker: worker, theme: theme, textScale: scale);
+      final add = find.bySemanticsLabel(RegExp('^Add photo of Tissues'));
+      await _reveal(tester, add);
+      await tester.tap(add);
+      await tester.pumpAndSettle();
+      expect(worker.items.single.subject?.id, 'tissues');
+      expect(tester.takeException(), isNull);
+      for (final key in ['photo-strip-packs', 'photo-strip-tissues']) {
+        final strip = find.byKey(ValueKey(key));
+        await tester.ensureVisible(strip);
+        await tester.pumpAndSettle();
+        expect(tester.getSize(strip).height, 88);
+        expect(tester.getRect(strip).right, lessThanOrEqualTo(320));
+      }
+      await tester.drag(find.byType(ListView).first, const Offset(0, -8000));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Other photos'), findsOneWidget);
+    }
+  });
+
   testWidgets('consumables screen floats one add action and lists items',
       (tester) async {
     await tester.pumpWidget(
@@ -313,6 +525,15 @@ void main() {
   });
 }
 
+/// Scrolls [finder] to the upper part of the page, clear of the floating
+/// "Record packs" action.
+Future<void> _reveal(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  await Scrollable.ensureVisible(tester.element(finder), alignment: 0.3);
+  await tester.pumpAndSettle();
+}
+
 TextField _field(WidgetTester tester) =>
     tester.widget<TextField>(find.byType(TextField));
 
@@ -324,6 +545,7 @@ Future<void> _pumpRoom(
   ThemeData? theme,
   double textScale = 1,
   List<SavedEdit> edits = const [],
+  _Worker? worker,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -339,17 +561,35 @@ Future<void> _pumpRoom(
         savedEditsProvider.overrideWith((_) => Stream.value(edits)),
         connectivityStatusProvider.overrideWith((_) => Stream.value(
             offline ? ConnectivityStatus.offline : ConnectivityStatus.online)),
-        evidenceUploadWorkerProvider
-            .overrideWith((_) => Completer<EvidenceUploadWorker>().future),
-        evidenceUploadsProvider.overrideWith(
-          (_) => Stream.value(const EvidenceUploadStatus(
-            items: [],
-            activeId: null,
-            legacyReviewCount: 0,
-            localError: false,
-          )),
-        ),
-        offlineMediaOwnerProvider.overrideWith((_, __) => null),
+        if (worker == null) ...[
+          evidenceUploadWorkerProvider
+              .overrideWith((_) => Completer<EvidenceUploadWorker>().future),
+          evidenceUploadsProvider.overrideWith(
+            (_) => Stream.value(const EvidenceUploadStatus(
+              items: [],
+              activeId: null,
+              legacyReviewCount: 0,
+              localError: false,
+            )),
+          ),
+          offlineMediaOwnerProvider.overrideWith((_, __) => null),
+        ] else ...[
+          evidenceUploadWorkerProvider.overrideWith((_) async => worker),
+          evidenceUploadsProvider.overrideWith((_) => worker.watch()),
+          photoServiceProvider.overrideWithValue(_Picker()),
+          offlineMediaOwnerProvider.overrideWith((_, __) => 'owner'),
+          offlineMediaBucketProvider
+              .overrideWithValue('approved.firebasestorage.app'),
+          offlineMediaWorkerProvider.overrideWith((_) async => _Cache()),
+          offlineMediaAssetStateProvider.overrideWith((_, __) => Stream.value((
+                phase: OfflineMediaPhase.available,
+                issue: null,
+                localPath: null,
+                verifiedAt: null,
+                progress: null,
+              ))),
+          isOnlineProvider.overrideWithValue(false),
+        ],
       ],
       child: MaterialApp(
         theme: theme ?? AppTheme.lightTheme,
@@ -422,6 +662,7 @@ class _Schools implements SchoolsRepository {
     required int? actual,
     this.consumables = const [],
     this.photosFail = false,
+    this.photos = const [],
   }) : room = Classroom(
           id: 'room',
           name: 'Room 1A',
@@ -434,6 +675,9 @@ class _Schools implements SchoolsRepository {
 
   final List<Consumable> consumables;
   final bool photosFail;
+  List<Photo> photos;
+  final deletedPhotos = <String>[];
+  final _photoChanges = StreamController<List<Photo>>.broadcast();
   final _changes = StreamController<List<Classroom>>.broadcast();
   Classroom room;
   String? lastEditId;
@@ -479,7 +723,22 @@ class _Schools implements SchoolsRepository {
   Stream<List<Photo>> watchClassroomPhotos(
           String schoolId, String yearLevelId, String classroomId,
           {String? deliveryId}) =>
-      photosFail ? Stream.error(StateError('offline')) : Stream.value(const []);
+      photosFail ? Stream.error(StateError('offline')) : _photoStream();
+
+  Stream<List<Photo>> _photoStream() async* {
+    yield photos;
+    yield* _photoChanges.stream;
+  }
+
+  @override
+  Future<Result<void>> deleteClassroomPhoto(String schoolId,
+      String yearLevelId, String classroomId, String photoId,
+      {String? deliveryId}) async {
+    deletedPhotos.add(photoId);
+    photos = photos.where((photo) => photo.id != photoId).toList();
+    _photoChanges.add(photos);
+    return const Result.success(null);
+  }
 
   @override
   Future<Result<ClassroomEditReceipt>> updateClassroomStatus(
@@ -506,3 +765,100 @@ class _Schools implements SchoolsRepository {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
+
+/// Records photos saved from the classroom screen as queued uploads.
+class _Worker implements EvidenceUploadWorker {
+  final items = <EvidenceUpload>[];
+  final _changes = StreamController<EvidenceUploadStatus>.broadcast();
+
+  @override
+  EvidenceUploadStatus get status => EvidenceUploadStatus(
+        items: List.of(items),
+        activeId: null,
+        legacyReviewCount: 0,
+        localError: false,
+      );
+
+  @override
+  Stream<EvidenceUploadStatus> watch() async* {
+    yield status;
+    yield* _changes.stream;
+  }
+
+  @override
+  File localFile(EvidenceUpload item) => File('missing/${item.id}.jpg');
+
+  @override
+  Future<void> enqueuePhoto({
+    required String ownerUid,
+    required String schoolId,
+    required String yearLevelId,
+    required String classroomId,
+    required File source,
+    String? deliveryId,
+    PhotoSubject? subject,
+  }) async {
+    final id = 'queued-${items.length + 1}';
+    items.add(EvidenceUpload(
+      id: id,
+      kind: EvidenceKind.photo,
+      ownerUid: ownerUid,
+      schoolId: schoolId,
+      yearLevelId: yearLevelId,
+      classroomId: classroomId,
+      deliveryId: deliveryId,
+      localFileName: 'pending_evidence/$id.jpg',
+      storagePath: 'path/$id.jpg',
+      createdAt: DateTime.utc(2026, 11, 18),
+      subjectType: subject?.type,
+      subjectId: subject?.id,
+      subjectLabel: subject?.label,
+    ));
+    _changes.add(status);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Picker implements PhotoService {
+  @override
+  Future<File?> pickImage(BuildContext context) async => File('camera.jpg');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Cache implements OfflineMediaCache {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+String _photoPath(String id) =>
+    '${_visit.workspacePath}/yearLevels/level/classrooms/room/photos/$id.jpg';
+
+Photo _photo(String id, {PhotoSubject? subject, int minute = 0}) => Photo(
+      id: id,
+      storagePath: _photoPath(id),
+      uploadedBy: 'owner',
+      uploadedAt: DateTime(2026, 11, 17, 10, minute),
+      subjectType: subject?.type,
+      subjectId: subject?.id,
+      subjectLabel: subject?.label,
+    );
+
+final _tissues = Consumable(
+  id: 'tissues',
+  itemName: 'Tissues',
+  quantity: 12,
+  unit: 'boxes',
+  createdAt: DateTime(2025),
+);
+
+final _paper = Consumable(
+  id: 'paper',
+  itemName: 'Copy paper',
+  quantity: 6,
+  unit: 'reams',
+  createdAt: DateTime(2025),
+);

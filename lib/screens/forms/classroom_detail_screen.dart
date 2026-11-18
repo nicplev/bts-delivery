@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,7 @@ import '../../models/delivery_visit.dart';
 import '../../models/offline/evidence_upload.dart';
 import '../../models/offline/offline_media.dart';
 import '../../models/offline/saved_edit.dart';
+import '../../models/photo_subject.dart';
 import '../../models/school.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/delivery_visit_provider.dart';
@@ -18,6 +21,7 @@ import '../../providers/schools_providers.dart';
 import '../../repositories/classroom_edit.dart';
 import '../../services/date_utils.dart';
 import '../../services/offline/connectivity_service.dart';
+import '../../services/offline/evidence_upload_worker.dart';
 import '../../services/offline/field_draft_store.dart';
 import '../../widgets/design/design.dart';
 import '../../widgets/field_draft_dialog.dart';
@@ -34,7 +38,8 @@ part 'classroom_detail/notes_section.dart';
 
 /// Classroom records: the year-coloured header, the packs card with its one
 /// floating "Record packs" action, and the consumables, photos, notes and
-/// student distribution work surfaces.
+/// student distribution work surfaces. Photos sit on the card of the item
+/// they show; the rest are under "Other photos".
 class ClassroomDetailScreen extends ConsumerWidget {
   const ClassroomDetailScreen({
     super.key,
@@ -166,6 +171,11 @@ class ClassroomDetailScreen extends ConsumerWidget {
                         classroom: classroom,
                         packTotalAsync: packTotalAsync,
                         showRecorded: deliveryId != null,
+                        photos: _ItemPhotos(
+                          room: room,
+                          subject: PhotoSubject.packs,
+                          name: 'packs',
+                        ),
                         onStatusSelected: (status) {
                           if (status == ClassroomCompletionStatus.incomplete) {
                             _showRecordPacksSheet(
@@ -191,7 +201,7 @@ class ClassroomDetailScreen extends ConsumerWidget {
                       _DistributionSection(
                           room: room, breakdownsAsync: breakdownsAsync),
                       _ConsumablesSection(room: room),
-                      _PhotosSection(room: room),
+                      _OtherPhotosSection(room: room),
                       _NotesSection(room: room),
                       _SavedStateLine(room: room, offline: offline),
                     ],

@@ -42,6 +42,8 @@ Captured photos and signatures have a separate durable evidence journal. Files a
 
 Pending evidence remains bound to the account that captured it. Switching accounts does not upload another person's queue. Sign into the original account to continue its work. Tap the evidence indicator to inspect, retry, pause or resume pending uploads.
 
+A classroom photo taken from the Packs card or a consumable is attached to that item when it is taken (`subjectType`, plus the consumable's id and name at the time). The attachment is saved with the queued photo, so it shows on the right card offline and after a restart, and is sent with the photo record when it syncs. Photos are never moved afterwards. General photos, photos from earlier versions and photos of a deleted consumable appear under **Other photos**. If the server rules refuse the attachment (for example, rules older than this app version), the upload worker retries that record write once without it, so the photo is saved and appears under **Other photos** on other devices; a second refusal is handled like any other upload failure.
+
 A detected network connection does not prove that Firebase is reachable. “Saved on this device” does not mean other staff can see it yet. The evidence indicator counts photo/signature uploads; ordinary edits have their own recovery state.
 
 ## Sign-off and historical evidence

@@ -56,6 +56,7 @@ class _ConsumablesSection extends ConsumerWidget {
               for (final consumable in consumables)
                 _ConsumableRow(
                   key: ValueKey(consumable.id),
+                  room: room,
                   consumable: consumable,
                   onComplete: () => _markComplete(context, ref, consumable),
                   onSetQuantity: () =>
@@ -301,6 +302,7 @@ class _ConsumablesSection extends ConsumerWidget {
 class _ConsumableRow extends StatelessWidget {
   const _ConsumableRow({
     super.key,
+    required this.room,
     required this.consumable,
     required this.onComplete,
     required this.onSetQuantity,
@@ -308,6 +310,7 @@ class _ConsumableRow extends StatelessWidget {
     required this.onDelete,
   });
 
+  final _Room room;
   final Consumable consumable;
   final VoidCallback onComplete;
   final VoidCallback onSetQuantity;
@@ -407,6 +410,19 @@ class _ConsumableRow extends StatelessWidget {
                 onPressed: onSetQuantity
               ),
             ]),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(left: 41, right: 12),
+            child: _ItemPhotos(
+              room: room,
+              subject: PhotoSubject.consumable(
+                id: consumable.id,
+                label: consumable.itemName,
+              ),
+              name: consumable.itemName,
+              iconOnly: true,
+            ),
           ),
         ],
       ),

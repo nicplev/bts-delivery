@@ -97,6 +97,9 @@ final evidenceUploadWorkerProvider = FutureProvider<EvidenceUploadWorker>((
           storagePath: item.storagePath,
           uploadedBy: item.ownerUid,
           uploadedAt: item.createdAt,
+          subjectType: item.subjectType,
+          subjectId: item.subjectId,
+          subjectLabel: item.subjectLabel,
         ),
         deliveryId: item.deliveryId,
       );

@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../models/offline/evidence_upload.dart';
+import '../../models/photo_subject.dart';
 import 'offline_storage_service.dart';
 
 typedef StartUpload = ({
@@ -98,6 +99,7 @@ class EvidenceUploadWorker {
     required String classroomId,
     required File source,
     String? deliveryId,
+    PhotoSubject? subject,
   }) {
     final id = const Uuid().v4();
     return _enqueue(
@@ -118,6 +120,9 @@ class EvidenceUploadWorker {
           deliveryId: deliveryId,
         ),
         createdAt: DateTime.now().toUtc(),
+        subjectType: subject?.type,
+        subjectId: subject?.id,
+        subjectLabel: subject?.label,
       ),
       (temp) => source.copy(temp.path),
     );
@@ -307,7 +312,7 @@ class EvidenceUploadWorker {
         await _store.put(progress);
       }
       requireOwner();
-      await _saveEvidence(progress, requireOwner).timeout(_attemptTimeout);
+      await _saveRecord(progress, requireOwner);
     } on _OwnerChanged {
       return;
     } catch (error) {
@@ -335,6 +340,29 @@ class EvidenceUploadWorker {
     final acknowledged = progress.updateProgress(acknowledged: true);
     await _store.put(acknowledged);
     await _cleanUp(acknowledged);
+  }
+
+  /// Writes the evidence record. A photo attached to an item is retried once
+  /// as a general photo when the server refuses the record: the rules on the
+  /// server may predate photo attachments, and a photo must never be stuck
+  /// because of that. Any other error, or a second refusal, is handled by the
+  /// caller exactly as before. The queue entry keeps its attachment.
+  Future<void> _saveRecord(
+    EvidenceUpload item,
+    void Function() requireOwner,
+  ) async {
+    try {
+      await _saveEvidence(item, requireOwner).timeout(_attemptTimeout);
+    } on FirebaseException catch (error) {
+      if (item.kind != EvidenceKind.photo ||
+          !item.hasSubject ||
+          error.code != 'permission-denied') {
+        rethrow;
+      }
+      requireOwner();
+      await _saveEvidence(item.withoutSubject(), requireOwner)
+          .timeout(_attemptTimeout);
+    }
   }
 
   Future<void> _cleanUp(EvidenceUpload item) async {

@@ -189,9 +189,25 @@ service cloud.firestore {
       return collectionName in ['packTotals', 'consumables', 'notes', 'yearLevelBreakdowns'];
     }
 
+    // What a photo shows, fixed at capture: none (a general photo), the
+    // classroom's packs, or one consumable (its id and its name at the time).
+    function photoSubjectValid(data) {
+      let keys = data.keys();
+      let type = data.get('subjectType', null);
+      return (!keys.hasAny(['subjectType', 'subjectId', 'subjectLabel'])) ||
+        (type == 'packs' && !keys.hasAny(['subjectId', 'subjectLabel'])) ||
+        (type == 'consumable' &&
+          data.get('subjectId', null) is string &&
+          data.subjectId.matches('^[A-Za-z0-9_-]{1,128}$') &&
+          data.get('subjectLabel', null) is string &&
+          data.subjectLabel.size() <= 100);
+    }
+
     function photoValid(schoolPath, yearLevelId, classroomId, photoId) {
       let data = request.resource.data;
-      return data.keys().hasOnly(['id', 'storagePath', 'uploadedBy', 'uploadedAt']) &&
+      return data.keys().hasOnly(['id', 'storagePath', 'uploadedBy', 'uploadedAt',
+          'subjectType', 'subjectId', 'subjectLabel']) &&
+        photoSubjectValid(data) &&
         data.get('id', photoId) == photoId && data.uploadedAt is timestamp &&
         data.uploadedBy == request.auth.uid &&
         data.storagePath == schoolPath + '/yearLevels/' + yearLevelId +

@@ -810,6 +810,7 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
     super.key,
     required this.asset,
     this.compact = true,
+    this.glassSize = AppTokens.minTouchTarget,
   });
 
   final OfflineMediaAsset asset;
@@ -817,6 +818,10 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
   /// A 44 pt round glass icon button (over media / in the nav area); `false`
   /// gives a labelled grey capsule.
   final bool compact;
+
+  /// The drawn size of the compact glass circle; the touch target stays
+  /// 44 pt (smaller circles sit over small thumbnails).
+  final double glassSize;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -837,9 +842,16 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
           image: true,
           child: SizedBox.square(
             dimension: AppTokens.minTouchTarget,
-            child: AppGlass(
-              child: Center(
-                child: Icon(AppIcons.complete, size: 20, color: colors.ink),
+            child: Center(
+              child: SizedBox.square(
+                dimension: glassSize,
+                child: AppGlass(
+                  child: Center(
+                    child: Icon(AppIcons.complete,
+                        size: glassSize < AppTokens.minTouchTarget ? 16 : 20,
+                        color: colors.ink),
+                  ),
+                ),
               ),
             ),
           ),
@@ -882,6 +894,9 @@ class OfflineMediaDownloadButton extends ConsumerWidget {
             icon: icon,
             semanticLabel: action,
             tooltip: action,
+            size: glassSize,
+            iconSize: glassSize < AppTokens.minTouchTarget ? 16 : 20,
+            hitSize: AppTokens.minTouchTarget,
             onPressed: cache == null ? null : perform,
           )
         : AppSecondaryButton(
@@ -1010,6 +1025,21 @@ class _MediaMessage extends StatelessWidget {
     final colors = AppPalette.of(context);
     return LayoutBuilder(builder: (context, constraints) {
       final roomy = constraints.maxHeight >= 120 && constraints.maxWidth >= 140;
+      if (constraints.maxHeight < 120 && constraints.maxWidth < 140) {
+        // A small thumbnail labels itself: the icon alone (message on long
+        // press). No scroll view, so a drag that starts here still scrolls
+        // the page.
+        return ColoredBox(
+          color: colors.surfaceQuiet,
+          child: Center(
+            child: Tooltip(
+              message: text,
+              excludeFromSemantics: true,
+              child: Icon(icon, size: 24, color: colors.muted),
+            ),
+          ),
+        );
+      }
       return ColoredBox(
         color: colors.surfaceQuiet,
         child: Center(

@@ -288,6 +288,7 @@ class AppGlassIconButton extends StatelessWidget {
     this.iconSize = 20,
     this.tooltip,
     this.loading = false,
+    this.hitSize,
   });
 
   final IconData icon;
@@ -300,18 +301,26 @@ class AppGlassIconButton extends StatelessWidget {
   final String? tooltip;
   final bool loading;
 
+  /// A touch target larger than the drawn circle (e.g. a 28 pt circle over a
+  /// small thumbnail that still takes a 44 pt tap).
+  final double? hitSize;
+
   @override
   Widget build(BuildContext context) {
+    final circle = AppGlassCircle(
+      icon: icon,
+      size: size,
+      iconSize: iconSize,
+      loading: loading,
+    );
+    final target = hitSize;
     final button = AppPressable(
       onTap: loading ? null : onPressed,
       semanticLabel: semanticLabel,
       excludeChildSemantics: true,
-      child: AppGlassCircle(
-        icon: icon,
-        size: size,
-        iconSize: iconSize,
-        loading: loading,
-      ),
+      child: target == null || target <= size
+          ? circle
+          : SizedBox.square(dimension: target, child: Center(child: circle)),
     );
     if (tooltip == null) return button;
     return Tooltip(

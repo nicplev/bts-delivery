@@ -287,32 +287,59 @@ class _AttentionCard extends ConsumerWidget {
 
 /// Per-upload menu: Retry / Resume and Pause.
 class EvidenceUploadActions extends ConsumerWidget {
-  const EvidenceUploadActions({super.key, required this.item});
+  const EvidenceUploadActions({
+    super.key,
+    required this.item,
+    this.overMedia = false,
+  });
 
   final EvidenceUpload item;
 
+  /// Draws a small glass circle (44 pt target) for use over a photo
+  /// thumbnail instead of the grey in-content circle.
+  final bool overMedia;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (overMedia) {
+      return PopupMenuButton<bool>(
+        tooltip: 'Upload actions',
+        padding: EdgeInsets.zero,
+        onSelected: (retry) => _perform(context, ref, retry),
+        itemBuilder: _items,
+        child: const SizedBox.square(
+          dimension: AppTokens.minTouchTarget,
+          child: Center(
+            child: AppGlassCircle(icon: AppIcons.more, size: 28, iconSize: 16),
+          ),
+        ),
+      );
+    }
     return AppMenuButton<bool>(
       tooltip: 'Upload actions',
       icon: AppIcons.more,
-      onSelected: (retry) => _update(context, () async {
+      onSelected: (retry) => _perform(context, ref, retry),
+      itemBuilder: _items,
+    );
+  }
+
+  List<PopupMenuEntry<bool>> _items(BuildContext context) => [
+        if (item.paused || item.error != null)
+          appMenuItem(context, true, item.paused ? 'Resume' : 'Retry',
+              icon: AppIcons.retry),
+        if (!item.paused)
+          appMenuItem(context, false, 'Pause', icon: AppIcons.paused),
+      ];
+
+  void _perform(BuildContext context, WidgetRef ref, bool retry) =>
+      _update(context, () async {
         final worker = await ref.read(evidenceUploadWorkerProvider.future);
         if (retry) {
           await worker.retry(item.id);
         } else {
           await worker.pause(item.id);
         }
-      }),
-      itemBuilder: (context) => [
-        if (item.paused || item.error != null)
-          appMenuItem(context, true, item.paused ? 'Resume' : 'Retry',
-              icon: AppIcons.retry),
-        if (!item.paused)
-          appMenuItem(context, false, 'Pause', icon: AppIcons.paused),
-      ],
-    );
-  }
+      });
 }
 
 Future<void> _update(
